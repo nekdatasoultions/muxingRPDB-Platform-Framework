@@ -1,0 +1,521 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Single muxer with AWS recovery, per-AZ transport ENIs, and scheduled convergence Lambda.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: muxer-single-prod
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  TransportSubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  TransportSubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  TransportEniAIp:
+    Type: String
+    Description: Static private IPv4 for the muxer transport ENI in AZ A.
+  TransportEniBIp:
+    Type: String
+    Description: Static private IPv4 for the muxer transport ENI in AZ B.
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  GreIngressCidr:
+    Type: String
+    Default: 10.30.0.0/16
+  TransportIngressCidr:
+    Type: String
+    Default: 10.30.0.0/16
+  AmiId:
+    Type: AWS::EC2::Image::Id
+  InstanceType:
+    Type: String
+    Default: c8gn.8xlarge
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  AsgMinSize:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  AsgMaxSize:
+    Type: Number
+    Default: 2
+    MinValue: 1
+  AsgDesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  RootVolumeSizeGiB:
+    Type: Number
+    Default: 16
+    MinValue: 8
+  LoggingVolumeSizeGiB:
+    Type: Number
+    Default: 30
+    MinValue: 8
+  ApplicationVolumeSizeGiB:
+    Type: Number
+    Default: 80
+    MinValue: 8
+  LoggingMountPath:
+    Type: String
+    Default: /LOG
+  ApplicationMountPath:
+    Type: String
+    Default: /Application
+  EnableSharedEfs:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+  SharedEfsFileSystemId:
+    Type: String
+    Default: ""
+    Description: Optional existing EFS file system ID for shared artifacts.
+  SharedEfsAccessPointId:
+    Type: String
+    Default: ""
+    Description: Optional EFS access point ID for the shared artifact mount.
+  SharedEfsMountPath:
+    Type: String
+    Default: /Shared
+  ProjectPackageS3Uri:
+    Type: String
+    Description: s3:// bucket/key for the MUXER3 bundle.
+  MuxerInstallScript:
+    Type: String
+    Default: scripts/install-local.sh
+  MuxerServiceName:
+    Type: String
+    Default: muxer.service
+  CustomerSotTableName:
+    Type: String
+    Default: muxingplus-customer-sot-example
+  EipAllocationId:
+    Type: String
+    Description: Existing EIP allocation ID for the muxer public identity.
+  RecoveryLambdaS3Bucket:
+    Type: String
+  RecoveryLambdaS3Key:
+    Type: String
+  RecoveryScheduleExpression:
+    Type: String
+    Default: rate(1 minute)
+  RecoveryScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+  RecoveryLambdaTimeout:
+    Type: Number
+    Default: 180
+    MinValue: 30
+  AllowEipReassociation:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Resources:
+  MuxerPublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Single muxer public ingress/egress policy
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: "50"
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: "47"
+          CidrIp: !Ref GreIngressCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-sg"
+
+  MuxerTransportSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Single muxer transport ENI policy
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: !Ref TransportIngressCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-transport-sg"
+
+  MuxerTransportEniA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-transport-a"
+      GroupSet:
+        - !Ref MuxerTransportSecurityGroup
+      PrivateIpAddress: !Ref TransportEniAIp
+      SourceDestCheck: false
+      SubnetId: !Ref TransportSubnetAId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-transport-a"
+        - Key: muxingplus:component
+          Value: muxer
+        - Key: muxingplus:interface-role
+          Value: transport
+        - Key: muxingplus:az-slot
+          Value: a
+
+  MuxerTransportEniB:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-transport-b"
+      GroupSet:
+        - !Ref MuxerTransportSecurityGroup
+      PrivateIpAddress: !Ref TransportEniBIp
+      SourceDestCheck: false
+      SubnetId: !Ref TransportSubnetBId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-transport-b"
+        - Key: muxingplus:component
+          Value: muxer
+        - Key: muxingplus:interface-role
+          Value: transport
+        - Key: muxingplus:az-slot
+          Value: b
+
+  MuxerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: !Sub "${ClusterName}-muxer-inline-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:Scan
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomerSotTableName}"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:ModifyNetworkInterfaceAttribute
+                Resource: "*"
+
+  MuxerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MuxerRole
+
+  MuxerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ClusterName}-lt"
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt MuxerInstanceProfile.Arn
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            DeleteOnTermination: true
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref MuxerPublicSecurityGroup
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: !Ref RootVolumeSizeGiB
+              DeleteOnTermination: true
+          - DeviceName: /dev/sdf
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: !Ref LoggingVolumeSizeGiB
+              DeleteOnTermination: true
+          - DeviceName: /dev/sdg
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: !Ref ApplicationVolumeSizeGiB
+              DeleteOnTermination: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "${ClusterName}-node"
+              - Key: muxingplus:component
+                Value: muxer
+              - Key: muxingplus:deployment-model
+                Value: single-muxer-recovery
+          - ResourceType: volume
+            Tags:
+              - Key: muxingplus:component
+                Value: muxer
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            retry_dnf() {
+              local attempts="$1"
+              shift
+              if [[ -z "$attempts" ]]; then
+                attempts=8
+              fi
+              local delay=15
+              local i
+              for ((i=1; i<=attempts; i++)); do
+                if dnf "$@"; then
+                  return 0
+                fi
+                if [[ "$i" -eq "$attempts" ]]; then
+                  return 1
+                fi
+                sleep "$delay"
+              done
+            }
+
+              retry_dnf 8 install -y awscli unzip jq
+
+              LOG_DIR="${LoggingMountPath}"
+              APP_DIR="${ApplicationMountPath}"
+              SHARED_DIR="${SharedEfsMountPath}"
+              SHARED_ROOT="$SHARED_DIR/${ClusterName}"
+              ENABLE_SHARED_EFS="${EnableSharedEfs}"
+              SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
+              SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
+
+            mkdir -p "$LOG_DIR" "$APP_DIR" /opt
+
+            ROOT_PART="$(findmnt -n -o SOURCE /)"
+            ROOT_DISK="$(echo "$ROOT_PART" | sed -E 's/p?[0-9]+$//')"
+            LOG_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '1p')"
+            APP_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '2p')"
+            if [[ -z "$LOG_DEV" || -z "$APP_DEV" ]]; then
+              echo "Expected 2 extra data disks for LOG/Application"
+              exit 1
+            fi
+
+            blkid "$LOG_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L MUXER_LOG "$LOG_DEV"
+            blkid "$APP_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L MUXER_APP "$APP_DEV"
+
+            LOG_UUID="$(blkid -s UUID -o value "$LOG_DEV")"
+            APP_UUID="$(blkid -s UUID -o value "$APP_DEV")"
+
+            grep -qE "[[:space:]]${LoggingMountPath}[[:space:]]" /etc/fstab || echo "UUID=$LOG_UUID ${LoggingMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+            grep -qE "[[:space:]]${ApplicationMountPath}[[:space:]]" /etc/fstab || echo "UUID=$APP_UUID ${ApplicationMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+
+              mount "$LOG_DIR" || true
+              mount "$APP_DIR" || true
+              mount -a
+
+              if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+                if [[ -z "$SHARED_EFS_FS_ID" ]]; then
+                  echo "EnableSharedEfs is true but SharedEfsFileSystemId is empty" >&2
+                  exit 1
+                fi
+                retry_dnf 8 install -y amazon-efs-utils
+                mkdir -p "$SHARED_DIR"
+                if [[ -n "$SHARED_EFS_AP_ID" ]]; then
+                  EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls,accesspoint=${SharedEfsAccessPointId} 0 0"
+                else
+                  EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls 0 0"
+                fi
+                grep -qE "[[:space:]]${SharedEfsMountPath}[[:space:]]" /etc/fstab || echo "$EFS_FSTAB" >> /etc/fstab
+                mount -a
+                mkdir -p "$SHARED_ROOT/customer-artifacts" "$SHARED_ROOT/exports" "$SHARED_ROOT/backups" "$SHARED_ROOT/log-archive"
+              fi
+
+              mkdir -p "$APP_DIR/muxer"
+              rm -rf /opt/muxer
+              ln -s "$APP_DIR/muxer" /opt/muxer
+              if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+                ln -sfn "$SHARED_ROOT" /opt/muxer/shared
+              fi
+
+              aws s3 cp "${ProjectPackageS3Uri}" /tmp/muxer-package.zip
+            unzip -oq /tmp/muxer-package.zip -d "$APP_DIR/muxer"
+            if [[ ! -f "$APP_DIR/muxer/README.md" ]]; then
+              inner_dir="$(find "$APP_DIR/muxer" -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+              if [[ -n "$inner_dir" && -f "$inner_dir/README.md" ]]; then
+                cp -a "$inner_dir"/. "$APP_DIR/muxer/"
+              fi
+            fi
+
+            if [[ -f "$APP_DIR/muxer/${MuxerInstallScript}" ]]; then
+              bash "$APP_DIR/muxer/${MuxerInstallScript}" "$APP_DIR/muxer"
+            else
+              echo "Missing muxer install script: $APP_DIR/muxer/${MuxerInstallScript}"
+              exit 1
+            fi
+
+            TOKEN="$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+            MACS="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/network/interfaces/macs/)"
+            PRIMARY_MAC="$(echo "$MACS" | head -n1 | sed 's:/$::')"
+            PRIMARY_ENI="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/network/interfaces/macs/${!PRIMARY_MAC}/interface-id")"
+            aws ec2 modify-network-interface-attribute --region ${AWS::Region} --network-interface-id "$PRIMARY_ENI" --source-dest-check "{\"Value\": false}"
+
+            systemctl disable ${MuxerServiceName} || true
+            echo "Muxer installed. Recovery Lambda will attach the transport ENI, patch muxer.yaml, and start ${MuxerServiceName}."
+
+  MuxerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${ClusterName}-asg"
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      VPCZoneIdentifier:
+        - !Ref PublicSubnetAId
+        - !Ref PublicSubnetBId
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MuxerLaunchTemplate
+        Version: !GetAtt MuxerLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-node"
+          PropagateAtLaunch: true
+        - Key: muxingplus:component
+          Value: muxer
+          PropagateAtLaunch: true
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+          PropagateAtLaunch: true
+        - Key: muxingplus:deployment-model
+          Value: single-muxer-recovery
+          PropagateAtLaunch: true
+
+  RecoveryLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub "${ClusterName}-recovery-inline-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:AssociateAddress
+                  - ec2:AttachNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:SendCommand
+                Resource: "*"
+
+  RecoveryLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ClusterName}-recovery"
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Timeout: !Ref RecoveryLambdaTimeout
+      Role: !GetAtt RecoveryLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref RecoveryLambdaS3Bucket
+        S3Key: !Ref RecoveryLambdaS3Key
+      Environment:
+        Variables:
+          ASG_NAME: !Ref MuxerAutoScalingGroup
+          EIP_ALLOCATION_ID: !Ref EipAllocationId
+          TRANSPORT_ENI_A: !Ref MuxerTransportEniA
+          TRANSPORT_ENI_B: !Ref MuxerTransportEniB
+          CUSTOMER_SOT_TABLE: !Ref CustomerSotTableName
+          MUXER_SERVICE_NAME: !Ref MuxerServiceName
+          ALLOW_EIP_REASSOCIATION: !Ref AllowEipReassociation
+
+  RecoveryScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: !Sub "${ClusterName} scheduled muxer convergence"
+      ScheduleExpression: !Ref RecoveryScheduleExpression
+      State: !Ref RecoveryScheduleState
+      Targets:
+        - Arn: !GetAtt RecoveryLambda.Arn
+          Id: muxer-recovery-lambda
+
+  RecoveryLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RecoveryLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RecoveryScheduleRule.Arn
+
+Outputs:
+  AutoScalingGroupName:
+    Value: !Ref MuxerAutoScalingGroup
+  LaunchTemplateId:
+    Value: !Ref MuxerLaunchTemplate
+  RecoveryLambdaName:
+    Value: !Ref RecoveryLambda
+  TransportEniAId:
+    Value: !Ref MuxerTransportEniA
+  TransportEniBId:
+    Value: !Ref MuxerTransportEniB
+  PublicSecurityGroupId:
+    Value: !Ref MuxerPublicSecurityGroup
+  TransportSecurityGroupId:
+    Value: !Ref MuxerTransportSecurityGroup

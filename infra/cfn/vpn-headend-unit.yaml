@@ -1,0 +1,902 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Reusable VPN head-end HA unit with primary, HA/sync, and southbound core ENIs.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Logical shard/unit name, e.g. vpn-headend-unit-0001
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  SubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  HaSyncSubnetAId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for node A HA/conntrack sync ENI.
+  HaSyncSubnetBId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for node B HA/conntrack sync ENI.
+  CoreSubnetAId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for node A southbound/core ENI.
+  CoreSubnetBId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for node B southbound/core ENI.
+  NodeAPrivateIp:
+    Type: String
+  NodeBPrivateIp:
+    Type: String
+  NodeAHaSyncIp:
+    Type: String
+  NodeBHaSyncIp:
+    Type: String
+  NodeACoreIp:
+    Type: String
+  NodeBCoreIp:
+    Type: String
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  AllowGreIngress:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+  GreIngressCidr:
+    Type: String
+    Default: 10.30.0.0/16
+    Description: Internal CIDR allowed to deliver GRE to the primary head-end ENIs.
+  CoreIngressCidr:
+    Type: String
+    Default: 10.40.0.0/16
+    Description: Internal CIDR allowed to reach the southbound core ENIs.
+  AmiId:
+    Type: AWS::EC2::Image::Id
+  InstanceType:
+    Type: String
+    Default: c8gn.2xlarge
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  RootVolumeSizeGiB:
+    Type: Number
+    Default: 16
+    MinValue: 8
+  LoggingVolumeSizeGiB:
+    Type: Number
+    Default: 30
+    MinValue: 8
+  ApplicationVolumeSizeGiB:
+    Type: Number
+    Default: 80
+    MinValue: 8
+  LoggingMountPath:
+    Type: String
+    Default: /LOG
+  ApplicationMountPath:
+    Type: String
+    Default: /Application
+  EnableSharedEfs:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+  SharedEfsFileSystemId:
+    Type: String
+    Default: ""
+    Description: Optional existing EFS file system ID for shared artifacts.
+  SharedEfsAccessPointId:
+    Type: String
+    Default: ""
+    Description: Optional EFS access point ID for the shared artifact mount.
+  SharedEfsMountPath:
+    Type: String
+    Default: /Shared
+  ProjectPackageS3Uri:
+    Type: String
+    Description: s3://bucket/path/muxingplus-ha.zip
+  EipAllocationId:
+    Type: String
+    Default: ""
+    Description: Optional existing EIP allocation ID for single public identity per unit.
+  LeaseTableName:
+    Type: String
+    Default: ""
+    Description: Optional DynamoDB table name for this unit. Leave empty for stack-unique auto name.
+  FlowSyncMode:
+    Type: String
+    Default: conntrackd
+    AllowedValues:
+      - none
+      - conntrackd
+  SaSyncMode:
+    Type: String
+    Default: libreswan-no-sa-sync
+    AllowedValues:
+      - none
+      - libreswan-no-sa-sync
+      - strongswan-ha
+  IpsecService:
+    Type: String
+    Default: ipsec
+    Description: Systemd service name for the chosen IPsec backend (`ipsec` for Libreswan, `strongswan` for strongSwan).
+  IpsecBackend:
+    Type: String
+    Default: libreswan
+    AllowedValues:
+      - libreswan
+      - strongswan
+    Description: Installs backend-specific packages and config directories without changing muxer behavior.
+  TargetConnectionsPerUnit:
+    Type: Number
+    Default: 1000
+    MinValue: 1
+    Description: Planning metadata only (used in outputs/runbook, not scheduling logic).
+
+Conditions:
+  HasEip: !Not [!Equals [!Ref EipAllocationId, ""]]
+  HasCustomLeaseTableName: !Not [!Equals [!Ref LeaseTableName, ""]]
+  AllowGreIngressEnabled: !Equals [!Ref AllowGreIngress, "true"]
+
+Resources:
+  HaLeaseTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !If [HasCustomLeaseTableName, !Ref LeaseTableName, !Ref AWS::NoValue]
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cluster_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cluster_id
+          KeyType: HASH
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-lease-table"
+        - Key: muxingplus:component
+          Value: vpn-headend
+
+  HeadendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPN head-end primary interface SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: "50"
+          CidrIp: !Ref AllowedIngressCidr
+        - !If
+          - AllowGreIngressEnabled
+          - IpProtocol: "47"
+            CidrIp: !Ref GreIngressCidr
+          - !Ref AWS::NoValue
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-sg"
+        - Key: muxingplus:component
+          Value: vpn-headend
+
+  HeadendHaSyncSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPN head-end HA sync interface SG
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-ha-sync-sg"
+        - Key: muxingplus:component
+          Value: vpn-headend
+
+  HeadendHaSyncSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref HeadendHaSyncSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref HeadendHaSyncSecurityGroup
+
+  HeadendCoreSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPN head-end southbound core interface SG
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: !Ref CoreIngressCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-core-sg"
+        - Key: muxingplus:component
+          Value: vpn-headend
+
+  HeadendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: !Sub "${ClusterName}-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt HaLeaseTable.Arn
+              - Effect: Allow
+                Action:
+                  - ec2:AssociateAddress
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: "*"
+
+  HeadendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref HeadendRole
+
+  HeadendAPrimaryEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-a-primary"
+      GroupSet:
+        - !Ref HeadendSecurityGroup
+      PrivateIpAddress: !Ref NodeAPrivateIp
+      SourceDestCheck: false
+      SubnetId: !Ref SubnetAId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-a-primary"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: primary
+        - Key: muxingplus:ha-node
+          Value: a
+
+  HeadendAHaSyncEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-a-ha-sync"
+      GroupSet:
+        - !Ref HeadendHaSyncSecurityGroup
+      PrivateIpAddress: !Ref NodeAHaSyncIp
+      SourceDestCheck: false
+      SubnetId: !Ref HaSyncSubnetAId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-a-ha-sync"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: ha-sync
+        - Key: muxingplus:ha-node
+          Value: a
+
+  HeadendACoreEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-a-core"
+      GroupSet:
+        - !Ref HeadendCoreSecurityGroup
+      PrivateIpAddress: !Ref NodeACoreIp
+      SourceDestCheck: false
+      SubnetId: !Ref CoreSubnetAId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-a-core"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: core
+        - Key: muxingplus:ha-node
+          Value: a
+
+  HeadendA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref HeadendInstanceProfile
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          NetworkInterfaceId: !Ref HeadendAPrimaryEni
+        - DeviceIndex: "1"
+          NetworkInterfaceId: !Ref HeadendAHaSyncEni
+        - DeviceIndex: "2"
+          NetworkInterfaceId: !Ref HeadendACoreEni
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref RootVolumeSizeGiB
+            DeleteOnTermination: true
+        - DeviceName: /dev/sdf
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref LoggingVolumeSizeGiB
+            DeleteOnTermination: true
+        - DeviceName: /dev/sdg
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref ApplicationVolumeSizeGiB
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-a"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:ha-node
+          Value: a
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          IPSEC_BACKEND="${IpsecBackend}"
+          dnf install -y awscli unzip jq conntrack-tools iptables iptables-services
+          if [[ "$IPSEC_BACKEND" != "strongswan" ]]; then
+            dnf install -y libreswan
+          fi
+
+          LOG_DIR="${LoggingMountPath}"
+          APP_DIR="${ApplicationMountPath}"
+          SHARED_DIR="${SharedEfsMountPath}"
+          SHARED_ROOT="$SHARED_DIR/${ClusterName}"
+          ENABLE_SHARED_EFS="${EnableSharedEfs}"
+          SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
+          SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
+          SHARED_DIR="${SharedEfsMountPath}"
+          SHARED_ROOT="$SHARED_DIR/${ClusterName}"
+          ENABLE_SHARED_EFS="${EnableSharedEfs}"
+          SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
+          SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
+
+          if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
+            mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/swanctl/conf.d
+            if [[ ! -f /etc/swanctl/swanctl.conf ]]; then
+              cat >/etc/swanctl/swanctl.conf <<'EOF'
+          connections {}
+
+          secrets {}
+
+          include conf.d/*.conf
+          EOF
+            fi
+            if ! grep -q 'conf.d/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
+              printf '\ninclude conf.d/*.conf\n' >> /etc/swanctl/swanctl.conf
+            fi
+          else
+            mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/ipsec.d/customers
+            if [[ ! -f /etc/ipsec.d/customers.include.conf ]]; then
+              cat >/etc/ipsec.d/customers.include.conf <<'EOF'
+          include /etc/ipsec.d/customers/*.conf
+          EOF
+            fi
+            if ! grep -q '/etc/ipsec.d/customers/\*.conf' /etc/ipsec.conf 2>/dev/null; then
+              printf '\ninclude /etc/ipsec.d/customers/*.conf\n' >> /etc/ipsec.conf
+            fi
+            if ! grep -q '/etc/ipsec.d/customers/\*.secrets' /etc/ipsec.secrets 2>/dev/null; then
+              printf 'include /etc/ipsec.d/customers/*.secrets\n' >> /etc/ipsec.secrets
+            fi
+          fi
+          cat >/etc/sysctl.d/99-vpn-headend-forwarding.conf <<'EOF'
+          net.ipv4.ip_forward = 1
+          EOF
+          sysctl -w net.ipv4.ip_forward=1
+
+          ROOT_PART="$(findmnt -n -o SOURCE /)"
+          ROOT_DISK="$(echo "$ROOT_PART" | sed -E 's/p?[0-9]+$//')"
+          LOG_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '1p')"
+          APP_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '2p')"
+          if [[ -z "$LOG_DEV" || -z "$APP_DEV" ]]; then
+            echo "Expected 2 extra data disks for LOG/Application"
+            exit 1
+          fi
+
+          blkid "$LOG_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L HEADEND_LOG "$LOG_DEV"
+          blkid "$APP_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L HEADEND_APP "$APP_DEV"
+
+          LOG_UUID="$(blkid -s UUID -o value "$LOG_DEV")"
+          APP_UUID="$(blkid -s UUID -o value "$APP_DEV")"
+
+          grep -qE "[[:space:]]${LoggingMountPath}[[:space:]]" /etc/fstab || echo "UUID=$LOG_UUID ${LoggingMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+          grep -qE "[[:space:]]${ApplicationMountPath}[[:space:]]" /etc/fstab || echo "UUID=$APP_UUID ${ApplicationMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+
+            mount "$LOG_DIR" || true
+            mount "$APP_DIR" || true
+            mount -a
+
+            if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+              if [[ -z "$SHARED_EFS_FS_ID" ]]; then
+                echo "EnableSharedEfs is true but SharedEfsFileSystemId is empty" >&2
+                exit 1
+              fi
+              dnf install -y amazon-efs-utils
+              mkdir -p "$SHARED_DIR"
+              if [[ -n "$SHARED_EFS_AP_ID" ]]; then
+                EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls,accesspoint=${SharedEfsAccessPointId} 0 0"
+              else
+                EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls 0 0"
+              fi
+              grep -qE "[[:space:]]${SharedEfsMountPath}[[:space:]]" /etc/fstab || echo "$EFS_FSTAB" >> /etc/fstab
+              mount -a
+              mkdir -p "$SHARED_ROOT/customer-bundles" "$SHARED_ROOT/backups" "$SHARED_ROOT/log-archive" "$SHARED_ROOT/exports"
+            fi
+
+            mkdir -p "$APP_DIR/muxingplus-ha"
+            rm -rf /opt/muxingplus-ha
+            ln -s "$APP_DIR/muxingplus-ha" /opt/muxingplus-ha
+            if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+              ln -sfn "$SHARED_ROOT" /opt/muxingplus-ha/shared
+            fi
+
+            aws s3 cp '${ProjectPackageS3Uri}' /tmp/muxingplus-ha.zip
+          unzip -oq /tmp/muxingplus-ha.zip -d "$APP_DIR/muxingplus-ha"
+          if [[ ! -f "$APP_DIR/muxingplus-ha/README.md" ]]; then
+            inner_dir="$(find "$APP_DIR/muxingplus-ha" -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+            if [[ -n "$inner_dir" && -f "$inner_dir/README.md" ]]; then
+              cp -a "$inner_dir"/. "$APP_DIR/muxingplus-ha/"
+            fi
+          fi
+
+          if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
+            if dnf list available strongswan >/dev/null 2>&1; then
+              dnf install -y strongswan
+              if ! command -v swanctl >/dev/null 2>&1; then
+                dnf install -y strongswan-swanctl || true
+              fi
+            fi
+            if ! command -v swanctl >/dev/null 2>&1; then
+              bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
+            fi
+            if ! command -v swanctl >/dev/null 2>&1; then
+              echo "strongSwan backend requires swanctl" >&2
+              exit 1
+            fi
+          fi
+
+          bash "$APP_DIR/muxingplus-ha/ops/headend-ha-active-standby/scripts/install-local.sh" "$APP_DIR/muxingplus-ha"
+
+          TOKEN="$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+          imds() {
+            curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" "$1"
+          }
+          iface_name_for_mac() {
+            local target
+            target="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+            for path in /sys/class/net/*/address; do
+              local current
+              current="$(cat "$path")"
+              if [[ "$current" == "$target" ]]; then
+                basename "$(dirname "$path")"
+                return 0
+              fi
+            done
+            return 1
+          }
+          eni_details() {
+            local target_eni="$1"
+            local base_url
+            base_url='http://169.254.169.254/latest/meta-data/network/interfaces/macs/'
+            for mac in $(imds http://169.254.169.254/latest/meta-data/network/interfaces/macs/); do
+              local eni_id
+              eni_id="$(imds "$base_url$mac"'interface-id')"
+              if [[ "$eni_id" == "$target_eni" ]]; then
+                local clean_mac iface_name local_ip
+                clean_mac="$(echo "$mac" | sed 's:/$::')"
+                iface_name="$(iface_name_for_mac "$clean_mac")"
+                local_ip="$(imds "$base_url$mac"'local-ipv4s' | head -n1)"
+                echo "$clean_mac $iface_name $local_ip"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          read -r _ PRIMARY_IF PRIMARY_IP <<<"$(eni_details '${HeadendAPrimaryEni}')"
+          read -r _ SYNC_IF SYNC_IP <<<"$(eni_details '${HeadendAHaSyncEni}')"
+          read -r _ CORE_IF CORE_IP <<<"$(eni_details '${HeadendACoreEni}')"
+
+          cat >/etc/muxingplus-ha/ha.env <<EOF
+          HA_CLUSTER_ID=${ClusterName}
+          HA_NODE_ID=headend-a
+          HA_REGION=${AWS::Region}
+          HA_DDB_TABLE=${HaLeaseTable}
+          HA_LEASE_TTL_SEC=15
+          HA_LOOP_INTERVAL_SEC=3
+          HA_EIP_ALLOC_ID=${EipAllocationId}
+          HA_ENI_ID=${HeadendAPrimaryEni}
+          HA_IPSEC_SERVICE=${IpsecService}
+          FLOW_SYNC_MODE=${FlowSyncMode}
+          SA_SYNC_MODE=${SaSyncMode}
+          HA_CONNTRACKD_SERVICE=conntrackd
+          HA_CONNTRACKD_COMMIT_ON_PROMOTE=true
+          HA_CONNTRACKD_RESYNC_ON_DEMOTE=true
+          HA_DEMOTE_STOP_IPSEC=true
+          HA_STATE_DIR=/run/muxingplus-ha
+          HA_LOG_FILE=$LOG_DIR/muxingplus-ha.log
+          HA_PRIMARY_INTERFACE=$PRIMARY_IF
+          HA_PRIMARY_LOCAL_IP=$PRIMARY_IP
+          HA_SYNC_INTERFACE=$SYNC_IF
+          HA_SYNC_LOCAL_IP=$SYNC_IP
+          HA_SYNC_PEER_IP=${NodeBHaSyncIp}
+          HA_CORE_INTERFACE=$CORE_IF
+          HA_CORE_LOCAL_IP=$CORE_IP
+          EOF
+          chmod 600 /etc/muxingplus-ha/ha.env
+
+          if [[ '${FlowSyncMode}' == 'conntrackd' ]]; then
+            cp /etc/muxingplus-ha/examples/conntrackd.conf.ftfw.example /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_LOCAL_IP>#$SYNC_IP#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_PEER_IP>#${NodeBHaSyncIp}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_INTERFACE>#$SYNC_IF#g" /etc/conntrackd/conntrackd.conf
+            systemctl enable --now conntrackd || true
+          fi
+
+          systemctl enable --now muxingplus-ha.service
+
+  HeadendBPrimaryEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-b-primary"
+      GroupSet:
+        - !Ref HeadendSecurityGroup
+      PrivateIpAddress: !Ref NodeBPrivateIp
+      SourceDestCheck: false
+      SubnetId: !Ref SubnetBId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-b-primary"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: primary
+        - Key: muxingplus:ha-node
+          Value: b
+
+  HeadendBHaSyncEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-b-ha-sync"
+      GroupSet:
+        - !Ref HeadendHaSyncSecurityGroup
+      PrivateIpAddress: !Ref NodeBHaSyncIp
+      SourceDestCheck: false
+      SubnetId: !Ref HaSyncSubnetBId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-b-ha-sync"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: ha-sync
+        - Key: muxingplus:ha-node
+          Value: b
+
+  HeadendBCoreEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub "${ClusterName}-headend-b-core"
+      GroupSet:
+        - !Ref HeadendCoreSecurityGroup
+      PrivateIpAddress: !Ref NodeBCoreIp
+      SourceDestCheck: false
+      SubnetId: !Ref CoreSubnetBId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-b-core"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:component
+          Value: vpn-headend
+        - Key: muxingplus:interface-role
+          Value: core
+        - Key: muxingplus:ha-node
+          Value: b
+
+  HeadendB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref HeadendInstanceProfile
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          NetworkInterfaceId: !Ref HeadendBPrimaryEni
+        - DeviceIndex: "1"
+          NetworkInterfaceId: !Ref HeadendBHaSyncEni
+        - DeviceIndex: "2"
+          NetworkInterfaceId: !Ref HeadendBCoreEni
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref RootVolumeSizeGiB
+            DeleteOnTermination: true
+        - DeviceName: /dev/sdf
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref LoggingVolumeSizeGiB
+            DeleteOnTermination: true
+        - DeviceName: /dev/sdg
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref ApplicationVolumeSizeGiB
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-b"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:ha-node
+          Value: b
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          IPSEC_BACKEND="${IpsecBackend}"
+          dnf install -y awscli unzip jq conntrack-tools iptables iptables-services
+          if [[ "$IPSEC_BACKEND" != "strongswan" ]]; then
+            dnf install -y libreswan
+          fi
+
+          LOG_DIR="${LoggingMountPath}"
+          APP_DIR="${ApplicationMountPath}"
+
+          if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
+            mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/swanctl/conf.d
+            if [[ ! -f /etc/swanctl/swanctl.conf ]]; then
+              cat >/etc/swanctl/swanctl.conf <<'EOF'
+          connections {}
+
+          secrets {}
+
+          include conf.d/*.conf
+          EOF
+            fi
+            if ! grep -q 'conf.d/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
+              printf '\ninclude conf.d/*.conf\n' >> /etc/swanctl/swanctl.conf
+            fi
+          else
+            mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/ipsec.d/customers
+            if [[ ! -f /etc/ipsec.d/customers.include.conf ]]; then
+              cat >/etc/ipsec.d/customers.include.conf <<'EOF'
+          include /etc/ipsec.d/customers/*.conf
+          EOF
+            fi
+            if ! grep -q '/etc/ipsec.d/customers/\*.conf' /etc/ipsec.conf 2>/dev/null; then
+              printf '\ninclude /etc/ipsec.d/customers/*.conf\n' >> /etc/ipsec.conf
+            fi
+            if ! grep -q '/etc/ipsec.d/customers/\*.secrets' /etc/ipsec.secrets 2>/dev/null; then
+              printf 'include /etc/ipsec.d/customers/*.secrets\n' >> /etc/ipsec.secrets
+            fi
+          fi
+          cat >/etc/sysctl.d/99-vpn-headend-forwarding.conf <<'EOF'
+          net.ipv4.ip_forward = 1
+          EOF
+          sysctl -w net.ipv4.ip_forward=1
+
+          ROOT_PART="$(findmnt -n -o SOURCE /)"
+          ROOT_DISK="$(echo "$ROOT_PART" | sed -E 's/p?[0-9]+$//')"
+          LOG_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '1p')"
+          APP_DEV="$(lsblk -dpno NAME,TYPE | awk -v root="$ROOT_DISK" '$2=="disk" && $1!=root {print $1}' | sort | sed -n '2p')"
+          if [[ -z "$LOG_DEV" || -z "$APP_DEV" ]]; then
+            echo "Expected 2 extra data disks for LOG/Application"
+            exit 1
+          fi
+
+          blkid "$LOG_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L HEADEND_LOG "$LOG_DEV"
+          blkid "$APP_DEV" >/dev/null 2>&1 || mkfs.xfs -f -L HEADEND_APP "$APP_DEV"
+
+          LOG_UUID="$(blkid -s UUID -o value "$LOG_DEV")"
+          APP_UUID="$(blkid -s UUID -o value "$APP_DEV")"
+
+          grep -qE "[[:space:]]${LoggingMountPath}[[:space:]]" /etc/fstab || echo "UUID=$LOG_UUID ${LoggingMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+          grep -qE "[[:space:]]${ApplicationMountPath}[[:space:]]" /etc/fstab || echo "UUID=$APP_UUID ${ApplicationMountPath} xfs defaults,nofail 0 2" >> /etc/fstab
+
+            mount "$LOG_DIR" || true
+            mount "$APP_DIR" || true
+            mount -a
+
+            if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+              if [[ -z "$SHARED_EFS_FS_ID" ]]; then
+                echo "EnableSharedEfs is true but SharedEfsFileSystemId is empty" >&2
+                exit 1
+              fi
+              dnf install -y amazon-efs-utils
+              mkdir -p "$SHARED_DIR"
+              if [[ -n "$SHARED_EFS_AP_ID" ]]; then
+                EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls,accesspoint=${SharedEfsAccessPointId} 0 0"
+              else
+                EFS_FSTAB="${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls 0 0"
+              fi
+              grep -qE "[[:space:]]${SharedEfsMountPath}[[:space:]]" /etc/fstab || echo "$EFS_FSTAB" >> /etc/fstab
+              mount -a
+              mkdir -p "$SHARED_ROOT/customer-bundles" "$SHARED_ROOT/backups" "$SHARED_ROOT/log-archive" "$SHARED_ROOT/exports"
+            fi
+
+            mkdir -p "$APP_DIR/muxingplus-ha"
+            rm -rf /opt/muxingplus-ha
+            ln -s "$APP_DIR/muxingplus-ha" /opt/muxingplus-ha
+            if [[ "$ENABLE_SHARED_EFS" == "true" ]]; then
+              ln -sfn "$SHARED_ROOT" /opt/muxingplus-ha/shared
+            fi
+
+            aws s3 cp '${ProjectPackageS3Uri}' /tmp/muxingplus-ha.zip
+          unzip -oq /tmp/muxingplus-ha.zip -d "$APP_DIR/muxingplus-ha"
+          if [[ ! -f "$APP_DIR/muxingplus-ha/README.md" ]]; then
+            inner_dir="$(find "$APP_DIR/muxingplus-ha" -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+            if [[ -n "$inner_dir" && -f "$inner_dir/README.md" ]]; then
+              cp -a "$inner_dir"/. "$APP_DIR/muxingplus-ha/"
+            fi
+          fi
+
+          if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
+            if dnf list available strongswan >/dev/null 2>&1; then
+              dnf install -y strongswan
+              if ! command -v swanctl >/dev/null 2>&1; then
+                dnf install -y strongswan-swanctl || true
+              fi
+            fi
+            if ! command -v swanctl >/dev/null 2>&1; then
+              bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
+            fi
+            if ! command -v swanctl >/dev/null 2>&1; then
+              echo "strongSwan backend requires swanctl" >&2
+              exit 1
+            fi
+          fi
+
+          bash "$APP_DIR/muxingplus-ha/ops/headend-ha-active-standby/scripts/install-local.sh" "$APP_DIR/muxingplus-ha"
+
+          TOKEN="$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+          imds() {
+            curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" "$1"
+          }
+          iface_name_for_mac() {
+            local target
+            target="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+            for path in /sys/class/net/*/address; do
+              local current
+              current="$(cat "$path")"
+              if [[ "$current" == "$target" ]]; then
+                basename "$(dirname "$path")"
+                return 0
+              fi
+            done
+            return 1
+          }
+          eni_details() {
+            local target_eni="$1"
+            local base_url
+            base_url='http://169.254.169.254/latest/meta-data/network/interfaces/macs/'
+            for mac in $(imds http://169.254.169.254/latest/meta-data/network/interfaces/macs/); do
+              local eni_id
+              eni_id="$(imds "$base_url$mac"'interface-id')"
+              if [[ "$eni_id" == "$target_eni" ]]; then
+                local clean_mac iface_name local_ip
+                clean_mac="$(echo "$mac" | sed 's:/$::')"
+                iface_name="$(iface_name_for_mac "$clean_mac")"
+                local_ip="$(imds "$base_url$mac"'local-ipv4s' | head -n1)"
+                echo "$clean_mac $iface_name $local_ip"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          read -r _ PRIMARY_IF PRIMARY_IP <<<"$(eni_details '${HeadendBPrimaryEni}')"
+          read -r _ SYNC_IF SYNC_IP <<<"$(eni_details '${HeadendBHaSyncEni}')"
+          read -r _ CORE_IF CORE_IP <<<"$(eni_details '${HeadendBCoreEni}')"
+
+          cat >/etc/muxingplus-ha/ha.env <<EOF
+          HA_CLUSTER_ID=${ClusterName}
+          HA_NODE_ID=headend-b
+          HA_REGION=${AWS::Region}
+          HA_DDB_TABLE=${HaLeaseTable}
+          HA_LEASE_TTL_SEC=15
+          HA_LOOP_INTERVAL_SEC=3
+          HA_EIP_ALLOC_ID=${EipAllocationId}
+          HA_ENI_ID=${HeadendBPrimaryEni}
+          HA_IPSEC_SERVICE=${IpsecService}
+          FLOW_SYNC_MODE=${FlowSyncMode}
+          SA_SYNC_MODE=${SaSyncMode}
+          HA_CONNTRACKD_SERVICE=conntrackd
+          HA_CONNTRACKD_COMMIT_ON_PROMOTE=true
+          HA_CONNTRACKD_RESYNC_ON_DEMOTE=true
+          HA_DEMOTE_STOP_IPSEC=true
+          HA_STATE_DIR=/run/muxingplus-ha
+          HA_LOG_FILE=$LOG_DIR/muxingplus-ha.log
+          HA_PRIMARY_INTERFACE=$PRIMARY_IF
+          HA_PRIMARY_LOCAL_IP=$PRIMARY_IP
+          HA_SYNC_INTERFACE=$SYNC_IF
+          HA_SYNC_LOCAL_IP=$SYNC_IP
+          HA_SYNC_PEER_IP=${NodeAHaSyncIp}
+          HA_CORE_INTERFACE=$CORE_IF
+          HA_CORE_LOCAL_IP=$CORE_IP
+          EOF
+          chmod 600 /etc/muxingplus-ha/ha.env
+
+          if [[ '${FlowSyncMode}' == 'conntrackd' ]]; then
+            cp /etc/muxingplus-ha/examples/conntrackd.conf.ftfw.example /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_LOCAL_IP>#$SYNC_IP#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_PEER_IP>#${NodeAHaSyncIp}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_INTERFACE>#$SYNC_IF#g" /etc/conntrackd/conntrackd.conf
+            systemctl enable --now conntrackd || true
+          fi
+
+          systemctl enable --now muxingplus-ha.service
+
+Outputs:
+  ClusterName:
+    Value: !Ref ClusterName
+  HeadendAInstanceId:
+    Value: !Ref HeadendA
+  HeadendBInstanceId:
+    Value: !Ref HeadendB
+  HeadendAPrimaryEniId:
+    Value: !Ref HeadendAPrimaryEni
+  HeadendBPrimaryEniId:
+    Value: !Ref HeadendBPrimaryEni
+  HeadendAHaSyncEniId:
+    Value: !Ref HeadendAHaSyncEni
+  HeadendBHaSyncEniId:
+    Value: !Ref HeadendBHaSyncEni
+  HeadendACoreEniId:
+    Value: !Ref HeadendACoreEni
+  HeadendBCoreEniId:
+    Value: !Ref HeadendBCoreEni
+  LeaseTableName:
+    Value: !Ref HaLeaseTable
+  SecurityGroupId:
+    Value: !Ref HeadendSecurityGroup
+  HaSyncSecurityGroupId:
+    Value: !Ref HeadendHaSyncSecurityGroup
+  CoreSecurityGroupId:
+    Value: !Ref HeadendCoreSecurityGroup
+  TargetConnectionsPerUnit:
+    Value: !Ref TargetConnectionsPerUnit

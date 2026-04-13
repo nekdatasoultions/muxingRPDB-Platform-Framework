@@ -9,6 +9,7 @@ scripts/
   backup/
   deployment/
   packaging/
+  platform/
 ```
 
 ## Intent
@@ -22,7 +23,13 @@ scripts/
 - `packaging/`
   - bundle creation helpers
   - manifest and checksum helpers
+- `platform/`
+  - imported current-state base-platform deploy and packaging scripts
 
 The first step is still structure and workflow clarity, but this branch now
 makes the deployment areas explicit so implementation can land into stable
 paths later.
+
+Reference:
+
+- [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)

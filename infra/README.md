@@ -10,6 +10,7 @@ node is pointed at the new framework.
 ```text
 infra/
   backups/
+  cfn/
   packaging/
   runbooks/
 ```
@@ -18,6 +19,8 @@ infra/
 
 - `backups/`
   - inventory and expectations for backup-first deployment gates
+- `cfn/`
+  - imported current-state CloudFormation templates and parameter files
 - `packaging/`
   - bundle layout and release artifact expectations
 - `runbooks/`
@@ -28,3 +31,7 @@ infra/
 - No live deploys from this repo without verified backups.
 - Customer deploy/apply should be customer-scoped by default.
 - Rollback expectations must be documented before rollout logic is added.
+
+Reference:
+
+- [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)

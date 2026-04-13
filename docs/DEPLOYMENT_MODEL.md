@@ -75,3 +75,17 @@ handoff directory containing:
 
 The deployment branch is responsible for packaging, validating, and preflighting
 that handoff output before any live-node apply logic is added.
+
+## Current Platform Baseline
+
+The repo now also carries imported current-state platform deploy assets for the
+base empty environment:
+
+- [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)
+- [infra/cfn](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn)
+- [scripts/platform](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform)
+
+That lets the repo hold both:
+
+- current-state base platform deploy references
+- RPDB-native customer lifecycle and verification flow
