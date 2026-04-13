@@ -25,12 +25,27 @@ Deploy one customer at a time with backup-first gates.
 - package the customer-scoped head-end artifacts
 - produce a manifest and checksums
 
+Suggested helper:
+
+```powershell
+python scripts\packaging\build_customer_bundle_manifest.py <bundle-dir>
+```
+
 ### 3. Preflight The Environment
 
 - confirm backup baseline for affected nodes
 - confirm purpose-built pre-change backup for this rollout
 - confirm target nodes and services
 - confirm rollback operator and rollback steps
+
+Suggested helpers:
+
+```powershell
+python scripts\backup\verify_backup_baseline.py
+python scripts\deployment\deployment_readiness_check.py `
+  --customer-name <customer-name> `
+  --bundle-dir <bundle-dir>
+```
 
 ### 4. Apply The Customer
 

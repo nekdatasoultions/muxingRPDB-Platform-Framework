@@ -39,3 +39,11 @@ The deployment model needs to cover:
 7. apply head-end changes
 8. validate customer dataplane/control-plane
 9. rollback using documented steps if validation fails
+
+## First Deployment Helpers
+
+The first deployment branch helpers are intentionally preflight-oriented:
+
+- [verify_backup_baseline.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/backup/verify_backup_baseline.py)
+- [build_customer_bundle_manifest.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/packaging/build_customer_bundle_manifest.py)
+- [deployment_readiness_check.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/deployment_readiness_check.py)
