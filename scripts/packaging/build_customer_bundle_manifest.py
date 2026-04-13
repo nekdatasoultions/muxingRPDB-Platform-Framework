@@ -28,6 +28,31 @@ def _iter_bundle_files(bundle_dir: Path):
         yield path
 
 
+def build_bundle_manifest(bundle_dir: Path, manifest_path: Path, sha_path: Path) -> int:
+    """Write manifest and checksum files for a customer bundle."""
+    files = list(_iter_bundle_files(bundle_dir))
+    if not files:
+        raise ValueError(f"No bundle files found under {bundle_dir}")
+
+    manifest_lines = [
+        f"# Customer bundle manifest",
+        f"# bundle_dir={bundle_dir.as_posix()}",
+        f"# file_count={len(files)}",
+        "",
+    ]
+    sha_lines = []
+
+    for path in files:
+        relative_path = path.relative_to(bundle_dir).as_posix()
+        size = path.stat().st_size
+        manifest_lines.append(f"{relative_path}\t{size}")
+        sha_lines.append(f"{_sha256(path)}  {relative_path}")
+
+    manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+    sha_path.write_text("\n".join(sha_lines) + "\n", encoding="utf-8")
+    return len(files)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build manifest and checksums for a customer bundle.")
     parser.add_argument("bundle_dir", help="Path to the customer bundle directory")
@@ -48,30 +73,14 @@ def main() -> int:
     manifest_path = Path(args.manifest_out).resolve() if args.manifest_out else bundle_dir / "manifest.txt"
     sha_path = Path(args.sha_out).resolve() if args.sha_out else bundle_dir / "sha256sums.txt"
 
-    files = list(_iter_bundle_files(bundle_dir))
-    if not files:
-        raise SystemExit(f"No bundle files found under {bundle_dir}")
-
-    manifest_lines = [
-        f"# Customer bundle manifest",
-        f"# bundle_dir={bundle_dir.as_posix()}",
-        f"# file_count={len(files)}",
-        "",
-    ]
-    sha_lines = []
-
-    for path in files:
-        relative_path = path.relative_to(bundle_dir).as_posix()
-        size = path.stat().st_size
-        manifest_lines.append(f"{relative_path}\t{size}")
-        sha_lines.append(f"{_sha256(path)}  {relative_path}")
-
-    manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
-    sha_path.write_text("\n".join(sha_lines) + "\n", encoding="utf-8")
+    try:
+        file_count = build_bundle_manifest(bundle_dir, manifest_path, sha_path)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
 
     print(f"Bundle manifest written: {manifest_path}")
     print(f"Bundle checksums written: {sha_path}")
-    print(f"Bundle files indexed: {len(files)}")
+    print(f"Bundle files indexed: {file_count}")
     return 0
 
 

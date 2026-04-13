@@ -28,6 +28,11 @@ Deploy one customer at a time with backup-first gates.
 Suggested helper:
 
 ```powershell
+python scripts\packaging\assemble_customer_bundle.py `
+  --customer-name <customer-name> `
+  --bundle-dir <bundle-dir> `
+  --customer-module <customer-module-json> `
+  --customer-ddb-item <customer-ddb-item-json>
 python scripts\packaging\build_customer_bundle_manifest.py <bundle-dir>
 python scripts\packaging\validate_customer_bundle.py <bundle-dir>
 ```

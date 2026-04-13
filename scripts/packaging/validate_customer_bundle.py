@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 REQUIRED_TOP_LEVEL_FILES = [
+    "bundle-metadata.json",
     "manifest.txt",
     "sha256sums.txt",
 ]
@@ -19,7 +20,12 @@ REQUIRED_DIRECTORIES = [
 ]
 
 RECOMMENDED_FILES = [
-    "customer/customer.yaml",
+    "customer/customer-source.yaml",
+]
+
+REQUIRED_CUSTOMER_FILES = [
+    "customer/customer-module.json",
+    "customer/customer-ddb-item.json",
 ]
 
 
@@ -50,6 +56,10 @@ def main() -> int:
         for name in REQUIRED_DIRECTORIES:
             if not (bundle_dir / name).is_dir():
                 report["errors"].append(f"missing required directory: {name}/")
+
+        for name in REQUIRED_CUSTOMER_FILES:
+            if not (bundle_dir / name).exists():
+                report["errors"].append(f"missing required file: {name}")
 
         for name in RECOMMENDED_FILES:
             if not (bundle_dir / name).exists():
