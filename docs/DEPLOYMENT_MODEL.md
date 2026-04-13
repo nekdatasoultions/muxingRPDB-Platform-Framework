@@ -45,5 +45,8 @@ The deployment model needs to cover:
 The first deployment branch helpers are intentionally preflight-oriented:
 
 - [verify_backup_baseline.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/backup/verify_backup_baseline.py)
+- [create_prechange_backup_note.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/backup/create_prechange_backup_note.py)
 - [build_customer_bundle_manifest.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/packaging/build_customer_bundle_manifest.py)
+- [validate_customer_bundle.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/packaging/validate_customer_bundle.py)
 - [deployment_readiness_check.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/deployment_readiness_check.py)
+- [create_rollout_notes.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/create_rollout_notes.py)

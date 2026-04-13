@@ -25,6 +25,9 @@ def _check_bundle(bundle_dir: Path) -> List[str]:
     for relative_name in ("manifest.txt", "sha256sums.txt"):
         if not (bundle_dir / relative_name).exists():
             errors.append(f"bundle missing {relative_name}")
+    for relative_name in ("customer", "muxer", "headend"):
+        if not (bundle_dir / relative_name).is_dir():
+            errors.append(f"bundle missing directory {relative_name}/")
     return errors
 
 

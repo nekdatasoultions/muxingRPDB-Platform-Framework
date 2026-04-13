@@ -29,6 +29,7 @@ Suggested helper:
 
 ```powershell
 python scripts\packaging\build_customer_bundle_manifest.py <bundle-dir>
+python scripts\packaging\validate_customer_bundle.py <bundle-dir>
 ```
 
 ### 3. Preflight The Environment
@@ -42,9 +43,18 @@ Suggested helpers:
 
 ```powershell
 python scripts\backup\verify_backup_baseline.py
+python scripts\backup\create_prechange_backup_note.py `
+  --customer-name <customer-name> `
+  --out notes\<customer-name>\prechange.md
+python scripts\deployment\create_rollout_notes.py `
+  --customer-name <customer-name> `
+  --bundle-dir <bundle-dir> `
+  --out-dir notes\<customer-name>
 python scripts\deployment\deployment_readiness_check.py `
   --customer-name <customer-name> `
-  --bundle-dir <bundle-dir>
+  --bundle-dir <bundle-dir> `
+  --prechange-backup-note notes\<customer-name>\prechange.md `
+  --rollback-notes notes\<customer-name>\rollback.md
 ```
 
 ### 4. Apply The Customer
