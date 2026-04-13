@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+# Standard library imports for JSON serialization, typed dataclasses, and
+# stable UTC timestamps used in the DynamoDB item.
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
+# Typed building blocks for the customer source model.
+# These map directly to the major sections we expect in the source YAML.
 @dataclass(frozen=True)
 class Overlay:
     mux_ip: str
@@ -117,12 +121,14 @@ class CustomerSource:
     customer: Customer
 
 
+# Small validation helper used by the parser to fail fast on required fields.
 def _require(value: Any, path: str) -> Any:
     if value in (None, "", []):
         raise ValueError(f"{path} is required")
     return value
 
 
+# Normalize list-based fields such as selectors and translated subnet lists.
 def _as_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -131,6 +137,9 @@ def _as_list(value: Any) -> List[str]:
     return [str(item) for item in value]
 
 
+# YAML will happily parse an unquoted hex mark like `0x41001` as an integer.
+# We normalize it back into a hex string so the rest of the control plane sees
+# a consistent representation.
 def _as_hex_mark(value: Any, path: str) -> str:
     raw = _require(value, path)
     if isinstance(raw, int):
@@ -138,6 +147,8 @@ def _as_hex_mark(value: Any, path: str) -> str:
     return str(raw)
 
 
+# Parse a raw customer source document into the typed RPDB customer model.
+# This is the main normalization step before defaults/class merge happens.
 def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     customer = raw.get("customer") or {}
     peer = customer.get("peer") or {}
@@ -261,12 +272,18 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     )
 
 
+# Resolve the final per-customer RPDB priority. If the customer source
+# explicitly provides one, keep it. Otherwise use the configured priority base
+# plus the customer ID.
 def compute_rpdb_priority(priority_base: int, customer_id: int, override: Optional[int] = None) -> int:
     if override is not None:
         return int(override)
     return int(priority_base) + int(customer_id)
 
 
+# Convert the merged customer module into the compact DynamoDB item shape.
+# The top-level fields keep routing metadata easy to inspect, while
+# `customer_json` stores the canonical merged customer module.
 def build_dynamodb_item(
     source: CustomerSource,
     merged_customer_module: Dict[str, Any],
@@ -302,5 +319,7 @@ def build_dynamodb_item(
     }
 
 
+# Convert the typed dataclass tree back into a plain dictionary. This is used
+# by the merge layer when it needs a regular dict structure to overlay.
 def source_to_dict(source: CustomerSource) -> Dict[str, Any]:
     return asdict(source)
