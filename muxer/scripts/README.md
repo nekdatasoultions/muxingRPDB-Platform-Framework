@@ -15,6 +15,7 @@ Current scaffold helpers:
   - exports one standard framework-side handoff directory
   - writes `customer-module.json` and `customer-ddb-item.json`
   - copies the source YAML
+  - generates muxer and head-end intent artifacts by default
   - optionally copies muxer and head-end customer artifact directories
 
 Planned next helpers:

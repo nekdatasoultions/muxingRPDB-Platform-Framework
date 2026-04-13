@@ -206,7 +206,14 @@ build/example-nat-0001/
   customer-ddb-item.json
   customer-source.yaml
   muxer/
+    customer-summary.json
+    rpdb-routing.json
+    tunnel-intent.json
+    firewall-intent.json
   headend/
+    ipsec-intent.json
+    routing-intent.json
+    post-ipsec-nat-intent.json
 ```
 
 The deployment branch should consume this handoff directory instead of trying

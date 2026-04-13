@@ -18,6 +18,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Project helpers used to build the merged customer module and DynamoDB item.
+from muxerlib.customer_artifacts import build_headend_artifacts, build_muxer_artifacts
 from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file
 from muxerlib.customer_model import parse_customer_source
 
@@ -40,6 +41,11 @@ def _copy_tree_contents(source_dir: Path, destination_dir: Path) -> int:
 def _write_placeholder(path: Path, title: str, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -133,19 +139,23 @@ def main() -> int:
     muxer_copied = _copy_tree_contents(Path(args.muxer_dir).resolve(), muxer_dir) if args.muxer_dir else 0
     headend_copied = _copy_tree_contents(Path(args.headend_dir).resolve(), headend_dir) if args.headend_dir else 0
 
-    # Placeholders make the contract shape explicit even when no generated
-    # muxer/head-end artifacts exist yet.
+    # When explicit artifact directories are not supplied, generate concrete
+    # customer-scoped intent files so the handoff export carries real content.
     if muxer_copied == 0:
+        for name, payload in build_muxer_artifacts(module, item).items():
+            _write_json(muxer_dir / name, payload)
         _write_placeholder(
             muxer_dir / "README.md",
             "Muxer Artifacts",
-            "No muxer artifacts were supplied for this handoff export.",
+            "This directory contains framework-generated muxer intent artifacts for deployment review.",
         )
     if headend_copied == 0:
+        for name, payload in build_headend_artifacts(module).items():
+            _write_json(headend_dir / name, payload)
         _write_placeholder(
             headend_dir / "README.md",
             "Headend Artifacts",
-            "No head-end artifacts were supplied for this handoff export.",
+            "This directory contains framework-generated head-end intent artifacts for deployment review.",
         )
 
     metadata = {
@@ -161,6 +171,10 @@ def main() -> int:
         "artifact_inputs": {
             "muxer_dir": str(Path(args.muxer_dir).resolve()) if args.muxer_dir else None,
             "headend_dir": str(Path(args.headend_dir).resolve()) if args.headend_dir else None,
+        },
+        "generated_artifacts": {
+            "muxer": sorted(path.name for path in muxer_dir.iterdir() if path.is_file()),
+            "headend": sorted(path.name for path in headend_dir.iterdir() if path.is_file()),
         },
     }
     (export_dir / "export-metadata.json").write_text(

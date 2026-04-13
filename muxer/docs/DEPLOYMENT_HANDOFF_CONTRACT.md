@@ -34,9 +34,13 @@ export/
 ## Optional Directories
 
 - `muxer/`
-  - customer-scoped muxer artifacts when available
+  - customer-scoped muxer artifacts
+  - framework-generated intent files should be present even before final live
+    apply artifacts exist
 - `headend/`
-  - customer-scoped head-end artifacts when available
+  - customer-scoped head-end artifacts
+  - framework-generated intent files should be present even before final live
+    apply artifacts exist
 
 ## Why This Matters
 
@@ -62,3 +66,6 @@ Optional inputs:
 
 - `--muxer-dir`
 - `--headend-dir`
+
+If explicit artifact directories are not supplied, the export helper should
+still generate reviewable intent files under `muxer/` and `headend/`.
