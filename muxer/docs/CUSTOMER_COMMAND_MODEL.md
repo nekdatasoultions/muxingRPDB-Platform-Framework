@@ -23,6 +23,9 @@ The first scaffold scripts align to that model:
 - `build_customer_item.py`
 - `render_customer_artifacts.py`
 - `validate_rendered_artifacts.py`
+- `validate_environment_bindings.py`
+- `bind_rendered_artifacts.py`
+- `validate_bound_artifacts.py`
 
 ## Fleet Commands
 

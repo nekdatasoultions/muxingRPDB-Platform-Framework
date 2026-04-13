@@ -80,6 +80,14 @@ python muxer\scripts\render_customer_artifacts.py `
   --out-dir build\render-example-nat-0001
 python muxer\scripts\validate_rendered_artifacts.py `
   build\render-example-nat-0001
+python muxer\scripts\validate_environment_bindings.py `
+  muxer\config\environment-defaults\example-environment.yaml
+python muxer\scripts\bind_rendered_artifacts.py `
+  build\render-example-nat-0001 `
+  --environment-file muxer\config\environment-defaults\example-environment.yaml `
+  --out-dir build\bound-render-example-nat-0001
+python muxer\scripts\validate_bound_artifacts.py `
+  build\bound-render-example-nat-0001
 ```
 
 Export the deployment handoff directory:

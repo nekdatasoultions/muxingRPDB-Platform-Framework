@@ -18,6 +18,13 @@ Current scaffold helpers:
 - `validate_rendered_artifacts.py`
   - validates a rendered customer artifact tree
   - checks `render-manifest.json` and the expected structured files
+- `bind_rendered_artifacts.py`
+  - binds rendered artifacts or handoff exports to environment-specific values
+  - writes `binding-report.json`
+- `validate_environment_bindings.py`
+  - validates the environment bindings YAML against the schema
+- `validate_bound_artifacts.py`
+  - verifies a bound artifact tree no longer contains unresolved placeholders
 - `export_customer_handoff.py`
   - exports one standard framework-side handoff directory
   - writes `customer-module.json` and `customer-ddb-item.json`
