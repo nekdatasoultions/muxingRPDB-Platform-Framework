@@ -220,17 +220,24 @@ build/example-nat-0001/
       customer-summary.json
     routing/
       rpdb-routing.json
+      ip-rule.command.txt
+      ip-route-default.command.txt
     tunnel/
       tunnel-intent.json
+      ip-link.command.txt
     firewall/
       firewall-intent.json
+      iptables-snippet.txt
   headend/
     ipsec/
       ipsec-intent.json
+      swanctl-connection.conf
     routing/
       routing-intent.json
+      ip-route.commands.txt
     post-ipsec-nat/
       post-ipsec-nat-intent.json
+      iptables-snippet.txt
 ```
 
 The deployment branch should consume this handoff directory instead of trying

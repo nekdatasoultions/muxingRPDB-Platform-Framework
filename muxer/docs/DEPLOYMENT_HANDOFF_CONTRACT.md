@@ -82,6 +82,12 @@ Optional inputs:
 If explicit artifact directories are not supplied, the export helper should
 still generate reviewable intent files under `muxer/` and `headend/`.
 
+Those generated files can include:
+
+- JSON intent summaries
+- command snippets such as `ip rule`, `ip route`, or `ip link`
+- config fragments such as `swanctl` connection snippets
+
 ## Render Helper
 
 Use:

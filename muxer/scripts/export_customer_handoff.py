@@ -11,6 +11,7 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Make the local `src` package importable when this script is run directly.
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
@@ -43,9 +44,13 @@ def _write_placeholder(path: Path, title: str, body: str) -> None:
     path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8")
 
 
-def _write_json(path: Path, payload: dict) -> None:
+def _write_artifact(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if isinstance(payload, dict):
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        text = str(payload)
+        path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -145,7 +150,7 @@ def main() -> int:
 
     if muxer_copied == 0:
         for name, payload in artifact_tree["muxer"].items():
-            _write_json(muxer_dir / name, payload)
+            _write_artifact(muxer_dir / name, payload)
         _write_placeholder(
             muxer_dir / "README.md",
             "Muxer Artifacts",
@@ -153,7 +158,7 @@ def main() -> int:
         )
     if headend_copied == 0:
         for name, payload in artifact_tree["headend"].items():
-            _write_json(headend_dir / name, payload)
+            _write_artifact(headend_dir / name, payload)
         _write_placeholder(
             headend_dir / "README.md",
             "Headend Artifacts",

@@ -1,4 +1,4 @@
-"""Render customer-scoped muxer and head-end intent artifacts."""
+"""Render customer-scoped muxer and head-end artifacts."""
 
 from __future__ import annotations
 
@@ -49,6 +49,20 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
                 "rpdb_priority": item.get("rpdb_priority"),
             },
         },
+        "routing/ip-rule.command.txt": "\n".join(
+            [
+                "# Customer-scoped RPDB rule for the muxer",
+                f"ip rule add pref {transport.get('rpdb_priority')} fwmark {transport.get('mark')} lookup {transport.get('table')}",
+            ]
+        )
+        + "\n",
+        "routing/ip-route-default.command.txt": "\n".join(
+            [
+                "# Per-customer table default route on the muxer",
+                f"ip route replace table {transport.get('table')} default via ${'{BACKEND_UNDERLAY_IP}'} dev ${'{MUXER_UNDERLAY_IFACE}'}",
+            ]
+        )
+        + "\n",
         "tunnel/tunnel-intent.json": {
             "interface": transport.get("interface"),
             "tunnel_type": transport.get("tunnel_type"),
@@ -58,6 +72,17 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "peer_public_ip": peer.get("public_ip"),
             "backend_underlay_ip": backend.get("underlay_ip"),
         },
+        "tunnel/ip-link.command.txt": "\n".join(
+            [
+                "# Customer-scoped muxer tunnel create",
+                f"ip link add {transport.get('interface')} type {transport.get('tunnel_type')} "
+                f"local ${'{MUXER_TRANSPORT_IP}'} remote ${'{BACKEND_UNDERLAY_IP}'} "
+                f"ttl {transport.get('tunnel_ttl')} key {transport.get('tunnel_key')}",
+                f"ip addr replace {((transport.get('overlay') or {}).get('mux_ip') or '')} dev {transport.get('interface')}",
+                f"ip link set {transport.get('interface')} up",
+            ]
+        )
+        + "\n",
         "firewall/firewall-intent.json": {
             "protocols": {
                 "udp500": protocols.get("udp500"),
@@ -68,6 +93,15 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "natd_rewrite": natd_rewrite,
             "post_ipsec_nat_enabled": bool(post_ipsec_nat.get("enabled")),
         },
+        "firewall/iptables-snippet.txt": "\n".join(
+            [
+                "# Customer-scoped muxer firewall snippet",
+                f"# peer: {peer.get('public_ip')}",
+                f"# fwmark: {transport.get('mark')}",
+                f"# udp500={protocols.get('udp500')} udp4500={protocols.get('udp4500')} esp50={protocols.get('esp50')}",
+            ]
+        )
+        + "\n",
     }
 
 
@@ -94,6 +128,41 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             "dpdaction": ipsec.get("dpdaction"),
             "encapsulation_model": "nat-t" if protocols.get("udp4500") else "strict-non-nat",
         },
+        "ipsec/swanctl-connection.conf": "\n".join(
+            [
+                f"connections {{",
+                f"  {customer.get('name')} {{",
+                "    version = 2",
+                f"    local_addrs = ${'{HEADEND_PUBLIC_IP}'}",
+                f"    remote_addrs = {peer.get('public_ip')}",
+                "    local {",
+                "      auth = psk",
+                f"      id = ${'{HEADEND_ID}'}",
+                "    }",
+                "    remote {",
+                "      auth = psk",
+                f"      id = {peer.get('remote_id')}",
+                "    }",
+                "    children {",
+                f"      {customer.get('name')}-child {{",
+                f"        local_ts = {','.join(selectors.get('local_subnets') or [])}",
+                f"        remote_ts = {','.join(selectors.get('remote_subnets') or [])}",
+                f"        start_action = {ipsec.get('auto') or 'start'}",
+                f"      }}",
+                "    }",
+                "  }",
+                "}",
+                "",
+                "secrets {",
+                f"  {customer.get('name')}-psk {{",
+                f"    id-1 = ${'{HEADEND_ID}'}",
+                f"    id-2 = {peer.get('remote_id')}",
+                f"    secret = ${'{PSK_FROM_SECRET_REF}'}",
+                "  }",
+                "}",
+            ]
+        )
+        + "\n",
         "routing/routing-intent.json": {
             "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
@@ -107,6 +176,16 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "interface": transport.get("interface"),
             },
         },
+        "routing/ip-route.commands.txt": "\n".join(
+            [
+                "# Customer-scoped head-end routes",
+                *[
+                    f"ip route replace {subnet} dev ${'{HEADEND_CLEAR_IFACE}'}"
+                    for subnet in (selectors.get("local_subnets") or [])
+                ],
+            ]
+        )
+        + "\n",
         "post-ipsec-nat/post-ipsec-nat-intent.json": {
             "enabled": bool(post_ipsec_nat.get("enabled")),
             "mode": post_ipsec_nat.get("mode"),
@@ -119,6 +198,15 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             "route_via": post_ipsec_nat.get("route_via"),
             "route_dev": post_ipsec_nat.get("route_dev"),
         },
+        "post-ipsec-nat/iptables-snippet.txt": "\n".join(
+            [
+                "# Customer-scoped post-IPsec NAT snippet",
+                f"# enabled={bool(post_ipsec_nat.get('enabled'))} mode={post_ipsec_nat.get('mode')}",
+                f"# translated_subnets={','.join(post_ipsec_nat.get('translated_subnets') or [])}",
+                f"# real_subnets={','.join(post_ipsec_nat.get('real_subnets') or [])}",
+            ]
+        )
+        + "\n",
     }
 
 

@@ -14,6 +14,7 @@ Current scaffold helpers:
 - `render_customer_artifacts.py`
   - renders customer-scoped muxer and head-end artifact trees
   - writes structured files under `muxer/` and `headend/`
+  - includes both JSON intent files and concrete command/config fragments
 - `validate_rendered_artifacts.py`
   - validates a rendered customer artifact tree
   - checks `render-manifest.json` and the expected structured files

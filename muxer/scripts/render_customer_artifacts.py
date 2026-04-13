@@ -8,6 +8,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_DIR) not in sys.path:
@@ -18,9 +19,13 @@ from muxerlib.customer_merge import build_customer_item, build_customer_module, 
 from muxerlib.customer_model import parse_customer_source
 
 
-def _write_json(path: Path, payload: dict) -> None:
+def _write_artifact(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if isinstance(payload, dict):
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        text = str(payload)
+        path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -81,9 +86,9 @@ def main() -> int:
     tree = build_customer_artifact_tree(module, item)
     for root_name, files in tree.items():
         for relative_name, payload in files.items():
-            _write_json(out_dir / root_name / relative_name, payload)
+            _write_artifact(out_dir / root_name / relative_name, payload)
 
-    _write_json(
+    _write_artifact(
         out_dir / "render-manifest.json",
         {
             "customer_name": source.customer.name,
