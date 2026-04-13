@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/nekdatasoultions/muxingRPDB-Platform-Framework/muxer/config/schema/customer-ddb-item.schema.json",
+  "title": "RPDB Customer DynamoDB Item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "customer_name",
+    "customer_id",
+    "customer_class",
+    "peer_ip",
+    "fwmark",
+    "route_table",
+    "rpdb_priority",
+    "backend_role",
+    "source_ref",
+    "schema_version",
+    "updated_at",
+    "customer_json"
+  ],
+  "properties": {
+    "customer_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "customer_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "customer_class": {
+      "type": "string",
+      "enum": [
+        "nat",
+        "strict-non-nat"
+      ]
+    },
+    "peer_ip": {
+      "type": "string",
+      "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}$"
+    },
+    "fwmark": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]+$"
+    },
+    "route_table": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rpdb_priority": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32765
+    },
+    "backend_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend_underlay_ip": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "customer_json": {
+      "type": "string",
+      "minLength": 2
+    }
+  }
+}
