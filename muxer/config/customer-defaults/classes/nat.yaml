@@ -1,7 +1,8 @@
 class: nat
 
 overrides:
-  backend_role: nat-active
+  backend:
+    role: nat-active
 
   protocols:
     udp500: true

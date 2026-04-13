@@ -19,6 +19,12 @@ muxer/config/customer-defaults/
 muxer/config/customer-sources/
   <customer-name>/
     customer.yaml
+  examples/
+    <example-customer-name>/
+      customer.yaml
+  migrated/
+    <live-customer-name>/
+      customer.yaml
 ```
 
 ## Layering Model
@@ -48,3 +54,9 @@ The default workflow should be:
 - sync one customer to DynamoDB
 - render one customer
 - apply one customer
+
+## Migration Pattern
+
+Use `examples/` for framework-only sample customers and `migrated/` for
+production-shaped customers being translated from the current live model into
+the new RPDB structure.

@@ -1,7 +1,8 @@
 class: strict-non-nat
 
 overrides:
-  backend_role: nonnat-active
+  backend:
+    role: nonnat-active
 
   protocols:
     udp500: true

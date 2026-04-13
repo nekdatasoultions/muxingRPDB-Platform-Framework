@@ -1,0 +1,12 @@
+schema_version: 1
+
+environment:
+  name: example-dev
+  bindings:
+    MUXER_TRANSPORT_IP: 172.31.34.89
+    MUXER_UNDERLAY_IFACE: ens34
+    BACKEND_UNDERLAY_IP: 172.31.40.221
+    HEADEND_PUBLIC_IP: 54.204.221.89
+    HEADEND_ID: 54.204.221.89
+    HEADEND_CLEAR_IFACE: ens36
+    PSK_FROM_SECRET_REF: resolved-from-secret-store
