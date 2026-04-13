@@ -19,7 +19,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
 
     return {
-        "customer-summary.json": {
+        "customer/customer-summary.json": {
             "customer_name": customer.get("name"),
             "customer_id": customer.get("id"),
             "customer_class": customer.get("customer_class"),
@@ -29,7 +29,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "local_subnets": selectors.get("local_subnets") or [],
             "remote_subnets": selectors.get("remote_subnets") or [],
         },
-        "rpdb-routing.json": {
+        "routing/rpdb-routing.json": {
             "fwmark": transport.get("mark"),
             "route_table": transport.get("table"),
             "rpdb_priority": transport.get("rpdb_priority"),
@@ -49,7 +49,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
                 "rpdb_priority": item.get("rpdb_priority"),
             },
         },
-        "tunnel-intent.json": {
+        "tunnel/tunnel-intent.json": {
             "interface": transport.get("interface"),
             "tunnel_type": transport.get("tunnel_type"),
             "tunnel_key": transport.get("tunnel_key"),
@@ -58,7 +58,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "peer_public_ip": peer.get("public_ip"),
             "backend_underlay_ip": backend.get("underlay_ip"),
         },
-        "firewall-intent.json": {
+        "firewall/firewall-intent.json": {
             "protocols": {
                 "udp500": protocols.get("udp500"),
                 "udp4500": protocols.get("udp4500"),
@@ -82,7 +82,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
 
     return {
-        "ipsec-intent.json": {
+        "ipsec/ipsec-intent.json": {
             "customer_name": customer.get("name"),
             "peer_public_ip": peer.get("public_ip"),
             "remote_id": peer.get("remote_id"),
@@ -94,7 +94,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             "dpdaction": ipsec.get("dpdaction"),
             "encapsulation_model": "nat-t" if protocols.get("udp4500") else "strict-non-nat",
         },
-        "routing-intent.json": {
+        "routing/routing-intent.json": {
             "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
             "selectors": {
@@ -107,7 +107,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "interface": transport.get("interface"),
             },
         },
-        "post-ipsec-nat-intent.json": {
+        "post-ipsec-nat/post-ipsec-nat-intent.json": {
             "enabled": bool(post_ipsec_nat.get("enabled")),
             "mode": post_ipsec_nat.get("mode"),
             "translated_subnets": post_ipsec_nat.get("translated_subnets") or [],
@@ -119,4 +119,11 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             "route_via": post_ipsec_nat.get("route_via"),
             "route_dev": post_ipsec_nat.get("route_dev"),
         },
+    }
+
+
+def build_customer_artifact_tree(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    return {
+        "muxer": build_muxer_artifacts(module, item),
+        "headend": build_headend_artifacts(module),
     }

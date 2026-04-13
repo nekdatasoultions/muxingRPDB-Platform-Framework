@@ -16,9 +16,21 @@ export/
   customer-ddb-item.json
   customer-source.yaml
   muxer/
-    ...
+    customer/
+      customer-summary.json
+    routing/
+      rpdb-routing.json
+    tunnel/
+      tunnel-intent.json
+    firewall/
+      firewall-intent.json
   headend/
-    ...
+    ipsec/
+      ipsec-intent.json
+    routing/
+      routing-intent.json
+    post-ipsec-nat/
+      post-ipsec-nat-intent.json
 ```
 
 ## Required Files
@@ -69,3 +81,16 @@ Optional inputs:
 
 If explicit artifact directories are not supplied, the export helper should
 still generate reviewable intent files under `muxer/` and `headend/`.
+
+## Render Helper
+
+Use:
+
+```powershell
+python muxer\scripts\render_customer_artifacts.py `
+  muxer\config\customer-sources\examples\example-nat-0001\customer.yaml `
+  --out-dir build\render-example-nat-0001
+```
+
+This helper writes the same structured muxer/head-end artifact tree without the
+top-level handoff files, which is useful for renderer-focused verification.

@@ -72,6 +72,14 @@ python muxer\scripts\build_customer_item.py `
   muxer\config\customer-sources\examples\example-nat-0001\customer.yaml
 ```
 
+Render customer-scoped muxer and head-end artifacts:
+
+```powershell
+python muxer\scripts\render_customer_artifacts.py `
+  muxer\config\customer-sources\examples\example-nat-0001\customer.yaml `
+  --out-dir build\render-example-nat-0001
+```
+
 Export the deployment handoff directory:
 
 ```powershell
@@ -206,14 +214,21 @@ build/example-nat-0001/
   customer-ddb-item.json
   customer-source.yaml
   muxer/
-    customer-summary.json
-    rpdb-routing.json
-    tunnel-intent.json
-    firewall-intent.json
+    customer/
+      customer-summary.json
+    routing/
+      rpdb-routing.json
+    tunnel/
+      tunnel-intent.json
+    firewall/
+      firewall-intent.json
   headend/
-    ipsec-intent.json
-    routing-intent.json
-    post-ipsec-nat-intent.json
+    ipsec/
+      ipsec-intent.json
+    routing/
+      routing-intent.json
+    post-ipsec-nat/
+      post-ipsec-nat-intent.json
 ```
 
 The deployment branch should consume this handoff directory instead of trying

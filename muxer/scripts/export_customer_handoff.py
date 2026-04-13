@@ -18,7 +18,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Project helpers used to build the merged customer module and DynamoDB item.
-from muxerlib.customer_artifacts import build_headend_artifacts, build_muxer_artifacts
+from muxerlib.customer_artifacts import build_customer_artifact_tree
 from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file
 from muxerlib.customer_model import parse_customer_source
 
@@ -141,8 +141,10 @@ def main() -> int:
 
     # When explicit artifact directories are not supplied, generate concrete
     # customer-scoped intent files so the handoff export carries real content.
+    artifact_tree = build_customer_artifact_tree(module, item)
+
     if muxer_copied == 0:
-        for name, payload in build_muxer_artifacts(module, item).items():
+        for name, payload in artifact_tree["muxer"].items():
             _write_json(muxer_dir / name, payload)
         _write_placeholder(
             muxer_dir / "README.md",
@@ -150,7 +152,7 @@ def main() -> int:
             "This directory contains framework-generated muxer intent artifacts for deployment review.",
         )
     if headend_copied == 0:
-        for name, payload in build_headend_artifacts(module).items():
+        for name, payload in artifact_tree["headend"].items():
             _write_json(headend_dir / name, payload)
         _write_placeholder(
             headend_dir / "README.md",
@@ -173,8 +175,8 @@ def main() -> int:
             "headend_dir": str(Path(args.headend_dir).resolve()) if args.headend_dir else None,
         },
         "generated_artifacts": {
-            "muxer": sorted(path.name for path in muxer_dir.iterdir() if path.is_file()),
-            "headend": sorted(path.name for path in headend_dir.iterdir() if path.is_file()),
+            "muxer": sorted(str(path.relative_to(muxer_dir)) for path in muxer_dir.rglob("*") if path.is_file()),
+            "headend": sorted(str(path.relative_to(headend_dir)) for path in headend_dir.rglob("*") if path.is_file()),
         },
     }
     (export_dir / "export-metadata.json").write_text(

@@ -11,6 +11,9 @@ Current scaffold helpers:
 - `build_customer_item.py`
   - builds a merged customer module
   - emits the DynamoDB item shape for one customer
+- `render_customer_artifacts.py`
+  - renders customer-scoped muxer and head-end artifact trees
+  - writes structured files under `muxer/` and `headend/`
 - `export_customer_handoff.py`
   - exports one standard framework-side handoff directory
   - writes `customer-module.json` and `customer-ddb-item.json`
