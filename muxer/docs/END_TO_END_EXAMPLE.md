@@ -78,6 +78,8 @@ Render customer-scoped muxer and head-end artifacts:
 python muxer\scripts\render_customer_artifacts.py `
   muxer\config\customer-sources\examples\example-nat-0001\customer.yaml `
   --out-dir build\render-example-nat-0001
+python muxer\scripts\validate_rendered_artifacts.py `
+  build\render-example-nat-0001
 ```
 
 Export the deployment handoff directory:
