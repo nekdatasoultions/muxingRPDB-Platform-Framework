@@ -1,11 +1,28 @@
 # Repository Scripts
 
-This directory is reserved for repository-level helpers such as:
+This directory holds repository-level helpers for deployment workflow.
 
-- packaging
-- validation
-- migration helpers
-- release helpers
+## Planned Layout
 
-These are intentionally not implemented yet. The first goal is to get the
-structure and architecture right.
+```text
+scripts/
+  backup/
+  deployment/
+  packaging/
+```
+
+## Intent
+
+- `backup/`
+  - backup verification helpers
+  - restore helper scaffolds
+- `deployment/`
+  - customer-scoped apply orchestration
+  - deployment preflight checks
+- `packaging/`
+  - bundle creation helpers
+  - manifest and checksum helpers
+
+The first step is still structure and workflow clarity, but this branch now
+makes the deployment areas explicit so implementation can land into stable
+paths later.

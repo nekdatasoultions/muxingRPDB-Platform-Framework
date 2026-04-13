@@ -80,3 +80,9 @@ Deliverables:
 - live node backup gate
 - migration runbook
 - customer cutover sequence
+
+## Deployment Baseline
+
+Before any RPDB live-node work, a shared backup baseline already exists from
+April 13, 2026. The deployment branch should treat that backup-first workflow as
+mandatory, not optional.
