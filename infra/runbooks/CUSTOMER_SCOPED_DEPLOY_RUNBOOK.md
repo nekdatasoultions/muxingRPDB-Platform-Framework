@@ -21,6 +21,7 @@ Deploy one customer at a time with backup-first gates.
 
 ### 2. Package The Customer
 
+- export the framework-side handoff directory for one customer
 - package the customer-scoped muxer artifacts
 - package the customer-scoped head-end artifacts
 - produce a manifest and checksums
@@ -28,11 +29,11 @@ Deploy one customer at a time with backup-first gates.
 Suggested helper:
 
 ```powershell
+# On rpdb-framework-scaffold, export the customer handoff directory first.
+# Then, on rpdb-deployment-model, assemble the bundle from that export.
 python scripts\packaging\assemble_customer_bundle.py `
-  --customer-name <customer-name> `
   --bundle-dir <bundle-dir> `
-  --customer-module <customer-module-json> `
-  --customer-ddb-item <customer-ddb-item-json>
+  --export-dir build\handoff\<customer-name>
 python scripts\packaging\build_customer_bundle_manifest.py <bundle-dir>
 python scripts\packaging\validate_customer_bundle.py <bundle-dir>
 ```

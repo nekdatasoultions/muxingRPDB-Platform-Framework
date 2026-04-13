@@ -27,18 +27,21 @@ The deployment model needs to cover:
 - Deployment should consume generated artifacts, not ad hoc node edits.
 - One-customer apply should be the default operator flow.
 - Fleet-wide actions should always be explicit.
+- Deployment should consume a framework-side handoff directory instead of
+  rebuilding merged customer artifacts on its own.
 
 ## Planned Flow
 
 1. validate one customer source
 2. build one merged customer module and DynamoDB item
-3. render one customer's muxer and head-end artifacts
-4. package those artifacts into a reviewable bundle
-5. verify backups and deployment preflight checks
-6. apply muxer changes
-7. apply head-end changes
-8. validate customer dataplane/control-plane
-9. rollback using documented steps if validation fails
+3. export one framework-side handoff directory
+4. render one customer's muxer and head-end artifacts
+5. package those artifacts into a reviewable bundle
+6. verify backups and deployment preflight checks
+7. apply muxer changes
+8. apply head-end changes
+9. validate customer dataplane/control-plane
+10. rollback using documented steps if validation fails
 
 ## First Deployment Helpers
 
@@ -51,3 +54,17 @@ The first deployment branch helpers are intentionally preflight-oriented:
 - [validate_customer_bundle.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/packaging/validate_customer_bundle.py)
 - [deployment_readiness_check.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/deployment_readiness_check.py)
 - [create_rollout_notes.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/create_rollout_notes.py)
+
+## Handoff Boundary
+
+The framework branch is responsible for exporting a stable customer-scoped
+handoff directory containing:
+
+- `customer-module.json`
+- `customer-ddb-item.json`
+- `customer-source.yaml`
+- `muxer/`
+- `headend/`
+
+The deployment branch is responsible for packaging, validating, and preflighting
+that handoff output before any live-node apply logic is added.

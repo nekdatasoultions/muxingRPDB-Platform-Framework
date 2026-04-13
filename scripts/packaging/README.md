@@ -21,11 +21,11 @@ Current helper:
 Example:
 
 ```powershell
+# First, on the framework branch, export the customer handoff directory.
+# Then, on this deployment branch, assemble the bundle from that export.
 python scripts\packaging\assemble_customer_bundle.py `
-  --customer-name example-nat-0001 `
   --bundle-dir build\customer-bundle `
-  --customer-module build\customer-module.json `
-  --customer-ddb-item build\customer-item.json
+  --export-dir build\handoff-example-nat-0001
 python scripts\packaging\build_customer_bundle_manifest.py build\customer-bundle
 python scripts\packaging\validate_customer_bundle.py build\customer-bundle
 ```
