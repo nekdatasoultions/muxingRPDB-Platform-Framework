@@ -54,6 +54,13 @@ The first deployment branch helpers are intentionally preflight-oriented:
 - [validate_customer_bundle.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/packaging/validate_customer_bundle.py)
 - [deployment_readiness_check.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/deployment_readiness_check.py)
 - [create_rollout_notes.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/create_rollout_notes.py)
+- [run_double_verification.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/run_double_verification.py)
+
+## Double Verification Gate
+
+Before any live-node apply rehearsal, run the full cross-branch proof path in:
+
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 
 ## Handoff Boundary
 

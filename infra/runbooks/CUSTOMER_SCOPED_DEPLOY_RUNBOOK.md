@@ -10,6 +10,11 @@ Deploy one customer at a time with backup-first gates.
 2. The merged customer module and DynamoDB item build cleanly.
 3. The affected live nodes have verified backups.
 4. The rollout has a written rollback plan.
+5. The full repo-only double-verification gate has passed.
+
+Reference:
+
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 
 ## Planned Workflow
 
@@ -61,6 +66,17 @@ python scripts\deployment\deployment_readiness_check.py `
   --bundle-dir <bundle-dir> `
   --prechange-backup-note notes\<customer-name>\prechange.md `
   --rollback-notes notes\<customer-name>\rollback.md
+```
+
+Or run the whole repo-only gate at once:
+
+```powershell
+python scripts\deployment\run_double_verification.py `
+  --framework-repo <framework-repo> `
+  --deployment-repo <deployment-repo> `
+  --customer-source <framework-customer-source> `
+  --environment-file <framework-environment-file> `
+  --baseline-dir <baseline-dir>
 ```
 
 ### 4. Apply The Customer
