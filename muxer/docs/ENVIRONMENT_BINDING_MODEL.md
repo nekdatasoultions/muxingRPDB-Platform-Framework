@@ -23,6 +23,7 @@ The binding layer uses:
 ## Example Binding File
 
 - [example-environment.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/environment-defaults/example-environment.yaml)
+- [CURRENT_ENVIRONMENT_PROFILES.md](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/docs/CURRENT_ENVIRONMENT_PROFILES.md)
 
 ## Workflow
 
@@ -41,6 +42,11 @@ The binding layer uses:
 - `HEADEND_ID`
 - `HEADEND_CLEAR_IFACE`
 - `PSK_FROM_SECRET_REF`
+
+## Current Profiles
+
+The framework also carries current dev environment examples so the migration
+path can be tested without hard-wiring those values into customer source files.
 
 ## Initial Helpers
 

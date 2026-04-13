@@ -258,17 +258,35 @@
           "minLength": 1
         },
         "vti_routing": {
-          "type": "string",
-          "enum": [
-            "yes",
-            "no"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no",
+                "true",
+                "false"
+              ]
+            }
           ]
         },
         "vti_shared": {
-          "type": "string",
-          "enum": [
-            "yes",
-            "no"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no",
+                "true",
+                "false"
+              ]
+            }
           ]
         },
         "bidirectional_secret": {

@@ -1,0 +1,69 @@
+schema_version: 1
+
+customer:
+  id: 3
+  name: legacy-cust0003
+  customer_class: strict-non-nat
+
+  peer:
+    public_ip: 166.213.153.41
+    remote_id: 166.213.153.41
+    psk_secret_ref: /muxingrpdb/dev/customers/legacy-cust0003/psk
+
+  transport:
+    mark: 0x2003
+    table: 2003
+    tunnel_key: 1003
+    interface: gre-cust-0003
+    overlay:
+      mux_ip: 169.254.0.9/30
+      router_ip: 169.254.0.10/30
+
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+      - 172.30.0.90/32
+    remote_subnets:
+      - 10.129.4.12/32
+
+  backend:
+    role: nonnat-active
+    underlay_ip: 172.31.40.220
+
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+    force_rewrite_4500_to_500: false
+
+  natd_rewrite:
+    enabled: true
+
+  ipsec:
+    auto: start
+    local_id: 54.204.221.89
+    remote_id: 166.213.153.41
+    ike: aes256-sha2_256;modp2048,aes256-sha2_256;modp4096!
+    esp: aes256-sha256!
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    mark: 0x2003/0xffffffff
+    vti_interface: vti-lcg0003
+    vti_routing: no
+    vti_shared: yes
+    bidirectional_secret: true
+
+  post_ipsec_nat:
+    enabled: false
+    mode: netmap
+    translated_subnets:
+      - 172.30.2.32/27
+    real_subnets:
+      - 10.129.4.12/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    output_mark: 0x2003/0xffffffff
+    tcp_mss_clamp: 1360

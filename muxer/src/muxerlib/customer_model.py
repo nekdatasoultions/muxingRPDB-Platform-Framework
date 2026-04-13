@@ -147,6 +147,21 @@ def _as_hex_mark(value: Any, path: str) -> str:
     return str(raw)
 
 
+# Normalize legacy-style boolean or YAML yes/no inputs into the strongSwan
+# string shape we want in the merged customer model.
+def _as_yes_no(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    normalized = str(value).strip().lower()
+    if normalized in {"yes", "true"}:
+        return "yes"
+    if normalized in {"no", "false"}:
+        return "no"
+    raise ValueError(f"expected yes/no boolean-like value, got {value!r}")
+
+
 # Parse a raw customer source document into the typed RPDB customer model.
 # This is the main normalization step before defaults/class merge happens.
 def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
@@ -240,8 +255,8 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     fragmentation=ipsec.get("fragmentation"),
                     mark=str(ipsec.get("mark") or ""),
                     vti_interface=str(ipsec.get("vti_interface") or ""),
-                    vti_routing=str(ipsec.get("vti_routing") or ""),
-                    vti_shared=str(ipsec.get("vti_shared") or ""),
+                    vti_routing=_as_yes_no(ipsec.get("vti_routing")),
+                    vti_shared=_as_yes_no(ipsec.get("vti_shared")),
                     bidirectional_secret=ipsec.get("bidirectional_secret"),
                 )
                 if isinstance(ipsec, dict) and ipsec
