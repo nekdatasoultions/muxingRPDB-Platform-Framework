@@ -7,6 +7,7 @@ This example shows the full RPDB customer flow for one customer:
 1. author the source file
 2. merge defaults and class overrides into the resolved customer module
 3. build the DynamoDB item that stores the canonical runtime record
+4. export the framework-side handoff directory used by deployment tooling
 
 The example below uses:
 
@@ -69,6 +70,14 @@ Build the merged module and DynamoDB item:
 ```powershell
 python muxer\scripts\build_customer_item.py `
   muxer\config\customer-sources\examples\example-nat-0001\customer.yaml
+```
+
+Export the deployment handoff directory:
+
+```powershell
+python muxer\scripts\export_customer_handoff.py `
+  muxer\config\customer-sources\examples\example-nat-0001\customer.yaml `
+  --export-dir build\example-nat-0001
 ```
 
 ## 3. Merged Customer Module
@@ -186,7 +195,24 @@ Important details:
 - secret values are still not stored in the source file; only the secret
   reference path is carried through
 
-## 5. Why This Matters
+## 5. Handoff Export
+
+The framework-side handoff export should look like:
+
+```text
+build/example-nat-0001/
+  export-metadata.json
+  customer-module.json
+  customer-ddb-item.json
+  customer-source.yaml
+  muxer/
+  headend/
+```
+
+The deployment branch should consume this handoff directory instead of trying
+to rebuild the merged module from the source YAML itself.
+
+## 6. Why This Matters
 
 This example shows the target operator flow:
 
@@ -194,7 +220,8 @@ This example shows the target operator flow:
 2. validate one customer
 3. build one merged module
 4. sync one DynamoDB item
-5. render and apply one customer
+5. export one customer handoff directory
+6. package and apply one customer
 
 That keeps the control plane customer-scoped by default instead of rebuilding
 the whole fleet for ordinary work.
