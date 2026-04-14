@@ -135,6 +135,12 @@ def build_customer_module(
         raise ValueError("resolved backend.role is required")
     if not backend.get("cluster"):
         backend["cluster"] = "nat" if source.customer.customer_class == "nat" else "non-nat"
+    # Keep physical backend IPs out of the canonical merged module whenever the
+    # customer is expressed in logical placement terms. The environment/apply
+    # layer or runtime backend-role map is responsible for resolving the active
+    # underlay IP later.
+    if backend.get("role") or backend.get("cluster") or backend.get("assignment"):
+        backend.pop("underlay_ip", None)
 
     # Ensure the identity fields are always present in the resolved customer
     # section, even if downstream code later depends only on the merged module.

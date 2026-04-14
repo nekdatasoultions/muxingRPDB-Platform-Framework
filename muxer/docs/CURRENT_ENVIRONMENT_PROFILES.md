@@ -10,9 +10,11 @@ current live estate as of April 13, 2026.
 
 ## Files
 
-- [current-dev-nat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/environment-defaults/current-dev-nat-active-a.yaml)
-- [current-dev-nonnat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/environment-defaults/current-dev-nonnat-active-a.yaml)
-- [example-environment.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/environment-defaults/example-environment.yaml)
+- [current-dev-nat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/environment-defaults/current-dev-nat-active-a.yaml)
+- [current-dev-nonnat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/environment-defaults/current-dev-nonnat-active-a.yaml)
+- [rpdb-empty-nat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/environment-defaults/rpdb-empty-nat-active-a.yaml)
+- [rpdb-empty-nonnat-active-a.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/environment-defaults/rpdb-empty-nonnat-active-a.yaml)
+- [example-environment.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/environment-defaults/example-environment.yaml)
 
 ## Current Dev Bindings
 
@@ -33,6 +35,27 @@ Non-NAT active A:
 
 - backend/head-end primary IP: `172.31.40.220`
 - head-end core IP: `172.31.59.220`
+- clear-side interface: `ens36`
+
+## RPDB Empty Platform Bindings
+
+Shared values:
+
+- muxer public VPN IP: `13.221.247.80`
+- muxer public-side private IP: `172.31.141.2`
+- muxer transport IP: `172.31.127.237`
+- muxer transport interface: `ens35`
+
+RPDB-empty NAT active A:
+
+- backend/head-end primary IP: `172.31.40.222`
+- head-end core IP: `172.31.55.122`
+- clear-side interface: `ens36`
+
+RPDB-empty non-NAT active A:
+
+- backend/head-end primary IP: `172.31.40.223`
+- head-end core IP: `172.31.59.221`
 - clear-side interface: `ens36`
 
 ## Notes

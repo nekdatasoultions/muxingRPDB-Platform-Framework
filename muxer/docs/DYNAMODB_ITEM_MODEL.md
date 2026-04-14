@@ -42,6 +42,16 @@ Each item should contain:
 - `updated_at`
 - `customer_json`
 
+When a customer is expressed in logical placement terms such as:
+
+- `backend_role`
+- `backend_cluster`
+- `backend_assignment`
+
+then `backend_underlay_ip` may be `null` in the canonical item. The active
+physical underlay is resolved later by the environment/apply layer or by the
+runtime backend-role map on the muxer.
+
 ## Why Store `customer_json`
 
 The `customer_json` field should hold the canonical merged customer module so
