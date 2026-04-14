@@ -58,6 +58,36 @@ The wrapper script enforces this by refusing `--execute` unless you also pass
 Use:
 
 - [deploy_empty_platform.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/deploy_empty_platform.py)
+- [prepare_empty_platform_params.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/prepare_empty_platform_params.py)
+
+## Recommended First True Empty Platform Preparation
+
+Before the first real empty-platform deploy, prepare a safe parameter set from
+the imported production shape:
+
+```powershell
+python scripts\platform\prepare_empty_platform_params.py
+```
+
+That writes a generated parameter set under:
+
+- `build\empty-platform\current-prod-shape-rpdb-empty`
+
+Safety changes in that generated set:
+
+- clears all imported `EipAllocationId` values
+- suffixes the muxer/head-end cluster names with `-rpdb-empty`
+- suffixes the customer SoT table name with `-rpdb-empty`
+
+Then plan the deploy against the generated files instead of the imported live
+shaped parameter files:
+
+```powershell
+python scripts\platform\deploy_empty_platform.py `
+  --muxer-params build\empty-platform\current-prod-shape-rpdb-empty\parameters.single-muxer.us-east-1.json `
+  --nat-headend-params build\empty-platform\current-prod-shape-rpdb-empty\parameters.vpn-headend.nat.graviton-efs.us-east-1.json `
+  --nonnat-headend-params build\empty-platform\current-prod-shape-rpdb-empty\parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json
+```
 
 ### Show the plan only
 
@@ -76,6 +106,9 @@ python scripts\platform\deploy_empty_platform.py --json
 ```powershell
 python scripts\platform\deploy_empty_platform.py --execute --allow-production-eip
 ```
+
+For the first true empty-platform deployment, prefer using the prepared safe
+parameter set above so `--allow-production-eip` is not needed.
 
 ## What The Wrapper Chains
 
