@@ -28,12 +28,53 @@ from .customers import (
 )
 from .modes import apply_passthrough, apply_termination
 from .strongswan import render_strongswan
-from .variables import load_modules
+from .variables import load_module, load_modules
+
+
+def print_module_summary(
+    module: Dict[str, Any],
+    *,
+    base_mark: int,
+    base_table: int,
+    overlay_pool: ipaddress.IPv4Network,
+) -> None:
+    cid = int(module["id"])
+    name = str(module["name"])
+    peer = str(module["peer_ip"])
+    mark = hex(base_mark + cid) if "mark" not in module else hex(norm_int(module["mark"]))
+    table = base_table + cid if "table" not in module else int(module["table"])
+    tunnel_mode, tunnel_ifname, _tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+    if "overlay" in module and module["overlay"]:
+        mux_ip = str(module["overlay"]["mux_ip"])
+        rtr_ip = str(module["overlay"]["router_ip"])
+    else:
+        mux_ip, rtr_ip = calc_overlay(overlay_pool, cid)
+    udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
+    natd_rewrite_enabled, natd_inner_ip = customer_natd_flags(module)
+    ipsec_cfg = module.get("ipsec", {}) or {}
+    local_subnets = subnet_list(ipsec_cfg.get("local_subnets", []))
+    remote_subnets = subnet_list(ipsec_cfg.get("remote_subnets", []))
+    natd_label = (
+        f"natd_rewrite={natd_rewrite_enabled}({natd_inner_ip}) "
+        if natd_inner_ip
+        else f"natd_rewrite={natd_rewrite_enabled} "
+    )
+    print(
+        f"{name}: peer={peer} mark={mark} table={table} "
+        f"tunnel({tunnel_mode},if={tunnel_ifname},key={tunnel_key if tunnel_key is not None else '-'}) "
+        f"overlay_mux={mux_ip} overlay_rtr={rtr_ip} "
+        f"proto(500={udp500},4500={udp4500},esp={esp50}) "
+        f"force4500to500={force_4500_to_500} "
+        f"{natd_label}"
+        f"local={','.join(local_subnets) if local_subnets else '-'} "
+        f"remote={','.join(remote_subnets) if remote_subnets else '-'}"
+    )
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["apply", "flush", "show", "render-ipsec"])
+    ap.add_argument("cmd", choices=["apply", "flush", "show", "show-customer", "render-ipsec"])
+    ap.add_argument("customer", nargs="?")
     args = ap.parse_args()
 
     if not CFG_GLOBAL.exists():
@@ -74,41 +115,10 @@ def main() -> None:
     natd_dpi_enabled, natd_dpi_queue_in, natd_dpi_queue_out, natd_dpi_queue_bypass = natd_dpi_settings(global_cfg)
     mode = str(global_cfg.get("mode", "pass_through")).lower()
 
-    modules: List[Dict[str, Any]] = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
-
     if args.cmd == "show":
+        modules: List[Dict[str, Any]] = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
         for module in modules:
-            cid = int(module["id"])
-            name = str(module["name"])
-            peer = str(module["peer_ip"])
-            mark = hex(base_mark + cid) if "mark" not in module else hex(norm_int(module["mark"]))
-            table = base_table + cid if "table" not in module else int(module["table"])
-            tunnel_mode, tunnel_ifname, _tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
-            if "overlay" in module and module["overlay"]:
-                mux_ip = str(module["overlay"]["mux_ip"])
-                rtr_ip = str(module["overlay"]["router_ip"])
-            else:
-                mux_ip, rtr_ip = calc_overlay(overlay_pool, cid)
-            udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
-            natd_rewrite_enabled, natd_inner_ip = customer_natd_flags(module)
-            ipsec_cfg = module.get("ipsec", {}) or {}
-            local_subnets = subnet_list(ipsec_cfg.get("local_subnets", []))
-            remote_subnets = subnet_list(ipsec_cfg.get("remote_subnets", []))
-            natd_label = (
-                f"natd_rewrite={natd_rewrite_enabled}({natd_inner_ip}) "
-                if natd_inner_ip
-                else f"natd_rewrite={natd_rewrite_enabled} "
-            )
-            print(
-                f"{name}: peer={peer} mark={mark} table={table} "
-                f"tunnel({tunnel_mode},if={tunnel_ifname},key={tunnel_key if tunnel_key is not None else '-'}) "
-                f"overlay_mux={mux_ip} overlay_rtr={rtr_ip} "
-                f"proto(500={udp500},4500={udp4500},esp={esp50}) "
-                f"force4500to500={force_4500_to_500} "
-                f"{natd_label}"
-                f"local={','.join(local_subnets) if local_subnets else '-'} "
-                f"remote={','.join(remote_subnets) if remote_subnets else '-'}"
-            )
+            print_module_summary(module, base_mark=base_mark, base_table=base_table, overlay_pool=overlay_pool)
         print(f"mode={mode}")
         print(
             f"nfqueue_ike_bridge(enabled={nfqueue_enabled},queue_in={nfqueue_queue_in},"
@@ -120,7 +130,22 @@ def main() -> None:
         )
         return
 
+    if args.cmd == "show-customer":
+        if not str(args.customer or "").strip():
+            raise SystemExit("show-customer requires a customer selector")
+        module = load_module(
+            str(args.customer),
+            overlay_pool,
+            cfg_dir=CFG_DIR,
+            global_cfg=global_cfg,
+            source_backend="auto",
+        )
+        print_module_summary(module, base_mark=base_mark, base_table=base_table, overlay_pool=overlay_pool)
+        print(f"mode={mode}")
+        return
+
     if args.cmd == "render-ipsec":
+        modules = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
         conf_path, secrets_path, conn_count = render_strongswan(global_cfg, modules)
         print(f"Rendered {conn_count} connection(s) to {conf_path} and {secrets_path}")
         return
@@ -146,6 +171,7 @@ def main() -> None:
     ensure_sysctl()
 
     if mode in {"terminate", "termination", "ipsec_termination", "mux_terminate"}:
+        modules = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
         apply_termination(
             global_cfg,
             modules,
@@ -165,6 +191,7 @@ def main() -> None:
             default_drop,
         )
     else:
+        modules = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
         apply_passthrough(
             modules,
             pub_if,

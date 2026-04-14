@@ -31,9 +31,9 @@ from muxerlib.dataplane import (
 from muxerlib.dynamodb_sot import (
     customer_sot_settings,
     normalize_customer_sot_backend,
-    put_customer_modules,
+    put_customer_module,
 )
-from muxerlib.variables import load_modules, strict_non_nat_customer
+from muxerlib.variables import load_module, load_modules, select_customer_module, strict_non_nat_customer
 
 EXPLAIN_TEXT = """\
 muxer_customer_doctor.py
@@ -163,11 +163,23 @@ def load_muxer_state(config_root: Path, source_backend: str) -> Tuple[Dict[str, 
     return muxer_doc, modules
 
 
-def normalize_source_backend(source_backend: str, muxer_doc: Dict[str, Any]) -> str:
-    chosen = str(source_backend or "auto").strip().lower()
-    if chosen == "auto":
-        chosen, _table_name, _region = customer_sot_settings(muxer_doc)
-    return normalize_customer_sot_backend(chosen)
+def load_muxer_customer(config_root: Path, source_backend: str, selector: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    muxer_cfg = config_root / "config" / "muxer.yaml"
+    if not muxer_cfg.exists():
+        raise SystemExit(f"Missing muxer config at {muxer_cfg}")
+
+    muxer_doc = load_yaml(muxer_cfg)
+    overlay_pool = ipaddress.ip_network(str(muxer_doc["overlay_pool"]), strict=False)
+    customer = load_module(
+        selector,
+        overlay_pool,
+        cfg_dir=config_root / "config" / "tunnels.d",
+        customer_modules_dir=config_root / "config" / "customer-modules",
+        customers_vars_path=config_root / "config" / "customers.variables.yaml",
+        global_cfg=muxer_doc,
+        source_backend=source_backend,
+    )
+    return muxer_doc, customer
 
 
 def local_customer_module_path(config_root: Path, customer_name: str) -> Path:
@@ -187,31 +199,7 @@ def local_customer_module_path(config_root: Path, customer_name: str) -> Path:
 
 
 def resolve_customer(modules: List[Dict[str, Any]], selector: str) -> Dict[str, Any]:
-    raw = str(selector).strip()
-    if not raw:
-        raise SystemExit("Customer selector cannot be empty")
-
-    by_name = [module for module in modules if str(module.get("name", "")).strip() == raw]
-    if len(by_name) == 1:
-        return by_name[0]
-
-    if raw.isdigit():
-        by_id = [module for module in modules if int(module.get("id", -1)) == int(raw)]
-        if len(by_id) == 1:
-            return by_id[0]
-
-    raw_ip = raw.split("/")[0]
-    by_peer = [module for module in modules if str(module.get("peer_ip", "")).split("/")[0] == raw_ip]
-    if len(by_peer) == 1:
-        return by_peer[0]
-
-    lowered = raw.lower()
-    partial = [module for module in modules if lowered in str(module.get("name", "")).lower()]
-    if len(partial) == 1:
-        return partial[0]
-
-    names = ", ".join(str(module.get("name")) for module in modules)
-    raise SystemExit(f"Unable to uniquely resolve customer '{selector}'. Known customers: {names}")
+    return select_customer_module(modules, selector)
 
 
 def iptables_check(cli: str) -> Tuple[bool, str]:
@@ -843,8 +831,8 @@ def do_update_sot(
     }
 
     if not dry_run:
-        written = put_customer_modules(
-            [updated_module],
+        written = put_customer_module(
+            updated_module,
             table_name=table_name,
             region=region or None,
             source_ref=source_ref,
@@ -961,7 +949,7 @@ def main() -> None:
         print_list(modules, muxer_doc)
         return
 
-    customer = resolve_customer(modules, args.customer)
+    muxer_doc, customer = load_muxer_customer(config_root, args.source, args.customer)
     report = build_report(customer, muxer_doc, config_root)
 
     if args.cmd == "repair":
@@ -972,8 +960,7 @@ def main() -> None:
         customer_name = str(customer["name"])
         update_info = do_update_sot(customer, report, muxer_doc, args.source, dry_run=args.dry_run)
         if update_info.get("eligible") and not args.dry_run:
-            muxer_doc, modules = load_muxer_state(config_root, args.source)
-            customer = resolve_customer(modules, customer_name)
+            muxer_doc, customer = load_muxer_customer(config_root, args.source, customer_name)
             report = build_report(customer, muxer_doc, config_root)
         report["update_sot"] = update_info
 

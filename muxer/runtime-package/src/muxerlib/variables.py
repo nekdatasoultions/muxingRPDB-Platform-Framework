@@ -12,6 +12,7 @@ from .core import BASE, CFG_DIR, load_yaml
 from .customers import calc_overlay, customer_protocol_flags
 from .dynamodb_sot import (
     customer_sot_settings,
+    load_customer_module_from_dynamodb,
     load_customer_modules_from_dynamodb,
     normalize_customer_module,
     normalize_customer_sot_backend,
@@ -70,6 +71,34 @@ def load_customer_modules_from_directory(customer_modules_dir: Path) -> List[Dic
         modules.append(module)
     modules.sort(key=lambda item: int(item["id"]))
     return modules
+
+
+def select_customer_module(modules: List[Dict[str, Any]], selector: str) -> Dict[str, Any]:
+    raw = str(selector).strip()
+    if not raw:
+        raise SystemExit("Customer selector cannot be empty")
+
+    by_name = [module for module in modules if str(module.get("name", "")).strip() == raw]
+    if len(by_name) == 1:
+        return by_name[0]
+
+    if raw.isdigit():
+        by_id = [module for module in modules if int(module.get("id", -1)) == int(raw)]
+        if len(by_id) == 1:
+            return by_id[0]
+
+    raw_ip = raw.split("/")[0]
+    by_peer = [module for module in modules if str(module.get("peer_ip", "")).split("/")[0] == raw_ip]
+    if len(by_peer) == 1:
+        return by_peer[0]
+
+    lowered = raw.lower()
+    partial = [module for module in modules if lowered in str(module.get("name", "")).lower()]
+    if len(partial) == 1:
+        return partial[0]
+
+    names = ", ".join(str(module.get("name")) for module in modules)
+    raise SystemExit(f"Unable to uniquely resolve customer '{selector}'. Known customers: {names}")
 
 
 def _default_tunnel_ifname(cust_id: int, tunnel_type: str) -> str:
@@ -402,3 +431,55 @@ def load_modules(
         "Unsupported customer source backend "
         f"'{chosen_backend}'. Use one of: dynamodb, customer_modules, legacy_variables, legacy_tunnels."
     )
+
+
+def load_module(
+    selector: str,
+    overlay_pool: ipaddress.IPv4Network | None,
+    cfg_dir: Path = CFG_DIR,
+    customer_modules_dir: Path = CUSTOMER_MODULES_DIR,
+    customers_vars_path: Path = LEGACY_CUSTOMERS_VARS,
+    global_cfg: Dict[str, Any] | None = None,
+    source_backend: str = "auto",
+    allow_scan_fallback: bool = True,
+) -> Dict[str, Any]:
+    raw_backend = str(source_backend or "auto").strip().lower()
+    if raw_backend == "auto" and global_cfg:
+        chosen_backend, table_name, region = customer_sot_settings(global_cfg)
+    elif raw_backend == "auto":
+        table_name = ""
+        region = ""
+        if _iter_customer_module_paths(customer_modules_dir):
+            chosen_backend = "customer_modules"
+        elif sorted(cfg_dir.glob("*.y*ml")):
+            chosen_backend = "legacy_tunnels"
+        elif customers_vars_path.exists():
+            chosen_backend = "legacy_variables"
+        else:
+            chosen_backend = "customer_modules"
+    elif global_cfg:
+        _backend, table_name, region = customer_sot_settings(global_cfg)
+        chosen_backend = normalize_customer_sot_backend(raw_backend, default="customer_modules")
+    else:
+        chosen_backend = normalize_customer_sot_backend(raw_backend, default="customer_modules")
+        table_name = ""
+        region = ""
+
+    if chosen_backend == "dynamodb":
+        module = load_customer_module_from_dynamodb(table_name=table_name, customer_name=selector, region=region or None)
+        if module is not None:
+            if global_cfg:
+                return resolve_backend_identity(module, global_cfg)
+            return module
+        if not allow_scan_fallback:
+            raise SystemExit(f"Customer '{selector}' was not found in DynamoDB table {table_name}")
+
+    modules = load_modules(
+        overlay_pool,
+        cfg_dir=cfg_dir,
+        customer_modules_dir=customer_modules_dir,
+        customers_vars_path=customers_vars_path,
+        global_cfg=global_cfg,
+        source_backend=chosen_backend,
+    )
+    return select_customer_module(modules, selector)

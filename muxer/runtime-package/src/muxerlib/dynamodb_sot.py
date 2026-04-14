@@ -41,6 +41,12 @@ def _aws_base_cmd(region: str | None = None) -> List[str]:
     return cmd
 
 
+def _write_temp_json(payload: Dict[str, Any]) -> Path:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as tf:
+        json.dump(payload, tf)
+        return Path(tf.name)
+
+
 def customer_sot_settings(global_cfg: Dict[str, Any]) -> Tuple[str, str, str]:
     sot = global_cfg.get("customer_sot", {}) or {}
     backend = normalize_customer_sot_backend(sot.get("backend"))
@@ -313,33 +319,86 @@ def put_customer_modules(
 ) -> int:
     written = 0
     for module in modules:
-        item = build_ddb_item(module, source_ref)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as tf:
-            json.dump(item, tf)
-            temp_path = Path(tf.name)
-        try:
-            subprocess.run(
-                _aws_base_cmd(region)
-                + ["put-item", "--table-name", table_name, "--item", f"file://{temp_path}"],
-                text=True,
-                capture_output=True,
-                check=True,
-            )
-            written += 1
-        finally:
-            temp_path.unlink(missing_ok=True)
+        written += put_customer_module(
+            module,
+            table_name=table_name,
+            region=region,
+            source_ref=source_ref,
+        )
     return written
 
 
-def _scan_items(table_name: str, region: str | None = None) -> List[Dict[str, Any]]:
+def put_customer_module(
+    module: Dict[str, Any],
+    table_name: str,
+    region: str | None = None,
+    source_ref: str = "muxer/runtime-package/runtime-update",
+) -> int:
+    item = build_ddb_item(module, source_ref)
+    temp_path = _write_temp_json(item)
+    try:
+        subprocess.run(
+            _aws_base_cmd(region)
+            + ["put-item", "--table-name", table_name, "--item", f"file://{temp_path}"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return 1
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def get_customer_item(table_name: str, customer_name: str, region: str | None = None) -> Dict[str, Any] | None:
+    if not table_name:
+        raise SystemExit("customer_sot.dynamodb.table_name is required for DynamoDB-backed customer loading")
+    if not str(customer_name or "").strip():
+        raise SystemExit("customer_name is required for DynamoDB-backed customer lookup")
+
+    key_doc = {"customer_name": {"S": str(customer_name).strip()}}
+    temp_path = _write_temp_json(key_doc)
+    try:
+        raw = subprocess.check_output(
+            _aws_base_cmd(region)
+            + ["get-item", "--table-name", table_name, "--key", f"file://{temp_path}"],
+            text=True,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    item = json.loads(raw).get("Item")
+    if not isinstance(item, dict):
+        return None
+    return item
+
+
+def delete_customer_module_from_dynamodb(table_name: str, customer_name: str, region: str | None = None) -> bool:
+    existing = get_customer_item(table_name, customer_name, region)
+    if not existing:
+        return False
+
+    key_doc = {"customer_name": {"S": str(customer_name).strip()}}
+    temp_path = _write_temp_json(key_doc)
+    try:
+        subprocess.run(
+            _aws_base_cmd(region)
+            + ["delete-item", "--table-name", table_name, "--key", f"file://{temp_path}"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return True
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def scan_customer_items(table_name: str, region: str | None = None) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     last_key: Dict[str, Any] | None = None
     while True:
         cmd = _aws_base_cmd(region) + ["scan", "--table-name", table_name]
         if last_key:
-            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as tf:
-                json.dump(last_key, tf)
-                temp_path = Path(tf.name)
+            temp_path = _write_temp_json(last_key)
             cmd.extend(["--exclusive-start-key", f"file://{temp_path}"])
         else:
             temp_path = None
@@ -356,15 +415,33 @@ def _scan_items(table_name: str, region: str | None = None) -> List[Dict[str, An
     return items
 
 
+def _item_to_customer_module(item: Dict[str, Any]) -> Dict[str, Any] | None:
+    payload = ((item.get("customer_json") or {}).get("S") or "").strip()
+    if not payload:
+        return None
+    return normalize_customer_module(json.loads(payload))
+
+
+def load_customer_module_from_dynamodb(
+    table_name: str,
+    customer_name: str,
+    region: str | None = None,
+) -> Dict[str, Any] | None:
+    item = get_customer_item(table_name, customer_name, region)
+    if not item:
+        return None
+    return _item_to_customer_module(item)
+
+
 def load_customer_modules_from_dynamodb(table_name: str, region: str | None = None) -> List[Dict[str, Any]]:
     if not table_name:
         raise SystemExit("customer_sot.dynamodb.table_name is required for DynamoDB-backed customer loading")
 
     modules: List[Dict[str, Any]] = []
-    for item in _scan_items(table_name, region):
-        payload = ((item.get("customer_json") or {}).get("S") or "").strip()
-        if not payload:
+    for item in scan_customer_items(table_name, region):
+        module = _item_to_customer_module(item)
+        if module is None:
             continue
-        modules.append(normalize_customer_module(json.loads(payload)))
+        modules.append(module)
     modules.sort(key=lambda item: int(item["id"]))
     return modules

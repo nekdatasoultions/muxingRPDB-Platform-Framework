@@ -54,3 +54,23 @@ The exact command names can still change, but the workflow should stay:
 4. sync one item to DynamoDB
 5. render one customer
 6. apply one customer
+
+## Current Runtime Status
+
+The target model above is still ahead of the runtime implementation.
+
+Today the runtime still has two important fleet-style behaviors:
+
+- DynamoDB-backed loading still uses table scan for normal module loading
+- apply still flushes and rebuilds the active chains for the loaded module set
+
+The first safe customer-scoped runtime read path now exists:
+
+- `show-customer`
+
+That gives us a real one-customer inspection path without pretending write/apply
+is already delta-safe.
+
+The completion checklist for closing that gap lives in:
+
+- [RUNTIME_COMPLETION_PLAN.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_COMPLETION_PLAN.md)
