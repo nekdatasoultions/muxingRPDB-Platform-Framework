@@ -26,7 +26,12 @@ from .customers import (
     customer_tunnel_settings,
     subnet_list,
 )
-from .modes import apply_passthrough, apply_termination
+from .modes import (
+    apply_customer_passthrough,
+    apply_passthrough,
+    apply_termination,
+    remove_customer_passthrough,
+)
 from .strongswan import render_strongswan
 from .variables import load_module, load_modules
 
@@ -73,7 +78,7 @@ def print_module_summary(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["apply", "flush", "show", "show-customer", "render-ipsec"])
+    ap.add_argument("cmd", choices=["apply", "flush", "show", "show-customer", "apply-customer", "remove-customer", "render-ipsec"])
     ap.add_argument("customer", nargs="?")
     args = ap.parse_args()
 
@@ -142,6 +147,64 @@ def main() -> None:
         )
         print_module_summary(module, base_mark=base_mark, base_table=base_table, overlay_pool=overlay_pool)
         print(f"mode={mode}")
+        return
+
+    if args.cmd in {"apply-customer", "remove-customer"}:
+        if not str(args.customer or "").strip():
+            raise SystemExit(f"{args.cmd} requires a customer selector")
+        module = load_module(
+            str(args.customer),
+            overlay_pool,
+            cfg_dir=CFG_DIR,
+            global_cfg=global_cfg,
+            source_backend="auto",
+        )
+        ensure_sysctl()
+        if mode in {"terminate", "termination", "ipsec_termination", "mux_terminate"}:
+            raise SystemExit(f"{args.cmd} is not implemented yet for muxer termination mode")
+        if args.cmd == "apply-customer":
+            apply_customer_passthrough(
+                module,
+                pub_if=pub_if,
+                inside_if=inside_if,
+                public_ip=public_ip,
+                public_priv_ip=public_priv_ip,
+                inside_ip=inside_ip,
+                backend_ul=backend_ul,
+                transport_local_mode=transport_local_mode,
+                overlay_pool=overlay_pool,
+                base_table=base_table,
+                base_mark=base_mark,
+                mangle_chain=mangle_chain,
+                filter_chain=filter_chain,
+                nat_rewrite=nat_rewrite,
+                nat_pre_chain=nat_pre_chain,
+                nat_post_chain=nat_post_chain,
+                mangle_post_chain=mangle_post_chain,
+                nfqueue_enabled=nfqueue_enabled,
+                nfqueue_queue_in=nfqueue_queue_in,
+                nfqueue_queue_out=nfqueue_queue_out,
+                nfqueue_queue_bypass=nfqueue_queue_bypass,
+                natd_dpi_enabled=natd_dpi_enabled,
+                natd_dpi_queue_in=natd_dpi_queue_in,
+                natd_dpi_queue_out=natd_dpi_queue_out,
+                natd_dpi_queue_bypass=natd_dpi_queue_bypass,
+                default_drop=default_drop,
+            )
+        else:
+            remove_customer_passthrough(
+                module,
+                inside_if=inside_if,
+                inside_ip=inside_ip,
+                transport_local_mode=transport_local_mode,
+                base_table=base_table,
+                base_mark=base_mark,
+                mangle_chain=mangle_chain,
+                mangle_post_chain=mangle_post_chain,
+                filter_chain=filter_chain,
+                nat_pre_chain=nat_pre_chain,
+                nat_post_chain=nat_post_chain,
+            )
         return
 
     if args.cmd == "render-ipsec":

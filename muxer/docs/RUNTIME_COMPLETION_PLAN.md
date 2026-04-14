@@ -121,6 +121,13 @@ Add runtime commands for:
 
 The default operator path should become one customer at a time.
 
+Current status:
+
+- `show-customer` is implemented
+- `apply-customer` is implemented for pass-through mode
+- `remove-customer` is implemented for pass-through mode
+- termination mode still needs its customer-scoped command path
+
 ### Phase 3. Delta dataplane apply
 
 Refactor the runtime so normal customer changes do not require:
@@ -130,6 +137,13 @@ Refactor the runtime so normal customer changes do not require:
 - full tunnel/rule rebuild
 
 This is the minimum migration gate before real customer swing work.
+
+Current status:
+
+- pass-through customer apply/remove now clears and reapplies only the selected
+  customer's runtime state
+- fleet `apply` still exists and still rebuilds the full loaded module set
+- termination mode still needs equivalent customer-scoped delta behavior
 
 ### Phase 4. Scalable dataplane backend
 

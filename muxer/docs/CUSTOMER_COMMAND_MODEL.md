@@ -68,6 +68,17 @@ The first safe customer-scoped runtime read path now exists:
 
 - `show-customer`
 
+The first safe customer-scoped pass-through write paths now also exist:
+
+- `apply-customer`
+- `remove-customer`
+
+Current boundary:
+
+- these customer-scoped write commands are implemented for pass-through mode
+- termination mode still needs its own customer-scoped path
+- `apply` remains the explicit fleet-style command
+
 That gives us a real one-customer inspection path without pretending write/apply
 is already delta-safe.
 

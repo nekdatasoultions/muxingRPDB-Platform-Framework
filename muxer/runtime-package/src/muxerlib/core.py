@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ipaddress
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
@@ -157,6 +158,44 @@ def remove_jump(table: str, parent_chain: str, chain: str) -> None:
             break
 
 
+def ensure_iptables_rule(table: str, parts: List[str]) -> None:
+    if not parts or parts[0] != "-A" or len(parts) < 2:
+        raise SystemExit("ensure_iptables_rule expects an append-form iptables rule")
+    check_cmd = ["iptables", "-t", table, "-C", parts[1], *parts[2:]]
+    if sh(check_cmd, check=False).returncode == 0:
+        return
+    must(["iptables", "-t", table, *parts])
+
+
+def delete_iptables_rule(table: str, parts: List[str]) -> None:
+    if not parts or parts[0] != "-A" or len(parts) < 2:
+        raise SystemExit("delete_iptables_rule expects an append-form iptables rule")
+    sh(["iptables", "-t", table, "-D", parts[1], *parts[2:]], check=False)
+
+
+def delete_iptables_rules_by_peer(table: str, chain: str, peer_cidr: str) -> int:
+    removed = 0
+    while True:
+        result = sh(["iptables", "-t", table, "-S", chain], check=False)
+        if result.returncode != 0:
+            return removed
+        matched_rule = ""
+        for rule in (result.stdout or "").splitlines():
+            line = rule.strip()
+            if not line.startswith(f"-A {chain} "):
+                continue
+            haystack = f" {line} "
+            if f" -s {peer_cidr} " in haystack or f" -d {peer_cidr} " in haystack:
+                matched_rule = line
+                break
+        if not matched_rule:
+            return removed
+        parts = shlex.split(matched_rule)
+        parts[0] = "-D"
+        must(["iptables", "-t", table, *parts])
+        removed += 1
+
+
 def ensure_tunnel(
     ifname: str,
     local_ul: str,
@@ -223,3 +262,39 @@ def ensure_policy(mark_hex: str, table_id: int, ifname: str, priority: int | Non
         cmd.extend(["pref", str(int(priority))])
     cmd.extend(["fwmark", mark_hex, "lookup", str(table_id)])
     must(cmd)
+
+
+def remove_policy(mark_hex: str, table_id: int, priority: int | None = None) -> None:
+    want = f"fwmark {mark_hex} lookup {table_id}"
+    while True:
+        rules = out(["ip", "rule", "show"]).splitlines()
+        matching = [rule for rule in rules if want in rule]
+        if not matching:
+            return
+        deleted = False
+        if priority is not None:
+            pref_text = f"{int(priority)}:"
+            for rule in matching:
+                if rule.strip().startswith(pref_text):
+                    sh(
+                        ["ip", "rule", "del", "pref", str(int(priority)), "fwmark", mark_hex, "lookup", str(table_id)],
+                        check=False,
+                    )
+                    deleted = True
+                    break
+        if deleted:
+            continue
+        sh(["ip", "rule", "del", "fwmark", mark_hex, "lookup", str(table_id)], check=False)
+        remaining = out(["ip", "rule", "show"]).splitlines()
+        if not any(want in rule for rule in remaining):
+            return
+        if not deleted:
+            return
+
+
+def flush_route_table(table_id: int) -> None:
+    sh(["ip", "route", "flush", "table", str(table_id)], check=False)
+
+
+def remove_tunnel(ifname: str) -> None:
+    sh(["ip", "tunnel", "del", ifname], check=False)
