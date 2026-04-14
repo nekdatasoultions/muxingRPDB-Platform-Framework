@@ -14,6 +14,26 @@ from typing import Any, Dict, List, Tuple
 from .customers import customer_protocol_flags
 
 
+def normalize_customer_sot_backend(value: str | None, *, default: str = "customer_modules") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return default
+    aliases = {
+        "ddb": "dynamodb",
+        "modules": "customer_modules",
+        "module_dir": "customer_modules",
+        "local": "customer_modules",
+        "local_modules": "customer_modules",
+        "variables": "legacy_variables",
+        "variables_file": "legacy_variables",
+        "legacy": "legacy_variables",
+        "legacy_file": "legacy_variables",
+        "tunnels": "legacy_tunnels",
+        "tunnels_dir": "legacy_tunnels",
+    }
+    return aliases.get(raw, raw)
+
+
 def _aws_base_cmd(region: str | None = None) -> List[str]:
     cmd = ["aws", "dynamodb"]
     if region:
@@ -23,7 +43,7 @@ def _aws_base_cmd(region: str | None = None) -> List[str]:
 
 def customer_sot_settings(global_cfg: Dict[str, Any]) -> Tuple[str, str, str]:
     sot = global_cfg.get("customer_sot", {}) or {}
-    backend = str(sot.get("backend") or "variables_file").strip().lower()
+    backend = normalize_customer_sot_backend(sot.get("backend"))
     ddb = sot.get("dynamodb", {}) or {}
     table_name = str(ddb.get("table_name") or "").strip()
     region = str(ddb.get("region") or "").strip()
@@ -156,7 +176,7 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
     return compat
 
 
-def _normalize_runtime_module(module: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_customer_module(module: Dict[str, Any]) -> Dict[str, Any]:
     if "customer" in module and "peer" in module and "transport" in module:
         return _compat_module_from_rpdb(module)
     return module
@@ -345,6 +365,6 @@ def load_customer_modules_from_dynamodb(table_name: str, region: str | None = No
         payload = ((item.get("customer_json") or {}).get("S") or "").strip()
         if not payload:
             continue
-        modules.append(_normalize_runtime_module(json.loads(payload)))
+        modules.append(normalize_customer_module(json.loads(payload)))
     modules.sort(key=lambda item: int(item["id"]))
     return modules

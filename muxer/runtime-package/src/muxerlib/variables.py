@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Shared customer variables loader for muxer and VPN-HUB rendering."""
+"""Customer module loader for the RPDB runtime, with explicit legacy fallbacks."""
 
 from __future__ import annotations
 
 import ipaddress
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .core import BASE, CFG_DIR, load_yaml
 from .customers import calc_overlay, customer_protocol_flags
-from .dynamodb_sot import customer_sot_settings, load_customer_modules_from_dynamodb
+from .dynamodb_sot import (
+    customer_sot_settings,
+    load_customer_modules_from_dynamodb,
+    normalize_customer_module,
+    normalize_customer_sot_backend,
+)
 
-CUSTOMERS_VARS = BASE / "config" / "customers.variables.yaml"
+CUSTOMER_MODULES_DIR = BASE / "config" / "customer-modules"
+LEGACY_CUSTOMERS_VARS = BASE / "config" / "customers.variables.yaml"
 
 
 def _merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -22,6 +29,47 @@ def _merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
         else:
             merged[key] = value
     return merged
+
+
+def _load_json_or_yaml(path: Path) -> Dict[str, Any]:
+    if path.suffix.lower() == ".json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    return load_yaml(path) or {}
+
+
+def _iter_customer_module_paths(customer_modules_dir: Path) -> List[Path]:
+    if not customer_modules_dir.exists():
+        return []
+
+    candidates: Dict[str, Path] = {}
+    for pattern in ("*.json", "*.yaml", "*.yml"):
+        for path in sorted(customer_modules_dir.glob(pattern)):
+            if not path.is_file():
+                continue
+            lowered = path.name.lower()
+            if lowered in {"readme.md", "readme.txt"}:
+                continue
+            if lowered.startswith(("customer-ddb-item", "export-metadata", "binding-report")):
+                continue
+            candidates[str(path.resolve())] = path
+
+    for pattern in ("*/customer-module.json", "*/customer-module.yaml", "*/customer-module.yml"):
+        for path in sorted(customer_modules_dir.glob(pattern)):
+            if path.is_file():
+                candidates[str(path.resolve())] = path
+
+    return [candidates[key] for key in sorted(candidates)]
+
+
+def load_customer_modules_from_directory(customer_modules_dir: Path) -> List[Dict[str, Any]]:
+    modules: List[Dict[str, Any]] = []
+    for path in _iter_customer_module_paths(customer_modules_dir):
+        module = normalize_customer_module(_load_json_or_yaml(path))
+        if not {"id", "name", "peer_ip"}.issubset(module):
+            continue
+        modules.append(module)
+    modules.sort(key=lambda item: int(item["id"]))
+    return modules
 
 
 def _default_tunnel_ifname(cust_id: int, tunnel_type: str) -> str:
@@ -201,10 +249,10 @@ def build_modules_from_variables(
     modules: List[Dict[str, Any]] = []
     for customer in customers:
         if not isinstance(customer, dict):
-            raise SystemExit("customers.variables.yaml: each customer entry must be a mapping")
+            raise SystemExit("legacy customers.variables.yaml: each customer entry must be a mapping")
 
         if "id" not in customer or "name" not in customer or "peer_ip" not in customer:
-            raise SystemExit("customers.variables.yaml: each customer requires id, name, and peer_ip")
+            raise SystemExit("legacy customers.variables.yaml: each customer requires id, name, and peer_ip")
 
         cust_id = int(customer["id"])
         name = str(customer["name"]).strip()
@@ -295,32 +343,62 @@ def build_modules_from_variables(
 def load_modules(
     overlay_pool: ipaddress.IPv4Network | None,
     cfg_dir: Path = CFG_DIR,
-    customers_vars_path: Path = CUSTOMERS_VARS,
+    customer_modules_dir: Path = CUSTOMER_MODULES_DIR,
+    customers_vars_path: Path = LEGACY_CUSTOMERS_VARS,
     global_cfg: Dict[str, Any] | None = None,
     source_backend: str = "auto",
 ) -> List[Dict[str, Any]]:
-    chosen_backend = str(source_backend or "auto").strip().lower()
-    if chosen_backend == "auto" and global_cfg:
+    raw_backend = str(source_backend or "auto").strip().lower()
+    if raw_backend == "auto" and global_cfg:
         chosen_backend, table_name, region = customer_sot_settings(global_cfg)
+    elif raw_backend == "auto":
+        table_name = ""
+        region = ""
+        if _iter_customer_module_paths(customer_modules_dir):
+            chosen_backend = "customer_modules"
+        elif sorted(cfg_dir.glob("*.y*ml")):
+            chosen_backend = "legacy_tunnels"
+        elif customers_vars_path.exists():
+            chosen_backend = "legacy_variables"
+        else:
+            chosen_backend = "customer_modules"
     elif global_cfg:
         _backend, table_name, region = customer_sot_settings(global_cfg)
+        chosen_backend = normalize_customer_sot_backend(raw_backend, default="customer_modules")
     else:
+        chosen_backend = normalize_customer_sot_backend(raw_backend, default="customer_modules")
         table_name = ""
         region = ""
 
-    if chosen_backend in {"dynamodb", "ddb"}:
+    if chosen_backend == "dynamodb":
         modules = load_customer_modules_from_dynamodb(table_name=table_name, region=region or None)
         if global_cfg:
             return resolve_backend_identities(modules, global_cfg)
         return modules
 
-    if customers_vars_path.exists():
+    if chosen_backend == "customer_modules":
+        modules = load_customer_modules_from_directory(customer_modules_dir)
+        if global_cfg:
+            return resolve_backend_identities(modules, global_cfg)
+        return modules
+
+    if chosen_backend == "legacy_variables":
+        if not customers_vars_path.exists():
+            raise SystemExit(f"Legacy variables backend selected but file is missing: {customers_vars_path}")
         vars_doc = load_yaml(customers_vars_path) or {}
         return build_modules_from_variables(vars_doc, overlay_pool, global_cfg)
 
-    modules: List[Dict[str, Any]] = []
-    for path in sorted(cfg_dir.glob("*.y*ml")):
-        data = load_yaml(path) or {}
-        data["_path"] = str(path)
-        modules.append(data)
-    return modules
+    if chosen_backend == "legacy_tunnels":
+        modules: List[Dict[str, Any]] = []
+        for path in sorted(cfg_dir.glob("*.y*ml")):
+            data = load_yaml(path) or {}
+            data["_path"] = str(path)
+            modules.append(data)
+        if global_cfg:
+            return resolve_backend_identities(modules, global_cfg)
+        return modules
+
+    raise SystemExit(
+        "Unsupported customer source backend "
+        f"'{chosen_backend}'. Use one of: dynamodb, customer_modules, legacy_variables, legacy_tunnels."
+    )

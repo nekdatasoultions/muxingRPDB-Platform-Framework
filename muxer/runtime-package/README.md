@@ -26,6 +26,11 @@ Important boundary:
   source-of-truth files here
 - this subtree is only for the muxer runtime and its deployment-time support
   assets
+- the runtime should prefer `customer_sot.backend=dynamodb`
+- for isolated staging or offline validation, the runtime may also load
+  RPDB-native `customer-module.json` files from `config/customer-modules/`
+- old `customers.variables.yaml` and `config/tunnels.d/` loading is legacy
+  compatibility only and should never be the default path in this repo
 
 See:
 

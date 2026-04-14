@@ -1,5 +1,12 @@
 # Muxer Operator Playbook
 
+Historical note:
+
+- in the RPDB repo, the preferred runtime customer backends are `dynamodb` and
+  `customer_modules`
+- references below to `config/customers.variables.yaml` are legacy compatibility
+  notes from the earlier MUXER3 authoring flow
+
 This playbook explains how the muxer works, how to inspect a customer, and how to run safe first-response troubleshooting on the muxer itself.
 
 ## What the muxer is doing

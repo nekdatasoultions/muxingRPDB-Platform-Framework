@@ -50,6 +50,7 @@ systemctl daemon-reload
 
 echo "Installed RPDB muxer runtime under $TARGET_ROOT"
 echo "Next steps:"
-echo "  1. place customer/module config under $TARGET_ROOT/config"
-echo "  2. systemctl enable muxer.service"
-echo "  3. systemctl start muxer.service"
+echo "  1. configure customer_sot in $TARGET_ROOT/config/muxer.yaml"
+echo "  2. either stage customer-module files under $TARGET_ROOT/config/customer-modules or point at DynamoDB"
+echo "  3. systemctl enable muxer.service"
+echo "  4. systemctl start muxer.service"

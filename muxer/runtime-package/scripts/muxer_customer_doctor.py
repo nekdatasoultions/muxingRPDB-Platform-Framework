@@ -28,7 +28,11 @@ from muxerlib.dataplane import (
     derive_passthrough_dataplane,
     derive_post_ipsec_nat,
 )
-from muxerlib.dynamodb_sot import customer_sot_settings, put_customer_modules
+from muxerlib.dynamodb_sot import (
+    customer_sot_settings,
+    normalize_customer_sot_backend,
+    put_customer_modules,
+)
 from muxerlib.variables import load_modules, strict_non_nat_customer
 
 EXPLAIN_TEXT = """\
@@ -61,6 +65,9 @@ What update-sot does
 How to run it
   List all customers:
     sudo python3 /etc/muxer/scripts/muxer_customer_doctor.py list
+
+  List customers from staged local RPDB customer-module files:
+    sudo python3 /etc/muxer/scripts/muxer_customer_doctor.py --source customer_modules list
 
   Show one customer:
     sudo python3 /etc/muxer/scripts/muxer_customer_doctor.py show legacy-cust0001
@@ -148,6 +155,7 @@ def load_muxer_state(config_root: Path, source_backend: str) -> Tuple[Dict[str, 
     modules = load_modules(
         overlay_pool,
         cfg_dir=config_root / "config" / "tunnels.d",
+        customer_modules_dir=config_root / "config" / "customer-modules",
         customers_vars_path=config_root / "config" / "customers.variables.yaml",
         global_cfg=muxer_doc,
         source_backend=source_backend,
@@ -159,12 +167,23 @@ def normalize_source_backend(source_backend: str, muxer_doc: Dict[str, Any]) -> 
     chosen = str(source_backend or "auto").strip().lower()
     if chosen == "auto":
         chosen, _table_name, _region = customer_sot_settings(muxer_doc)
+    return normalize_customer_sot_backend(chosen)
 
-    aliases = {
-        "ddb": "dynamodb",
-        "variables": "variables_file",
-    }
-    return aliases.get(chosen, chosen or "variables_file")
+
+def local_customer_module_path(config_root: Path, customer_name: str) -> Path:
+    base = config_root / "config" / "customer-modules"
+    candidates = (
+        base / customer_name / "customer-module.json",
+        base / customer_name / "customer-module.yaml",
+        base / customer_name / "customer-module.yml",
+        base / f"{customer_name}.json",
+        base / f"{customer_name}.yaml",
+        base / f"{customer_name}.yml",
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
 
 
 def resolve_customer(modules: List[Dict[str, Any]], selector: str) -> Dict[str, Any]:
@@ -457,7 +476,7 @@ def build_report(module: Dict[str, Any], muxer_doc: Dict[str, Any], config_root:
     passthrough = derive_passthrough_dataplane(module, muxer_doc)
     headend = derive_headend_return_path(module, str(muxer_doc.get("public_ip", "")).strip())
     post_ipsec_nat = derive_post_ipsec_nat(module)
-    customer_dir = config_root / "config" / "customers" / str(module["name"])
+    customer_module_path = local_customer_module_path(config_root, str(module["name"]))
 
     tunnel_observed, tunnel_issues = check_tunnel_runtime(transport)
     observed_backend_ip = str(tunnel_observed.get("observed_remote_ip") or "").strip()
@@ -527,8 +546,8 @@ def build_report(module: Dict[str, Any], muxer_doc: Dict[str, Any], config_root:
         "headend_return": headend,
         "post_ipsec_nat": post_ipsec_nat,
         "artifacts": {
-            "customer_dir": str(customer_dir),
-            "present": customer_dir.exists(),
+            "customer_module_path": str(customer_module_path),
+            "present": customer_module_path.exists(),
         },
         "runtime": {
             "tunnel": tunnel_observed,
@@ -861,7 +880,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source",
         default="auto",
-        choices=["auto", "variables_file", "variables", "dynamodb", "ddb"],
+        choices=[
+            "auto",
+            "dynamodb",
+            "ddb",
+            "customer_modules",
+            "modules",
+            "local",
+            "legacy_variables",
+            "variables",
+            "variables_file",
+            "legacy_tunnels",
+            "tunnels",
+        ],
         help="Customer source backend override",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human-readable output")

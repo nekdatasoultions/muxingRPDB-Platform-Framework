@@ -1,5 +1,14 @@
 # Customer DynamoDB SoT
 
+Historical note:
+
+- the current RPDB repo now prefers customer authoring under `muxer/config/customer-sources/`
+- the deployable runtime prefers `customer_sot.backend=dynamodb`
+- for isolated staging, the runtime can also load RPDB-native `customer-module.json`
+  files from `config/customer-modules/`
+- references below to `customers.variables.yaml` describe the older MUXER3-era flow
+  that remains only as explicit legacy compatibility
+
 This repo now supports a two-step customer source-of-truth model:
 
 1. Author or update customers in [`config/customers.variables.yaml`](../config/customers.variables.yaml)
