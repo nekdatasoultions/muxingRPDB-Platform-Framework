@@ -218,6 +218,7 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
         {
             "name": "Validate each VPN head-end node",
             "commands": [
+                f"{sys.executable} scripts/platform/verify_headend_bootstrap.py --region {region} --json",
                 "ip addr",
                 "findmnt /LOG",
                 "findmnt /Application",

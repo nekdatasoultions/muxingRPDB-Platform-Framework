@@ -161,6 +161,14 @@ sudo iptables-save
 
 ### Each VPN head-end node
 
+First run the framework verifier:
+
+```powershell
+python scripts\platform\verify_headend_bootstrap.py --region us-east-1 --json
+```
+
+Then, if needed, inspect individual nodes manually:
+
 ```bash
 ip addr
 findmnt /LOG
