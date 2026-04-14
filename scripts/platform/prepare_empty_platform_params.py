@@ -302,6 +302,13 @@ def main() -> int:
                     selected_private_ips[key] = replacement
                     break
 
+    nat_map = _parameter_map(nat_payload)
+    nonnat_map = _parameter_map(nonnat_payload)
+    _update_parameter(muxer_payload, "NatActiveAUnderlayIp", nat_map["NodeAPrivateIp"])
+    _update_parameter(muxer_payload, "NatActiveBUnderlayIp", nat_map["NodeBPrivateIp"])
+    _update_parameter(muxer_payload, "NonNatActiveAUnderlayIp", nonnat_map["NodeAPrivateIp"])
+    _update_parameter(muxer_payload, "NonNatActiveBUnderlayIp", nonnat_map["NodeBPrivateIp"])
+
     muxer_out = output_dir / muxer_source.name
     nat_out = output_dir / nat_source.name
     nonnat_out = output_dir / nonnat_source.name
@@ -343,6 +350,16 @@ def main() -> int:
             "allow_eip_reassociation": muxer_map.get("AllowEipReassociation"),
             "artifact_upload_prefix": f"s3://{bucket}/{prefix}/",
             "strongswan_archive_s3_uri": strongswan_archive_uri,
+        },
+        "muxer_backend_role_map": {
+            "nat-active": {
+                "us-east-1a": nat_map.get("NodeAPrivateIp"),
+                "us-east-1b": nat_map.get("NodeBPrivateIp"),
+            },
+            "nonnat-active": {
+                "us-east-1a": nonnat_map.get("NodeAPrivateIp"),
+                "us-east-1b": nonnat_map.get("NodeBPrivateIp"),
+            },
         },
         "selected_private_ips": selected_private_ips,
     }
