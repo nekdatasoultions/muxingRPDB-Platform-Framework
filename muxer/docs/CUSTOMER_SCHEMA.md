@@ -94,10 +94,19 @@ Optional section.
 
 Useful fields:
 
+- `cluster`
+- `assignment`
 - `role`
 - `underlay_ip`
 
-If omitted, the class defaults should provide the backend role.
+Recommended shape:
+
+- `cluster` identifies the logical head-end pool, such as `nat` or `non-nat`
+- `assignment` identifies the logical slot, such as `active-a`
+- `role` remains useful as a stable compatibility label
+- `underlay_ip` is transitional compatibility only and should not be the long-term primary input
+
+If omitted, the class defaults should provide the backend role and cluster.
 
 ### `customer.protocols`
 

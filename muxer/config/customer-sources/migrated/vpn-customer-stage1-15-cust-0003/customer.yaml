@@ -27,6 +27,8 @@ customer:
       - 10.129.3.154/32
 
   backend:
+    cluster: nat
+    assignment: active-a
     role: nat-active
     underlay_ip: 172.31.40.221
 

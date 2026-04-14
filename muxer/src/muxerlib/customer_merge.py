@@ -133,6 +133,8 @@ def build_customer_module(
     backend = merged.setdefault("backend", {})
     if not backend.get("role"):
         raise ValueError("resolved backend.role is required")
+    if not backend.get("cluster"):
+        backend["cluster"] = "nat" if source.customer.customer_class == "nat" else "non-nat"
 
     # Ensure the identity fields are always present in the resolved customer
     # section, even if downstream code later depends only on the merged module.

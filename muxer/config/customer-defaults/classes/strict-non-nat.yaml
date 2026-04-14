@@ -2,6 +2,7 @@ class: strict-non-nat
 
 overrides:
   backend:
+    cluster: non-nat
     role: nonnat-active
 
   protocols:

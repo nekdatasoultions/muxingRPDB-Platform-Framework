@@ -34,6 +34,8 @@ Each item should contain:
 - `route_table`
 - `rpdb_priority`
 - `backend_role`
+- `backend_cluster`
+- `backend_assignment`
 - `backend_underlay_ip`
 - `source_ref`
 - `schema_version`

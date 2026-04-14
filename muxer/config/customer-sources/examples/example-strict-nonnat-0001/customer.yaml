@@ -26,4 +26,6 @@ customer:
       - 10.129.4.12/32
 
   backend:
+    cluster: non-nat
+    assignment: active-a
     role: nonnat-active

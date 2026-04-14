@@ -24,6 +24,8 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "customer_id": customer.get("id"),
             "customer_class": customer.get("customer_class"),
             "peer_ip": peer.get("public_ip"),
+            "backend_cluster": backend.get("cluster"),
+            "backend_assignment": backend.get("assignment"),
             "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
             "local_subnets": selectors.get("local_subnets") or [],
@@ -70,6 +72,9 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "tunnel_ttl": transport.get("tunnel_ttl"),
             "overlay": transport.get("overlay") or {},
             "peer_public_ip": peer.get("public_ip"),
+            "backend_cluster": backend.get("cluster"),
+            "backend_assignment": backend.get("assignment"),
+            "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
         },
         "tunnel/ip-link.command.txt": "\n".join(
@@ -164,6 +169,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
         )
         + "\n",
         "routing/routing-intent.json": {
+            "backend_cluster": backend.get("cluster"),
+            "backend_assignment": backend.get("assignment"),
             "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
             "selectors": {

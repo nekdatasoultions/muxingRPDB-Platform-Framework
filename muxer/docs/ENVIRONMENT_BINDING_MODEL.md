@@ -19,6 +19,8 @@ The binding layer uses:
 - an environment bindings file
 - the optional `customer-module.json` for derived values such as
   `BACKEND_UNDERLAY_IP`
+  and logical placement values such as `BACKEND_CLUSTER` and
+  `BACKEND_ASSIGNMENT`
 
 ## Example Binding File
 
@@ -38,10 +40,34 @@ The binding layer uses:
 - `MUXER_TRANSPORT_IP`
 - `MUXER_UNDERLAY_IFACE`
 - `BACKEND_UNDERLAY_IP`
+- `BACKEND_CLUSTER`
+- `BACKEND_ASSIGNMENT`
+- `BACKEND_ROLE`
 - `HEADEND_PUBLIC_IP`
 - `HEADEND_ID`
 - `HEADEND_CLEAR_IFACE`
 - `PSK_FROM_SECRET_REF`
+
+## Backend Resolution
+
+The preferred RPDB shape is:
+
+- customer source owns logical backend placement
+  - `backend.cluster`
+  - `backend.assignment`
+  - `backend.role`
+- environment binding owns physical placement
+  - `BACKEND_UNDERLAY_IP`
+  - `HEADEND_PRIMARY_IP`
+  - `HEADEND_PUBLIC_IP`
+  - `HEADEND_ID`
+
+Environment files can now carry a `backend_resolver` section with either:
+
+- `roles.<backend-role>`
+- `clusters.<cluster>.<assignment>`
+
+Cluster/assignment-specific bindings override role bindings when both exist.
 
 ## Current Profiles
 

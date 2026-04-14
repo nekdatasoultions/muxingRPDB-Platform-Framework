@@ -28,6 +28,8 @@ customer:
       - 10.129.4.12/32
 
   backend:
+    cluster: non-nat
+    assignment: active-a
     role: nonnat-active
     underlay_ip: 172.31.40.220
 

@@ -161,6 +161,14 @@
           "type": "string",
           "minLength": 1
         },
+        "cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assignment": {
+          "type": "string",
+          "minLength": 1
+        },
         "underlay_ip": {
           "$ref": "#/$defs/ipv4"
         }

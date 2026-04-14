@@ -21,11 +21,36 @@ def load_environment_bindings(path: str | Path) -> Dict[str, Any]:
     return load_yaml_file(path)
 
 
+def _stringify_bindings(mapping: Dict[str, Any]) -> Dict[str, str]:
+    return {key: str(value) for key, value in mapping.items()}
+
+
+def _resolve_backend_bindings(environment_doc: Dict[str, Any], customer_module: Dict[str, Any]) -> Dict[str, str]:
+    environment = environment_doc.get("environment") or {}
+    resolver = environment.get("backend_resolver") or {}
+    backend = (customer_module.get("backend") or {}) if customer_module else {}
+
+    role = str(backend.get("role") or "").strip()
+    cluster = str(backend.get("cluster") or "").strip()
+    assignment = str(backend.get("assignment") or "").strip()
+
+    resolved: Dict[str, str] = {}
+
+    role_bindings = (resolver.get("roles") or {}).get(role)
+    if isinstance(role_bindings, dict):
+        resolved.update(_stringify_bindings(role_bindings))
+
+    cluster_doc = (resolver.get("clusters") or {}).get(cluster)
+    if isinstance(cluster_doc, dict):
+        assignment_bindings = cluster_doc.get(assignment)
+        if isinstance(assignment_bindings, dict):
+            resolved.update(_stringify_bindings(assignment_bindings))
+
+    return resolved
+
+
 def build_binding_context(environment_doc: Dict[str, Any], customer_module: Dict[str, Any] | None = None) -> Dict[str, str]:
-    bindings = {
-        key: str(value)
-        for key, value in ((environment_doc.get("environment") or {}).get("bindings") or {}).items()
-    }
+    bindings = _stringify_bindings(((environment_doc.get("environment") or {}).get("bindings") or {}))
 
     module = customer_module or {}
     customer = module.get("customer") or {}
@@ -33,12 +58,17 @@ def build_binding_context(environment_doc: Dict[str, Any], customer_module: Dict
     backend = module.get("backend") or {}
     transport = module.get("transport") or {}
 
+    bindings.update(_resolve_backend_bindings(environment_doc, module))
+
     derived = {
         "CUSTOMER_NAME": customer.get("name"),
         "CUSTOMER_ID": customer.get("id"),
         "CUSTOMER_CLASS": customer.get("customer_class"),
         "PEER_PUBLIC_IP": peer.get("public_ip"),
         "PEER_REMOTE_ID": peer.get("remote_id"),
+        "BACKEND_CLUSTER": backend.get("cluster"),
+        "BACKEND_ASSIGNMENT": backend.get("assignment"),
+        "BACKEND_ROLE": backend.get("role"),
         "BACKEND_UNDERLAY_IP": backend.get("underlay_ip"),
         "CUSTOMER_FWMARK": transport.get("mark"),
         "CUSTOMER_ROUTE_TABLE": transport.get("table"),

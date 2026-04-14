@@ -26,6 +26,8 @@ customer:
       - 10.200.1.0/24
 
   backend:
+    cluster: nat
+    assignment: active-a
     role: nat-active
 
   post_ipsec_nat:

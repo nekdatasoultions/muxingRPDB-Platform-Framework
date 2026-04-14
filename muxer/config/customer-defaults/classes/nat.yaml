@@ -2,6 +2,7 @@ class: nat
 
 overrides:
   backend:
+    cluster: nat
     role: nat-active
 
   protocols:

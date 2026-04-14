@@ -46,6 +46,8 @@ class Selectors:
 @dataclass(frozen=True)
 class Backend:
     role: str = ""
+    cluster: str = ""
+    assignment: str = ""
     underlay_ip: str = ""
 
 
@@ -215,6 +217,8 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
             backend=(
                 Backend(
                     role=str(backend.get("role") or ""),
+                    cluster=str(backend.get("cluster") or ""),
+                    assignment=str(backend.get("assignment") or ""),
                     underlay_ip=str(backend.get("underlay_ip") or ""),
                 )
                 if isinstance(backend, dict) and backend
@@ -326,6 +330,8 @@ def build_dynamodb_item(
         "route_table": transport["table"],
         "rpdb_priority": rpdb_priority,
         "backend_role": backend.get("role"),
+        "backend_cluster": backend.get("cluster") or None,
+        "backend_assignment": backend.get("assignment") or None,
         "backend_underlay_ip": backend.get("underlay_ip") or None,
         "source_ref": source_ref,
         "schema_version": source.schema_version,

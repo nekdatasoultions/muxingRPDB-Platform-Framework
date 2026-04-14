@@ -14,3 +14,23 @@ environment:
     HEADEND_ID: 54.204.221.89
     HEADEND_CLEAR_IFACE: ens36
     PSK_FROM_SECRET_REF: resolved-via-secret-store
+  backend_resolver:
+    roles:
+      nat-active:
+        BACKEND_CLUSTER: nat
+        BACKEND_ASSIGNMENT: active-a
+        BACKEND_UNDERLAY_IP: 172.31.40.221
+        HEADEND_PRIMARY_IP: 172.31.40.221
+        HEADEND_CORE_IP: 172.31.55.121
+        HEADEND_PUBLIC_IP: 54.204.221.89
+        HEADEND_ID: 54.204.221.89
+        HEADEND_CLEAR_IFACE: ens36
+    clusters:
+      nat:
+        active-a:
+          BACKEND_UNDERLAY_IP: 172.31.40.221
+          HEADEND_PRIMARY_IP: 172.31.40.221
+          HEADEND_CORE_IP: 172.31.55.121
+          HEADEND_PUBLIC_IP: 54.204.221.89
+          HEADEND_ID: 54.204.221.89
+          HEADEND_CLEAR_IFACE: ens36

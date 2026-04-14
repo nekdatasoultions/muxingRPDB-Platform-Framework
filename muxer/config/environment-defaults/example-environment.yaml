@@ -5,8 +5,37 @@ environment:
   bindings:
     MUXER_TRANSPORT_IP: 172.31.34.89
     MUXER_UNDERLAY_IFACE: ens34
-    BACKEND_UNDERLAY_IP: 172.31.40.221
-    HEADEND_PUBLIC_IP: 54.204.221.89
-    HEADEND_ID: 54.204.221.89
-    HEADEND_CLEAR_IFACE: ens36
     PSK_FROM_SECRET_REF: resolved-from-secret-store
+  backend_resolver:
+    roles:
+      nat-active:
+        BACKEND_CLUSTER: nat
+        BACKEND_ASSIGNMENT: active-a
+        BACKEND_UNDERLAY_IP: 172.31.40.221
+        HEADEND_PRIMARY_IP: 172.31.40.221
+        HEADEND_PUBLIC_IP: 54.204.221.89
+        HEADEND_ID: 54.204.221.89
+        HEADEND_CLEAR_IFACE: ens36
+      nonnat-active:
+        BACKEND_CLUSTER: non-nat
+        BACKEND_ASSIGNMENT: active-a
+        BACKEND_UNDERLAY_IP: 172.31.40.220
+        HEADEND_PRIMARY_IP: 172.31.40.220
+        HEADEND_PUBLIC_IP: 54.204.221.89
+        HEADEND_ID: 54.204.221.89
+        HEADEND_CLEAR_IFACE: ens36
+    clusters:
+      nat:
+        active-a:
+          BACKEND_UNDERLAY_IP: 172.31.40.221
+          HEADEND_PRIMARY_IP: 172.31.40.221
+          HEADEND_PUBLIC_IP: 54.204.221.89
+          HEADEND_ID: 54.204.221.89
+          HEADEND_CLEAR_IFACE: ens36
+      non-nat:
+        active-a:
+          BACKEND_UNDERLAY_IP: 172.31.40.220
+          HEADEND_PRIMARY_IP: 172.31.40.220
+          HEADEND_PUBLIC_IP: 54.204.221.89
+          HEADEND_ID: 54.204.221.89
+          HEADEND_CLEAR_IFACE: ens36

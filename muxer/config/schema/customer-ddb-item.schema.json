@@ -55,6 +55,18 @@
       "type": "string",
       "minLength": 1
     },
+    "backend_cluster": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "backend_assignment": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "backend_underlay_ip": {
       "type": [
         "string",
