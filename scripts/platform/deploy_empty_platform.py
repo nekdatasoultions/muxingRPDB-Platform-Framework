@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MUXER_REPO = REPO_ROOT.parent / "MUXER3"
+DEFAULT_BASH_SHIMS = REPO_ROOT / "scripts" / "platform" / "bash-shims"
 DEFAULT_MUXER_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.single-muxer.us-east-1.json"
 DEFAULT_NAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.nat.graviton-efs.us-east-1.json"
 DEFAULT_NONNAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json"
@@ -326,9 +327,14 @@ def _print_plan(plan: Dict[str, Any]) -> None:
 
 
 def _execute_plan(plan: Dict[str, Any]) -> None:
+    base_env = os.environ.copy()
+    shim_dir = str(DEFAULT_BASH_SHIMS)
     for index, step in enumerate(plan["steps"], start=1):
         print(f"[{index}/{len(plan['steps'])}] {step['name']}")
-        subprocess.run(step["argv"], cwd=step["cwd"], check=True)
+        env = base_env.copy()
+        if step["argv"] and step["argv"][0] == "bash":
+            env["PATH"] = f"{shim_dir};{env.get('PATH', '')}"
+        subprocess.run(step["argv"], cwd=step["cwd"], check=True, env=env)
 
 
 def main() -> int:
