@@ -97,6 +97,10 @@ Parameters:
   ProjectPackageS3Uri:
     Type: String
     Description: s3://bucket/path/muxingplus-ha.zip
+  StrongswanArchiveUri:
+    Type: String
+    Default: ""
+    Description: Optional strongSwan source archive URI for deterministic installs, e.g. s3://bucket/path/strongswan.tar.bz2
   EipAllocationId:
     Type: String
     Default: ""
@@ -384,11 +388,6 @@ Resources:
           ENABLE_SHARED_EFS="${EnableSharedEfs}"
           SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
           SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
-          SHARED_DIR="${SharedEfsMountPath}"
-          SHARED_ROOT="$SHARED_DIR/${ClusterName}"
-          ENABLE_SHARED_EFS="${EnableSharedEfs}"
-          SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
-          SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
 
           if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
             mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/swanctl/conf.d
@@ -486,7 +485,8 @@ Resources:
               fi
             fi
             if ! command -v swanctl >/dev/null 2>&1; then
-              bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
+              STRONGSWAN_ARCHIVE_URI="${StrongswanArchiveUri}" \
+                bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
             fi
             if ! command -v swanctl >/dev/null 2>&1; then
               echo "strongSwan backend requires swanctl" >&2
@@ -686,6 +686,11 @@ Resources:
 
           LOG_DIR="${LoggingMountPath}"
           APP_DIR="${ApplicationMountPath}"
+          SHARED_DIR="${SharedEfsMountPath}"
+          SHARED_ROOT="$SHARED_DIR/${ClusterName}"
+          ENABLE_SHARED_EFS="${EnableSharedEfs}"
+          SHARED_EFS_FS_ID="${SharedEfsFileSystemId}"
+          SHARED_EFS_AP_ID="${SharedEfsAccessPointId}"
 
           if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
             mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/swanctl/conf.d
@@ -783,7 +788,8 @@ Resources:
               fi
             fi
             if ! command -v swanctl >/dev/null 2>&1; then
-              bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
+              STRONGSWAN_ARCHIVE_URI="${StrongswanArchiveUri}" \
+                bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
             fi
             if ! command -v swanctl >/dev/null 2>&1; then
               echo "strongSwan backend requires swanctl" >&2

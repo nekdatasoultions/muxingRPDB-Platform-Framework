@@ -78,6 +78,8 @@ Safety changes in that generated set:
 - clears all imported `EipAllocationId` values
 - suffixes the muxer/head-end cluster names with `-rpdb-empty`
 - suffixes the customer SoT table name with `-rpdb-empty`
+- pins `StrongswanArchiveUri` to the RPDB rehearsal S3 prefix so head-end
+  bootstrap does not depend on a live upstream download
 
 Then plan the deploy against the generated files instead of the imported live
 shaped parameter files:
@@ -122,6 +124,16 @@ parameter set above so `--allow-production-eip` is not needed.
 8. deploy the NAT pair
 9. deploy the non-NAT pair
 10. ensure the customer SoT table exists
+
+The head-end deployment artifact must include the runtime files bootstrap
+expects at the package root:
+
+- `ops/headend-ha-active-standby/...`
+- `config/ha.env.example`
+- `config/conntrackd/conntrackd.conf.ftfw.example`
+- `config/strongswan/charon-ha.conf.example`
+- `config/strongswan/ha-sync.env.example`
+- `scripts/install_strongswan_from_source.sh`
 
 ## Database Step
 

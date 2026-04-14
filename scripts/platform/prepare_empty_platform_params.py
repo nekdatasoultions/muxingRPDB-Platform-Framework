@@ -16,6 +16,7 @@ DEFAULT_REGION = "us-east-1"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "build" / "empty-platform" / "current-prod-shape-rpdb-empty"
 DEFAULT_S3_BUCKET = "baines-networking"
 DEFAULT_S3_PREFIX_ROOT = "Code/muxingRPDB-Platform-Framework/empty-platform"
+DEFAULT_STRONGSWAN_ARCHIVE_NAME = "strongswan-6.0.4.tar.bz2"
 DEFAULT_MUXER_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.single-muxer.us-east-1.json"
 DEFAULT_NAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.nat.graviton-efs.us-east-1.json"
 DEFAULT_NONNAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json"
@@ -236,6 +237,7 @@ def main() -> int:
     prefix = f"{prefix_root}/{suffix}"
     muxer_bundle_uri = f"s3://{bucket}/{prefix}/muxer3-bundle.zip"
     deployment_bundle_uri = f"s3://{bucket}/{prefix}/rpdb-platform-bundle.zip"
+    strongswan_archive_uri = f"s3://{bucket}/{prefix}/{DEFAULT_STRONGSWAN_ARCHIVE_NAME}"
     recovery_lambda_key = f"{prefix}/muxer-recovery-lambda.zip"
 
     _update_parameter(muxer_payload, "ProjectPackageS3Uri", muxer_bundle_uri)
@@ -243,6 +245,8 @@ def main() -> int:
     _update_parameter(muxer_payload, "RecoveryLambdaS3Key", recovery_lambda_key)
     _update_parameter(nat_payload, "ProjectPackageS3Uri", deployment_bundle_uri)
     _update_parameter(nonnat_payload, "ProjectPackageS3Uri", deployment_bundle_uri)
+    _update_parameter(nat_payload, "StrongswanArchiveUri", strongswan_archive_uri)
+    _update_parameter(nonnat_payload, "StrongswanArchiveUri", strongswan_archive_uri)
 
     selected_private_ips: Dict[str, str] = {}
     if args.auto_select_private_ips_from_aws:
@@ -336,6 +340,7 @@ def main() -> int:
             "nonnat_headend_eip_cleared": nonnat_map.get("EipAllocationId", "") == "",
             "allow_eip_reassociation": muxer_map.get("AllowEipReassociation"),
             "artifact_upload_prefix": f"s3://{bucket}/{prefix}/",
+            "strongswan_archive_s3_uri": strongswan_archive_uri,
         },
         "selected_private_ips": selected_private_ips,
     }
@@ -360,6 +365,7 @@ def main() -> int:
                 "- EipAllocationId cleared in all three parameter files",
                 f"- CustomerSotTableName suffixed to {muxer_map.get('CustomerSotTableName')}",
                 f"- Artifact uploads redirected to s3://{bucket}/{prefix}/",
+                f"- StrongswanArchiveUri pinned to {strongswan_archive_uri}",
                 (
                     "- Static private IPs replaced with currently unused addresses in the same subnets"
                     if selected_private_ips

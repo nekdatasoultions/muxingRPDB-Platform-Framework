@@ -1,0 +1,14 @@
+[Unit]
+Description=Muxingplus HA Active/Standby Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HA_ENV_FILE=/etc/muxingplus-ha/ha.env
+ExecStart=/usr/local/sbin/ha-leader-loop.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

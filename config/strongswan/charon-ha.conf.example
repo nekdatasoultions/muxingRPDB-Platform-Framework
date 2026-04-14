@@ -1,0 +1,31 @@
+# strongSwan HA plugin config (for SA/state synchronization)
+# Target path:
+#   /etc/strongswan.d/charon/ha.conf
+#
+# Requires strongSwan build/package with `ha` plugin enabled.
+
+charon {
+  plugins {
+    ha {
+      # Local sync/control IP (node A or B)
+      local = <HA_SYNC_LOCAL_IP>
+
+      # Peer sync/control IP (the other node)
+      remote = <HA_SYNC_REMOTE_IP>
+
+      # Shared secret for synchronization channel
+      secret = <HA_SYNC_SECRET_HEX_OR_ASCII>
+
+      # Number of active segments in cluster.
+      # For active/standby with one active node, keep 1.
+      segment_count = 1
+
+      # Optional operational settings
+      monitor = yes
+      heartbeat_delay = 1000
+      heartbeat_timeout = 2100
+      resync = yes
+      fifo_interface = yes
+    }
+  }
+}
