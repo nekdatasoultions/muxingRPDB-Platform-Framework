@@ -216,7 +216,7 @@ def main() -> None:
         return
 
     overlay_pool = ipaddress.ip_network(str(global_cfg["overlay_pool"]), strict=False)
-    modules = load_customer_modules(overlay_pool)
+    modules = load_customer_modules(overlay_pool, global_cfg=global_cfg)
     pub_if = str(global_cfg.get("interfaces", {}).get("public_if", "ens5"))
     peers: Set[str] = set()
     ipip_ifs: List[str] = []

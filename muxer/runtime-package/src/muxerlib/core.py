@@ -205,9 +205,21 @@ def ensure_tunnel(
     must(["ip", "addr", "replace", overlay_ip, "dev", ifname])
 
 
-def ensure_policy(mark_hex: str, table_id: int, ifname: str) -> None:
+def ensure_policy(mark_hex: str, table_id: int, ifname: str, priority: int | None = None) -> None:
     must(["ip", "route", "replace", "default", "dev", ifname, "table", str(table_id)])
     rules = out(["ip", "rule", "show"]).splitlines()
     want = f"fwmark {mark_hex} lookup {table_id}"
-    if not any(want in rule for rule in rules):
-        must(["ip", "rule", "add", "fwmark", mark_hex, "lookup", str(table_id)])
+    pref_text = f"{int(priority)}:"
+    for rule in rules:
+        if want not in rule:
+            continue
+        if priority is None or rule.strip().startswith(pref_text):
+            return
+        must(["ip", "rule", "del", "fwmark", mark_hex, "lookup", str(table_id)])
+        break
+
+    cmd = ["ip", "rule", "add"]
+    if priority is not None:
+        cmd.extend(["pref", str(int(priority))])
+    cmd.extend(["fwmark", mark_hex, "lookup", str(table_id)])
+    must(cmd)

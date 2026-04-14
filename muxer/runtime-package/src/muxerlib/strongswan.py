@@ -77,7 +77,18 @@ def render_strongswan(global_cfg: Dict[str, Any], modules: List[Dict[str, Any]])
 
         local_id = str(ipsec_cfg.get("local_id", local_id_default))
         remote_id = str(ipsec_cfg.get("remote_id", peer_ip))
-        psk = str(ipsec_cfg.get("psk", "CHANGE_ME_PSK"))
+        psk = str(ipsec_cfg.get("psk", "")).strip()
+        if not psk:
+            original = module.get("_rpdb_original") or {}
+            peer_doc = original.get("peer") if isinstance(original, dict) else {}
+            psk_secret_ref = str((peer_doc or {}).get("psk_secret_ref") or "").strip()
+            if psk_secret_ref:
+                raise SystemExit(
+                    f"{name}: termination-mode rendering cannot use peer.psk_secret_ref "
+                    f"({psk_secret_ref}) directly yet. Resolve the secret into ipsec.psk before "
+                    "running render-ipsec or muxer termination mode."
+                )
+            raise SystemExit(f"{name}: ipsec.psk is required for termination-mode rendering")
         auto = str(ipsec_cfg.get("auto", default_auto))
 
         conf_lines.extend(
@@ -99,4 +110,3 @@ def render_strongswan(global_cfg: Dict[str, Any], modules: List[Dict[str, Any]])
     conf_path.write_text("\n".join(conf_lines).rstrip() + "\n")
     secrets_path.write_text("\n".join(secret_lines).rstrip() + "\n")
     return conf_path, secrets_path, conn_count
-

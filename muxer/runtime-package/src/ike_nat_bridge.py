@@ -25,9 +25,10 @@ import yaml
 from netfilterqueue import NetfilterQueue
 from scapy.all import IP, UDP  # type: ignore
 
+from muxerlib.variables import load_modules
+
 BASE = Path("/etc/muxer")
 CFG_GLOBAL = BASE / "config" / "muxer.yaml"
-CFG_DIR = BASE / "config" / "tunnels.d"
 
 IKEV2_SA_INIT = 34
 IKEV2_PAYLOAD_NOTIFY = 41
@@ -57,11 +58,8 @@ def parse_int(v: Any, default: int) -> int:
 
 def load_runtime() -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     g = load_yaml(CFG_GLOBAL)
-    modules: List[Dict[str, Any]] = []
-    for p in sorted(CFG_DIR.glob("*.y*ml")):
-        d = load_yaml(p)
-        d["_path"] = str(p)
-        modules.append(d)
+    overlay_pool = ipaddress.ip_network(str(g["overlay_pool"]), strict=False)
+    modules = load_modules(overlay_pool, global_cfg=g)
     return g, modules
 
 

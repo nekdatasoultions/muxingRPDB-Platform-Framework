@@ -124,7 +124,7 @@ def apply_passthrough(
             ttl=tunnel_ttl,
             key=tunnel_key,
         )
-        ensure_policy(mark_hex, table_id, tunnel_ifname)
+        ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
 
         nat_preroute_targets: List[str] = []
         if public_priv_ip != public_ip:
