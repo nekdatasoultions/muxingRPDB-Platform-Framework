@@ -82,10 +82,12 @@ The repo now also carries imported current-state platform deploy assets for the
 base empty environment:
 
 - [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)
+- [DATABASE_BOOTSTRAP.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/DATABASE_BOOTSTRAP.md)
 - [infra/cfn](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn)
 - [scripts/platform](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform)
 
 That lets the repo hold both:
 
 - current-state base platform deploy references
+- explicit database bootstrap guidance for the customer SoT and HA lease model
 - RPDB-native customer lifecycle and verification flow
