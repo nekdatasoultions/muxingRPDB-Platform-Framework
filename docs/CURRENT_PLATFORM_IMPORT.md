@@ -47,7 +47,8 @@ For a fresh environment with no customers yet:
 2. use the imported CloudFormation assets in [infra/cfn](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn)
 3. use the imported base deploy scripts in [scripts/platform](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform)
 4. make the database layer explicit with [DATABASE_BOOTSTRAP.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/DATABASE_BOOTSTRAP.md) and [ensure_dynamodb_tables.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/ensure_dynamodb_tables.py)
-5. after the empty platform exists and the customer SoT table is ensured, move into the RPDB-native customer flow
+5. use the RPDB-native front door in [FRESH_EMPTY_PLATFORM_RUNBOOK.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md) and [deploy_empty_platform.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/deploy_empty_platform.py)
+6. after the empty platform exists and the customer SoT table is ensured, move into the RPDB-native customer flow
 
 ### Customer Onboarding
 

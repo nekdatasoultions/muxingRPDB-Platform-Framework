@@ -83,6 +83,7 @@ base empty environment:
 
 - [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)
 - [DATABASE_BOOTSTRAP.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/DATABASE_BOOTSTRAP.md)
+- [FRESH_EMPTY_PLATFORM_RUNBOOK.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md)
 - [infra/cfn](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn)
 - [scripts/platform](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform)
 
@@ -90,4 +91,5 @@ That lets the repo hold both:
 
 - current-state base platform deploy references
 - explicit database bootstrap guidance for the customer SoT and HA lease model
+- a single current production-shaped front door for an empty platform deploy
 - RPDB-native customer lifecycle and verification flow
