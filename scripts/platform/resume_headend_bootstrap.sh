@@ -33,7 +33,7 @@ Or:
 EOF
 }
 
-PROJECT_PACKAGE_S3_URI="s3://baines-networking/Code/Muxingplus-Platform-Deployments/dev/muxingplus-platform-deployments-dev.zip"
+PROJECT_PACKAGE_S3_URI="s3://baines-networking/Code/muxingRPDB-Platform-Framework/rpdb-platform-bundle.zip"
 SHARED_EFS_FS_ID=""
 SHARED_EFS_AP_ID=""
 SHARED_DIR="/Shared"

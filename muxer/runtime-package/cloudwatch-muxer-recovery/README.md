@@ -34,7 +34,7 @@ Package and upload with:
 
 ```bash
 bash "E:\Code1\Muxingplus HA\scripts\package_muxer_recovery_lambda_to_s3.sh" \
-  s3://baines-networking/Code/MUXER3/muxer-recovery-lambda.zip
+s3://baines-networking/Code/muxingRPDB-Platform-Framework/muxer-recovery-lambda.zip
 ```
 
 The CloudFormation stack uses that uploaded object when creating the recovery Lambda.

@@ -25,7 +25,7 @@
   { "ParameterKey": "SharedEfsFileSystemId", "ParameterValue": "fs-xxxxxxxx" },
   { "ParameterKey": "SharedEfsAccessPointId", "ParameterValue": "fsap-xxxxxxxx" },
   { "ParameterKey": "SharedEfsMountPath", "ParameterValue": "/Shared" },
-  { "ParameterKey": "ProjectPackageS3Uri", "ParameterValue": "s3://bucket/path/muxer3-bundle.zip" },
+  { "ParameterKey": "ProjectPackageS3Uri", "ParameterValue": "s3://bucket/path/rpdb-muxer-runtime-bundle.zip" },
   { "ParameterKey": "MuxerInstallScript", "ParameterValue": "scripts/install-local.sh" },
   { "ParameterKey": "MuxerServiceName", "ParameterValue": "muxer.service" },
   { "ParameterKey": "CustomerSotTableName", "ParameterValue": "muxingplus-customer-sot-example" },

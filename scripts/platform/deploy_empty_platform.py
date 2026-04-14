@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 # that already match the current production shape.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REGION = "us-east-1"
-DEFAULT_MUXER_REPO = REPO_ROOT.parent / "MUXER3"
+DEFAULT_MUXER_RUNTIME_ROOT = REPO_ROOT / "muxer" / "runtime-package"
 DEFAULT_BASH_SHIMS = REPO_ROOT / "scripts" / "platform" / "bash-shims"
 DEFAULT_MUXER_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.single-muxer.us-east-1.json"
 DEFAULT_NAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.nat.graviton-efs.us-east-1.json"
@@ -68,7 +68,7 @@ def _step(
 
 def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
     repo_root = Path(args.repo_root).resolve()
-    muxer_repo = Path(args.muxer_repo).resolve()
+    muxer_runtime_root = Path(args.muxer_repo).resolve()
     muxer_params_path = Path(args.muxer_params).resolve()
     nat_params_path = Path(args.nat_headend_params).resolve()
     nonnat_params_path = Path(args.nonnat_headend_params).resolve()
@@ -98,7 +98,10 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
     muxer_param_rel = _relative_posix(muxer_params_path, repo_root)
     nat_param_rel = _relative_posix(nat_params_path, repo_root)
     nonnat_param_rel = _relative_posix(nonnat_params_path, repo_root)
-    muxer_lambda_source_rel = _relative_posix(muxer_repo / "cloudwatch-muxer-recovery", repo_root)
+    muxer_lambda_source_rel = _relative_posix(
+        muxer_runtime_root / "cloudwatch-muxer-recovery",
+        repo_root,
+    )
 
     steps: List[Dict[str, Any]] = [
         _step(
@@ -109,10 +112,10 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
         ),
         _step(
             "package",
-            "Package muxer application bundle from the current muxer repo",
-            muxer_repo,
+            "Package the RPDB muxer runtime bundle",
+            muxer_runtime_root,
             ["bash", "scripts/package_project_to_s3.sh", muxer_bundle_uri],
-            note="The muxer runtime still comes from the sibling MUXER3 repo in the current platform model.",
+            note="This packages the copied-and-evolving runtime from muxer/runtime-package in the RPDB repo.",
         ),
         _step(
             "package",
@@ -239,7 +242,7 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "region": region,
         "repo_root": str(repo_root),
-        "muxer_repo": str(muxer_repo),
+        "muxer_runtime_root": str(muxer_runtime_root),
         "production_shape": {
             "muxer_instance_type": muxer_params.get("InstanceType"),
             "nat_headend_instance_type": nat_params.get("InstanceType"),
@@ -296,7 +299,7 @@ def _guard_execute(plan: Dict[str, Any], args: argparse.Namespace) -> None:
 def _print_plan(plan: Dict[str, Any]) -> None:
     print("Fresh empty platform deploy plan")
     print(f"- region: {plan['region']}")
-    print(f"- muxer repo: {plan['muxer_repo']}")
+    print(f"- muxer runtime root: {plan['muxer_runtime_root']}")
     print(
         "- production shape: "
         f"muxer={plan['production_shape']['muxer_instance_type']}, "
@@ -341,7 +344,11 @@ def _execute_plan(plan: Dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan or execute the current production-shaped empty platform deploy flow.")
     parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Path to the RPDB repo root")
-    parser.add_argument("--muxer-repo", default=str(DEFAULT_MUXER_REPO), help="Path to the sibling current muxer repo")
+    parser.add_argument(
+        "--muxer-repo",
+        default=str(DEFAULT_MUXER_RUNTIME_ROOT),
+        help="Path to the RPDB muxer runtime package root",
+    )
     parser.add_argument("--region", default=DEFAULT_REGION, help="AWS region to use for deploy and DynamoDB checks")
     parser.add_argument("--muxer-params", default=str(DEFAULT_MUXER_PARAMS), help="Path to the single-muxer parameter file")
     parser.add_argument("--nat-headend-params", default=str(DEFAULT_NAT_PARAMS), help="Path to the NAT head-end parameter file")

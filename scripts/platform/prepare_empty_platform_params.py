@@ -237,7 +237,7 @@ def main() -> int:
     bucket = args.artifact_s3_bucket.strip()
     prefix_root = args.artifact_s3_prefix_root.strip().strip("/")
     prefix = f"{prefix_root}/{suffix}"
-    muxer_bundle_uri = f"s3://{bucket}/{prefix}/muxer3-bundle.zip"
+    muxer_bundle_uri = f"s3://{bucket}/{prefix}/rpdb-muxer-runtime-bundle.zip"
     deployment_bundle_uri = f"s3://{bucket}/{prefix}/rpdb-platform-bundle.zip"
     strongswan_archive_uri = f"s3://{bucket}/{prefix}/{DEFAULT_STRONGSWAN_ARCHIVE_NAME}"
     recovery_lambda_key = f"{prefix}/muxer-recovery-lambda.zip"

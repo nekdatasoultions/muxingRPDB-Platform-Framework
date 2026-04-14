@@ -7,7 +7,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 S3_URI="$1"
-DEFAULT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/MUXER3/cloudwatch-muxer-recovery"
+DEFAULT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../muxer/runtime-package/cloudwatch-muxer-recovery" && pwd)"
 SOURCE_DIR="${2:-$DEFAULT_SOURCE_DIR}"
 TMP_DIR="$(mktemp -d)"
 ZIP_PATH="$TMP_DIR/muxer-recovery-lambda.zip"

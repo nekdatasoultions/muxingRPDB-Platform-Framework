@@ -86,7 +86,7 @@ Parameters:
     Default: /Shared
   ProjectPackageS3Uri:
     Type: String
-    Description: s3:// bucket/key for the MUXER3 bundle.
+    Description: s3:// bucket/key for the RPDB muxer runtime bundle.
   MuxerInstallScript:
     Type: String
     Default: scripts/install-local.sh

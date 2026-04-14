@@ -115,7 +115,7 @@ parameter set above so `--allow-production-eip` is not needed.
 ## What The Wrapper Chains
 
 1. verify AWS credentials
-2. package the current muxer application from the sibling `MUXER3` repo
+2. package the RPDB muxer runtime bundle from `muxer/runtime-package`
 3. package the muxer recovery Lambda
 4. validate the single-muxer template
 5. deploy the muxer stack

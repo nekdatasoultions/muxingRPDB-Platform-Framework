@@ -9,6 +9,13 @@ This runbook covers the current platform model:
 - non-NAT VPN head-end HA pair
 - customer source of truth authored privately and synchronized into DynamoDB
 
+This file is preserved as an imported current-state reference.
+
+For the RPDB-native empty-platform flow that now packages the muxer runtime
+from this repo instead of `MUXER3`, start with:
+
+- [FRESH_EMPTY_PLATFORM_RUNBOOK.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md)
+
 This runbook assumes you are working from WSL:
 
 - framework repo: `/home/master/code1/Muxingplus-Platform-Framework`

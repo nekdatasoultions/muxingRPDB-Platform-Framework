@@ -18,6 +18,13 @@ Use these when you need to stand up or validate the **base platform**:
 - safe rehearsal parameter generation through [prepare_empty_platform_params.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/prepare_empty_platform_params.py)
 - post-bootstrap head-end verification through [verify_headend_bootstrap.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/verify_headend_bootstrap.py)
 
+The muxer runtime source for this repo now lives under:
+
+- [muxer/runtime-package](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package)
+
+That means the empty-platform wrapper packages the RPDB runtime from this repo
+rather than reaching back into the sibling `MUXER3` repo.
+
 Use the other script areas for RPDB-native customer lifecycle work:
 
 - [backup](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/backup)
