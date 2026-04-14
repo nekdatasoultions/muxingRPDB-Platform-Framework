@@ -6,13 +6,14 @@ if [[ $# -lt 2 ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STACK_NAME="$1"
 PARAM_FILE="$2"
 REGION="${3:-us-east-1}"
 
-bash "$ROOT_DIR/scripts/cfn_deploy.sh" \
+bash "$SCRIPT_DIR/cfn_deploy.sh" \
   "$STACK_NAME" \
   "$PARAM_FILE" \
   "$REGION" \
-  "$ROOT_DIR/cfn/muxer-single-asg.yaml"
+  "$REPO_ROOT/infra/cfn/muxer-single-asg.yaml"

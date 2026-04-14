@@ -10,7 +10,8 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MANIFEST="$1"
 REGION_FILTER=""
 PLAN_ONLY="false"
@@ -29,8 +30,8 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "$MANIFEST" ]]; then
-  if [[ -f "$ROOT_DIR/$MANIFEST" ]]; then
-    MANIFEST="$ROOT_DIR/$MANIFEST"
+  if [[ -f "$REPO_ROOT/$MANIFEST" ]]; then
+    MANIFEST="$REPO_ROOT/$MANIFEST"
   else
     echo "Manifest not found: $MANIFEST"
     exit 1
@@ -65,13 +66,13 @@ for REGION in "${REGIONS[@]}"; do
   if [[ "$MUXER_ENABLED" == "true" ]]; then
     MUXER_STACK="$(jq -r --arg r "$REGION" '.regions[] | select(.name==$r) | .muxer.stack_name' "$MANIFEST")"
     MUXER_PARAMS="$(jq -r --arg r "$REGION" '.regions[] | select(.name==$r) | .muxer.params_file' "$MANIFEST")"
-    [[ "$MUXER_PARAMS" = /* ]] || MUXER_PARAMS="$ROOT_DIR/$MUXER_PARAMS"
+    [[ "$MUXER_PARAMS" = /* ]] || MUXER_PARAMS="$REPO_ROOT/$MUXER_PARAMS"
 
     if [[ "$PLAN_ONLY" == "true" ]]; then
       echo "[PLAN] Muxer: region=$REGION stack=$MUXER_STACK params=$MUXER_PARAMS"
     else
       echo "[DEPLOY] Muxer: region=$REGION stack=$MUXER_STACK"
-      bash "$ROOT_DIR/scripts/cfn_deploy_muxer.sh" "$MUXER_STACK" "$MUXER_PARAMS" "$REGION"
+      bash "$SCRIPT_DIR/cfn_deploy_muxer.sh" "$MUXER_STACK" "$MUXER_PARAMS" "$REGION"
     fi
   else
     echo "[SKIP] Muxer disabled for $REGION"
@@ -86,13 +87,13 @@ for REGION in "${REGIONS[@]}"; do
   for row in "${UNIT_ROWS[@]}"; do
     STACK_NAME="$(jq -r '.stack_name' <<<"$row")"
     PARAMS_FILE="$(jq -r '.params_file' <<<"$row")"
-    [[ "$PARAMS_FILE" = /* ]] || PARAMS_FILE="$ROOT_DIR/$PARAMS_FILE"
+    [[ "$PARAMS_FILE" = /* ]] || PARAMS_FILE="$REPO_ROOT/$PARAMS_FILE"
 
     if [[ "$PLAN_ONLY" == "true" ]]; then
       echo "[PLAN] VPN unit: region=$REGION stack=$STACK_NAME params=$PARAMS_FILE"
     else
       echo "[DEPLOY] VPN unit: region=$REGION stack=$STACK_NAME"
-      bash "$ROOT_DIR/scripts/cfn_deploy_vpn_headend.sh" "$STACK_NAME" "$PARAMS_FILE" "$REGION"
+      bash "$SCRIPT_DIR/cfn_deploy_vpn_headend.sh" "$STACK_NAME" "$PARAMS_FILE" "$REGION"
     fi
   done
 done

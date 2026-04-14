@@ -6,10 +6,25 @@ if [[ $# -lt 2 ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STACK_NAME="$1"
 PARAM_FILE="$2"
 REGION="${3:-us-east-1}"
-TEMPLATE_FILE="${4:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/cfn/vpn-headend-unit.yaml}"
+TEMPLATE_FILE="${4:-$REPO_ROOT/infra/cfn/vpn-headend-unit.yaml}"
+
+host_path() {
+  local path="$1"
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$path"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$path"
+    return
+  fi
+  printf '%s\n' "$path"
+}
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "aws CLI is required"
@@ -119,7 +134,7 @@ validate_subnet_pair \
 aws cloudformation deploy \
   --region "$REGION" \
   --stack-name "$STACK_NAME" \
-  --template-file "$TEMPLATE_FILE" \
+  --template-file "$(host_path "$TEMPLATE_FILE")" \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "${PARAM_OVERRIDES[@]}"
 

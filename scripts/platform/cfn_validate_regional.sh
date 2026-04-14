@@ -6,7 +6,8 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MANIFEST="$1"
 REGION_FILTER="${2:-}"
 
@@ -16,8 +17,8 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "$MANIFEST" ]]; then
-  if [[ -f "$ROOT_DIR/$MANIFEST" ]]; then
-    MANIFEST="$ROOT_DIR/$MANIFEST"
+  if [[ -f "$REPO_ROOT/$MANIFEST" ]]; then
+    MANIFEST="$REPO_ROOT/$MANIFEST"
   else
     echo "Manifest not found: $MANIFEST"
     exit 1
@@ -47,6 +48,6 @@ for REGION in "${REGIONS[@]}"; do
 
   echo
   echo "=== Validate region: $REGION ==="
-  bash "$ROOT_DIR/scripts/cfn_validate_muxer.sh" "$REGION"
-  bash "$ROOT_DIR/scripts/cfn_validate_vpn_headend.sh" "$REGION"
+  bash "$SCRIPT_DIR/cfn_validate_muxer.sh" "$REGION"
+  bash "$SCRIPT_DIR/cfn_validate_vpn_headend.sh" "$REGION"
 done

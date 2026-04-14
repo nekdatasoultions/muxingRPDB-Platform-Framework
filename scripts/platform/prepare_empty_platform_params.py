@@ -56,6 +56,8 @@ def _transform_muxer(params: List[Dict[str, str]], suffix: str) -> List[Dict[str
             updated["ParameterValue"] = ""
         elif key == "AllowEipReassociation":
             updated["ParameterValue"] = "false"
+        elif key == "RecoveryScheduleState":
+            updated["ParameterValue"] = "ENABLED"
         result.append(updated)
     return result
 
