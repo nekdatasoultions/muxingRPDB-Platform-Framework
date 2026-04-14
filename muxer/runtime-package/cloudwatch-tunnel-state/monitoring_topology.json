@@ -1,0 +1,211 @@
+{
+  "muxer": {
+    "name": "muxer-cluster-prod",
+    "instances": [
+      "i-03f05bedef2d9ba02"
+    ]
+  },
+  "hubs": [
+    {
+      "name": "vpn-headend-nat",
+      "instances": [
+        "i-0376a67c9c4ac5d0f"
+      ]
+    },
+    {
+      "name": "vpn-headend-non-nat",
+      "instances": [
+        "i-03fc7362e3c030a42"
+      ]
+    }
+  ],
+  "customers": [
+    {
+      "customer": "legacy-cust0001",
+      "conn": "legacy-cust0001",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "54.85.240.35",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "legacy-cust0002",
+      "conn": "legacy-cust0002",
+      "hub": "vpn-headend-non-nat",
+      "transport_interface": "ipip-cust-0002",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.5",
+      "transport_hub_ip": "169.254.0.6",
+      "public_ip": "166.213.153.39",
+      "ipsec_mode": "UDP/500 + ESP/50"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0001",
+      "conn": "vpn-customer-stage1-15-cust-0001",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "34.201.23.168",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0002",
+      "conn": "vpn-customer-stage1-15-cust-0002",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.236.161.125",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0003",
+      "conn": "vpn-customer-stage1-15-cust-0003",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.215.115.178",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0004",
+      "conn": "vpn-customer-stage1-15-cust-0004",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.237.201.84",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0005",
+      "conn": "vpn-customer-stage1-15-cust-0005",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "35.169.124.144",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0006",
+      "conn": "vpn-customer-stage1-15-cust-0006",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "100.54.120.200",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0007",
+      "conn": "vpn-customer-stage1-15-cust-0007",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "35.171.133.225",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0008",
+      "conn": "vpn-customer-stage1-15-cust-0008",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "44.211.86.250",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0009",
+      "conn": "vpn-customer-stage1-15-cust-0009",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "98.91.185.196",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0010",
+      "conn": "vpn-customer-stage1-15-cust-0010",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.239.168.24",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0011",
+      "conn": "vpn-customer-stage1-15-cust-0011",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.235.101.38",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0012",
+      "conn": "vpn-customer-stage1-15-cust-0012",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "44.222.157.42",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0013",
+      "conn": "vpn-customer-stage1-15-cust-0013",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "44.223.83.35",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0014",
+      "conn": "vpn-customer-stage1-15-cust-0014",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "100.55.58.139",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    },
+    {
+      "customer": "vpn-customer-stage1-15-cust-0015",
+      "conn": "vpn-customer-stage1-15-cust-0015",
+      "hub": "vpn-headend-nat",
+      "transport_interface": "ipip-cust-0001",
+      "transport_type": "IPIP",
+      "transport_muxer_ip": "169.254.0.1",
+      "transport_hub_ip": "169.254.0.2",
+      "public_ip": "3.236.195.175",
+      "ipsec_mode": "NAT-T (UDP/4500)"
+    }
+  ]
+}
