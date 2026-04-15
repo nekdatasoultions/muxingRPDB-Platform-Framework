@@ -8,7 +8,24 @@ fi
 
 S3_URI="$1"
 PROJECT_ROOT="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-TMP_ZIP="/tmp/muxingplus-ha.zip"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+TMP_DIR="$PROJECT_ROOT/.package-tmp"
+TMP_ZIP="$TMP_DIR/rpdb-platform-bundle.zip"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+to_host_path() {
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$1"
+  elif command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    echo "$1"
+  fi
+}
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "aws CLI is required"
@@ -27,7 +44,8 @@ import zipfile
 
 project_root = Path(sys.argv[1]).resolve()
 tmp_zip = Path(sys.argv[2]).resolve()
-exclude_parts = {".git", ".vscode", "__pycache__"}
+exclude_parts = {".git", ".vscode", "__pycache__", "build", ".pytest_cache"}
+tmp_zip.parent.mkdir(parents=True, exist_ok=True)
 
 if tmp_zip.exists():
     tmp_zip.unlink()
@@ -41,5 +59,5 @@ with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(path, rel.as_posix())
 PY
 
-aws s3 cp "$TMP_ZIP" "$S3_URI"
+aws s3 cp "$(to_host_path "$TMP_ZIP")" "$S3_URI"
 echo "Uploaded project package to $S3_URI"
