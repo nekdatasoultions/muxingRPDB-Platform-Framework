@@ -216,15 +216,21 @@ Dynamic NAT-T promotion is a reviewed replacement flow:
 
 1. provision the initial customer from non-NAT pools
 2. observe UDP/4500 from the same peer
-3. generate a repo-only NAT promotion request
-4. provision the promoted request from NAT pools using `--replace-customer`
-   during planning
-5. review old and new allocation summaries side by side
-6. keep old allocations reserved until the live promotion succeeds or rollback
+3. process the observation through the repo-only audited workflow
+4. generate a NAT promotion request and promoted allocation package
+5. provision the promoted request from NAT pools while ignoring the old
+   same-name package during planning
+6. reprocess the same observation to verify it returns the existing audit
+   instead of allocating again
+7. review old and new allocation summaries side by side
+8. keep old allocations reserved until the live promotion succeeds or rollback
    ownership says they can be released
 
 The `--replace-customer` flag is not a live release operation. It only prevents
 the same customer name from blocking the repo-only replacement allocation plan.
+The audited observation processor applies that same planning rule internally
+and records an idempotency key so duplicate UDP/4500 events do not create
+duplicate staged allocations.
 
 Normal delete should work like this:
 

@@ -339,53 +339,61 @@ python muxer\scripts\validate_customer_source.py $AllocatedSource --show-merged
 Use this only when the customer was intentionally started as strict non-NAT and
 the muxer later observes UDP/4500 from the same peer.
 
-This step is repo-only. It creates a NAT-T promotion request and review
-summary. It does not modify live muxer state, live head-end state, or DynamoDB.
+This step is repo-only. It creates an audited NAT-T promotion package. It does
+not modify live muxer state, live head-end state, or DynamoDB.
 
 ```powershell
-$PromotedRequest = "$WorkRoot\promoted-nat-request.yaml"
-$PromotionSummary = "$WorkRoot\promotion-summary.json"
-$PromotedSource = "$WorkRoot\promoted-customer-source.yaml"
-$PromotedModule = "$WorkRoot\promoted-customer-module.json"
-$PromotedDdbItem = "$WorkRoot\promoted-customer-ddb-item.json"
-$PromotedAllocationSummary = "$WorkRoot\promoted-allocation-summary.json"
+$Observation = "$WorkRoot\nat-t-observation.json"
+$DynamicOutDir = "$WorkRoot\dynamic-nat-t"
 ```
 
-Generate the promotion request from observed UDP/4500 facts:
+Write the observation event:
 
 ```powershell
-python muxer\scripts\plan_nat_t_promotion.py $Request `
-  --observed-peer CUSTOMER_PUBLIC_IP `
-  --observed-protocol udp `
-  --observed-dport 4500 `
-  --initial-udp500-observed `
-  --request-out $PromotedRequest `
-  --summary-out $PromotionSummary `
+@{
+  schema_version = 1
+  event_id = "$CustomerName-udp4500-observed"
+  customer_name = $CustomerName
+  observed_peer = "CUSTOMER_PUBLIC_IP"
+  observed_protocol = "udp"
+  observed_dport = 4500
+  initial_udp500_observed = $true
+  packet_count = 1
+  observed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  source = "operator-reviewed"
+} | ConvertTo-Json | Set-Content -Encoding utf8 $Observation
+```
+
+Process the observation and stage the full promotion package:
+
+```powershell
+python muxer\scripts\process_nat_t_observation.py $Request `
+  --observation $Observation `
+  --out-dir $DynamicOutDir `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
 
-Validate and provision the promoted request from NAT pools:
+Run the same command again. The second result should report
+`status: already_planned` and `new_allocation_created: false`.
+
+Validate the staged promoted artifacts using the paths returned in the JSON:
 
 ```powershell
-python muxer\scripts\validate_customer_request.py $PromotedRequest
-```
+python muxer\scripts\validate_customer_request.py `
+  "$DynamicOutDir\$CustomerName\IDEMPOTENCY_KEY\promoted-nat-request.yaml"
 
-```powershell
-python muxer\scripts\provision_customer_request.py $PromotedRequest `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
-  --replace-customer $CustomerName `
-  --source-out $PromotedSource `
-  --module-out $PromotedModule `
-  --item-out $PromotedDdbItem `
-  --allocation-out $PromotedAllocationSummary
+python muxer\scripts\validate_customer_source.py `
+  "$DynamicOutDir\$CustomerName\IDEMPOTENCY_KEY\promoted-customer-source.yaml"
 ```
 
 Review:
 
 - `$AllocationSummary` should show the initial non-NAT pool allocation
-- `$PromotedAllocationSummary` should show the proposed NAT pool allocation
-- `$PromotionSummary` should show `live_apply: false`
+- the promoted allocation summary should show the proposed NAT pool allocation
+- the audit record should show `live_apply: false`
+- duplicate processing should not create a new allocation
 - the promoted request should enable UDP/4500
 - old non-NAT reservations should not be released until the live promotion has
   either succeeded or rollback ownership says they can be released

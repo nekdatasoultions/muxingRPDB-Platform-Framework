@@ -65,7 +65,76 @@ See the committed example:
 
 - `muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml`
 
-## Repo-Only Promotion Command
+## Observation Event Shape
+
+The muxer-side detection feed should be converted into this repo-only event
+shape before any promotion planning:
+
+```json
+{
+  "schema_version": 1,
+  "event_id": "example-dynamic-default-nonnat-udp4500-demo",
+  "customer_name": "example-dynamic-default-nonnat",
+  "observed_peer": "203.0.113.55",
+  "observed_protocol": "udp",
+  "observed_dport": 4500,
+  "initial_udp500_observed": true,
+  "packet_count": 1,
+  "observed_at": "2026-04-15T20:45:00Z",
+  "source": "repo-only-example"
+}
+```
+
+See:
+
+- `muxer/config/customer-requests/examples/example-dynamic-nat-t-observation.json`
+- `muxer/config/schema/dynamic-nat-t-observation.schema.json`
+
+## Audited Repo-Only Processor
+
+Use the audited processor for the normal workflow. It writes the observation,
+promotion request, promoted source, module, DynamoDB item view, allocation
+summary, allocation DDB item view, promotion summary, and audit record under
+one idempotent artifact directory.
+
+If the same UDP/4500 observation is processed again for the same customer and
+peer, the processor returns the existing audit/artifacts instead of allocating
+again.
+
+```powershell
+$CustomerName = "example-dynamic-default-nonnat"
+$WorkRoot = "build\onboarding\$CustomerName\dynamic-nat-t"
+$InitialRequest = "muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml"
+$Observation = "muxer\config\customer-requests\examples\example-dynamic-nat-t-observation.json"
+
+python muxer\scripts\process_nat_t_observation.py $InitialRequest `
+  --observation $Observation `
+  --out-dir $WorkRoot `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --json
+```
+
+The returned JSON includes:
+
+- `status`
+- `live_apply: false`
+- `idempotency_key`
+- `new_allocation_created`
+- `artifacts.audit`
+- `artifacts.promoted_request`
+- `artifacts.promoted_source`
+- `artifacts.promoted_module`
+- `artifacts.promoted_item`
+- `artifacts.promoted_allocation_summary`
+
+Run the same command a second time to verify idempotency. The expected result
+is:
+
+- `status: already_planned`
+- `new_allocation_created: false`
+
+## Lower-Level Promotion Command
 
 Generate a NAT-T promotion request:
 
@@ -113,6 +182,8 @@ Before any live deployment, review:
 - promoted package allocated from NAT pools
 - promoted package enables UDP/4500
 - peer IP in the observed event matches the customer peer
+- audit record has `live_apply: false`
+- duplicate processing returns `already_planned`
 - no live database writes happened
 - no live muxer or head-end apply happened
 - rollback owner decides whether old non-NAT reservations are retained or

@@ -162,37 +162,42 @@ Use this committed example for the initial request shape:
 muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml
 ```
 
-The promotion command is:
+Create an observation file after the muxer has seen UDP/4500 from the same
+peer:
 
 ```powershell
-python muxer\scripts\plan_nat_t_promotion.py $Request `
-  --observed-peer CUSTOMER_PUBLIC_IP `
-  --observed-protocol udp `
-  --observed-dport 4500 `
-  --initial-udp500-observed `
-  --request-out "$WorkRoot\promoted-nat-request.yaml" `
-  --summary-out "$WorkRoot\promotion-summary.json" `
+$Observation = "$WorkRoot\nat-t-observation.json"
+
+@{
+  schema_version = 1
+  event_id = "$CustomerName-udp4500-observed"
+  customer_name = $CustomerName
+  observed_peer = "CUSTOMER_PUBLIC_IP"
+  observed_protocol = "udp"
+  observed_dport = 4500
+  initial_udp500_observed = $true
+  packet_count = 1
+  observed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  source = "operator-reviewed"
+} | ConvertTo-Json | Set-Content -Encoding utf8 $Observation
+```
+
+Then process it through the audited repo-only workflow:
+
+```powershell
+python muxer\scripts\process_nat_t_observation.py $Request `
+  --observation $Observation `
+  --out-dir "$WorkRoot\dynamic-nat-t" `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
 
-Then validate and provision the promoted request with `--replace-customer` so
-the allocator plans the NAT replacement package without mutating the old
-non-NAT package in place.
+Run the same command twice. The second run should return
+`status: already_planned` and `new_allocation_created: false`.
 
-```powershell
-python muxer\scripts\validate_customer_request.py "$WorkRoot\promoted-nat-request.yaml"
-
-python muxer\scripts\provision_customer_request.py "$WorkRoot\promoted-nat-request.yaml" `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
-  --replace-customer $CustomerName `
-  --source-out "$WorkRoot\promoted-customer-source.yaml" `
-  --module-out "$WorkRoot\promoted-customer-module.json" `
-  --item-out "$WorkRoot\promoted-customer-ddb-item.json" `
-  --allocation-out "$WorkRoot\promoted-allocation-summary.json"
-```
-
-Stop after reviewing the promotion package. Live promotion still needs its own
+Stop after reviewing the promoted request, source, module, DynamoDB item view,
+allocation summary, and audit record. Live promotion still needs its own
 approved change window.
 
 ## Create The Customer Request

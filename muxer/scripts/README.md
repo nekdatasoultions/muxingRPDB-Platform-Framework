@@ -20,6 +20,12 @@ Current scaffold helpers:
   - creates a repo-only NAT-T promotion request when a dynamic strict non-NAT
     customer is later observed on UDP/4500
   - writes a promotion summary without touching live nodes or DynamoDB
+- `process_nat_t_observation.py`
+  - consumes a repo-only UDP/4500 observation event
+  - stages the promoted NAT-T request, allocated source, module, DynamoDB item
+    view, allocation views, promotion summary, and audit record
+  - is idempotent for repeat observations of the same customer, peer,
+    protocol, and destination port
 - `validate_customer_source.py`
   - validates a single customer source file
   - loads defaults and class overrides

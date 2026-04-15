@@ -105,6 +105,8 @@ Use existing provisioning to create:
 
 - initial non-NAT allocation package
 - promoted NAT-T allocation package
+- observation audit record
+- idempotency key for the UDP/4500 trigger
 
 Validation:
 
@@ -112,6 +114,8 @@ Validation:
 - promoted package allocates from NAT pools
 - promoted package can use `--replace-customer` to ignore the old same-name
   package during planning
+- reprocessing the same observation returns the existing audit/artifacts
+  instead of allocating again
 - neither package is applied live
 
 ### Stage 5: Document Operator Flow
@@ -138,7 +142,8 @@ Validation:
 - Python compile checks pass
 - request validation passes
 - initial non-NAT provisioning passes
-- NAT-T promotion planning passes
+- NAT-T observation processing passes
+- duplicate NAT-T observation idempotency passes
 - promoted NAT provisioning passes
 - render/package/staged head-end validation still passes
 - full repo verification passes

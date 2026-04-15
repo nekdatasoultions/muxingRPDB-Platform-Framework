@@ -111,6 +111,7 @@ def main() -> int:
             "runtime_plan": str(MUXER_DIR / "docs" / "RUNTIME_COMPLETION_PLAN.md"),
             "provisioning_input_model": str(MUXER_DIR / "docs" / "PROVISIONING_INPUT_MODEL.md"),
             "resource_allocation_model": str(MUXER_DIR / "docs" / "RESOURCE_ALLOCATION_MODEL.md"),
+            "dynamic_nat_t_provisioning": str(MUXER_DIR / "docs" / "DYNAMIC_NAT_T_PROVISIONING.md"),
         },
     }
 
@@ -130,6 +131,7 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "validate_customer_allocations.py"),
         str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
         str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
+        str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
@@ -204,58 +206,68 @@ def main() -> int:
     if dynamic_promotion_dir.exists():
         shutil.rmtree(dynamic_promotion_dir)
     dynamic_promotion_dir.mkdir(parents=True, exist_ok=True)
-    promoted_request_path = dynamic_promotion_dir / "promoted-nat-request.yaml"
-    promotion_summary_path = dynamic_promotion_dir / "promotion-summary.json"
-    promotion_summary = _run_json(
-        [
-            "python",
-            str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
-            str(request_paths[dynamic_name]),
-            "--observed-peer",
-            "203.0.113.55",
-            "--observed-protocol",
-            "udp",
-            "--observed-dport",
-            "4500",
-            "--initial-udp500-observed",
-            "--request-out",
-            str(promoted_request_path),
-            "--summary-out",
-            str(promotion_summary_path),
-            "--json",
-        ]
+    observation_path = (
+        MUXER_DIR
+        / "config"
+        / "customer-requests"
+        / "examples"
+        / "example-dynamic-nat-t-observation.json"
     )
-    _run(["python", str(MUXER_DIR / "scripts" / "validate_customer_request.py"), str(promoted_request_path)])
-    promoted_source_out = dynamic_promotion_dir / "promoted-customer-source.yaml"
-    promoted_result = _run_json(
+    workflow_result = _run_json(
         [
             "python",
-            str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
-            str(promoted_request_path),
+            str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
+            str(request_paths[dynamic_name]),
+            "--observation",
+            str(observation_path),
+            "--out-dir",
+            str(dynamic_promotion_dir),
             "--existing-source-root",
             str(MUXER_DIR / "config" / "customer-sources"),
             "--existing-source-root",
             str(generated_sources_root),
-            "--replace-customer",
-            dynamic_name,
-            "--source-out",
-            str(promoted_source_out),
             "--json",
         ]
     )
+    duplicate_workflow_result = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
+            str(request_paths[dynamic_name]),
+            "--observation",
+            str(observation_path),
+            "--out-dir",
+            str(dynamic_promotion_dir),
+            "--existing-source-root",
+            str(MUXER_DIR / "config" / "customer-sources"),
+            "--existing-source-root",
+            str(generated_sources_root),
+            "--json",
+        ]
+    )
+    artifacts = workflow_result["artifacts"]
+    _run(["python", str(MUXER_DIR / "scripts" / "validate_customer_request.py"), artifacts["promoted_request"]])
+    _run(["python", str(MUXER_DIR / "scripts" / "validate_customer_source.py"), artifacts["promoted_source"]])
     if provision_results[dynamic_name]["allocation_plan"]["pool_class"] != "non-nat":
         raise SystemExit("dynamic initial request did not allocate from the non-NAT pool")
-    if promoted_result["allocation_plan"]["pool_class"] != "nat":
+    if workflow_result["allocation_plan"]["pool_class"] != "nat":
         raise SystemExit("dynamic NAT-T promotion did not allocate from the NAT pool")
+    if duplicate_workflow_result["status"] != "already_planned":
+        raise SystemExit("duplicate dynamic NAT-T observation was not idempotent")
+    if duplicate_workflow_result["new_allocation_created"]:
+        raise SystemExit("duplicate dynamic NAT-T observation unexpectedly allocated again")
     record_step(
-        "dynamic_nat_t_promotion_planning",
+        "dynamic_nat_t_observation_processing",
         {
             "customer_name": dynamic_name,
             "initial_pool_class": provision_results[dynamic_name]["allocation_plan"]["pool_class"],
-            "promoted_pool_class": promoted_result["allocation_plan"]["pool_class"],
-            "promoted_customer_id": promoted_result["allocation_plan"]["customer_id"],
-            "promoted_request": str(promoted_request_path),
-            "promotion_summary": promotion_summary,
+            "promoted_pool_class": workflow_result["allocation_plan"]["pool_class"],
+            "promoted_customer_id": workflow_result["allocation_plan"]["customer_id"],
+            "idempotency_key": workflow_result["idempotency_key"],
+            "duplicate_status": duplicate_workflow_result["status"],
+            "promoted_request": artifacts["promoted_request"],
+            "audit": artifacts["audit"],
+            "promotion_summary": workflow_result["promotion_summary"],
         },
     )
 

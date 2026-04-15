@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import ipaddress
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
@@ -70,6 +72,82 @@ def _promotion_doc(dynamic: Dict[str, Any]) -> Dict[str, Any]:
 
 def dynamic_provisioning_enabled(doc: Dict[str, Any]) -> bool:
     return bool(_dynamic_doc(_customer_doc(doc)).get("enabled"))
+
+
+def customer_name_from_doc(doc: Dict[str, Any]) -> str:
+    customer_name = str(_customer_doc(doc).get("name") or "").strip()
+    if not customer_name:
+        raise ValueError("customer.name is required")
+    return customer_name
+
+
+def normalize_nat_t_observation_event(
+    event_doc: Dict[str, Any],
+    *,
+    default_customer_name: str = "",
+) -> Dict[str, Any]:
+    """Normalize a muxer-observed UDP/4500 event for repo-only processing."""
+
+    if not isinstance(event_doc, dict):
+        raise ValueError("NAT-T observation event must be a mapping")
+
+    customer_name = str(event_doc.get("customer_name") or default_customer_name).strip()
+    if not customer_name:
+        raise ValueError("NAT-T observation event must include customer_name")
+
+    peer_value = (
+        event_doc.get("observed_peer")
+        or event_doc.get("observed_peer_ip")
+        or event_doc.get("peer_ip")
+    )
+    if not peer_value:
+        raise ValueError("NAT-T observation event must include observed_peer")
+    observed_peer = str(ipaddress.ip_address(str(peer_value).strip()))
+
+    observed_protocol = str(event_doc.get("observed_protocol") or event_doc.get("protocol") or "udp")
+    observed_protocol = observed_protocol.strip().lower()
+    observed_dport = int(
+        event_doc.get("observed_dport")
+        or event_doc.get("destination_port")
+        or event_doc.get("dport")
+        or 4500
+    )
+    packet_count = int(event_doc.get("packet_count") or 1)
+    if packet_count < 1:
+        raise ValueError("NAT-T observation event packet_count must be positive")
+
+    normalized = {
+        "schema_version": int(event_doc.get("schema_version") or 1),
+        "event_id": str(event_doc.get("event_id") or "").strip(),
+        "customer_name": customer_name,
+        "observed_peer": observed_peer,
+        "observed_protocol": observed_protocol,
+        "observed_dport": observed_dport,
+        "initial_udp500_observed": bool(event_doc.get("initial_udp500_observed")),
+        "packet_count": packet_count,
+        "observed_at": str(event_doc.get("observed_at") or "").strip(),
+        "source": str(event_doc.get("source") or "").strip(),
+    }
+    if normalized["observed_protocol"] != "udp":
+        raise ValueError("NAT-T observation event observed_protocol must be udp")
+    if normalized["observed_dport"] != 4500:
+        raise ValueError("NAT-T observation event observed_dport must be 4500")
+    return normalized
+
+
+def build_nat_t_observation_idempotency_key(event: Dict[str, Any]) -> str:
+    """Return a stable key so repeat UDP/4500 observations reuse one plan."""
+
+    key_doc = {
+        "schema_version": 1,
+        "action": "nat_t_auto_promote",
+        "customer_name": str(event["customer_name"]).strip(),
+        "observed_peer": str(event["observed_peer"]).strip(),
+        "observed_protocol": str(event["observed_protocol"]).strip().lower(),
+        "observed_dport": int(event["observed_dport"]),
+    }
+    encoded = json.dumps(key_doc, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def validate_dynamic_initial_request(doc: Dict[str, Any]) -> Dict[str, Any]:

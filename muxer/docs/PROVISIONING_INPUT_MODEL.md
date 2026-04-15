@@ -126,6 +126,7 @@ The repo now has a working minimal-request provisioning path through:
 - [validate_customer_allocations.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/validate_customer_allocations.py)
 - [provision_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/provision_customer_request.py)
 - [plan_nat_t_promotion.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/plan_nat_t_promotion.py)
+- [process_nat_t_observation.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/process_nat_t_observation.py)
 
 That path now:
 
@@ -139,6 +140,9 @@ That path now:
 - emits the exclusive allocation DDB item view
 - can produce a repo-only NAT-T promotion request when a dynamic strict
   non-NAT customer is later observed on UDP/4500
+- can process the UDP/4500 observation through an idempotent audit workflow so
+  repeat observations return the existing staged package instead of allocating
+  again
 
 ## Dynamic NAT-T Promotion Input
 
@@ -152,9 +156,9 @@ strict non-NAT:
 - `protocols.esp50: true`
 
 If the muxer later observes UDP/4500 from that same peer, the dynamic
-provisioning helper can generate a reviewed NAT-T promotion request. This
-promotion request changes the customer class to `nat`, enables UDP/4500, and
-uses NAT allocation pools.
+provisioning processor can generate a reviewed NAT-T promotion package. This
+package changes the customer class to `nat`, enables UDP/4500, uses NAT
+allocation pools, and writes an audit record proving `live_apply: false`.
 
 The committed example is:
 
