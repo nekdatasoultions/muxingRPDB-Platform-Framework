@@ -39,7 +39,7 @@ fi
 mapfile -t PARAM_OVERRIDES < <(python3 - "$PARAM_FILE" <<'PY'
 import json, sys
 path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as fh:
+with open(path, "r", encoding="utf-8-sig") as fh:
     data = json.load(fh)
 for item in data:
     k = item["ParameterKey"]
