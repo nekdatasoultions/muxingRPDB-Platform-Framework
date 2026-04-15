@@ -33,6 +33,18 @@ bundle/
 - `muxer/`
 - `headend/`
 
+## Required Head-End Files
+
+To support customer-scoped head-end apply/remove orchestration, the bundle must
+carry these files:
+
+- `headend/ipsec/ipsec-intent.json`
+- `headend/ipsec/swanctl-connection.conf`
+- `headend/routing/routing-intent.json`
+- `headend/routing/ip-route.commands.txt`
+- `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
+- `headend/post-ipsec-nat/iptables-snippet.txt`
+
 ## Recommended Contents
 
 - `customer/customer-source.yaml`

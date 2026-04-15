@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 REQUIRED_TOP_LEVEL_FILES = [
@@ -27,6 +28,23 @@ REQUIRED_CUSTOMER_FILES = [
     "customer/customer-module.json",
     "customer/customer-ddb-item.json",
 ]
+
+REQUIRED_HEADEND_FILES = [
+    "headend/ipsec/ipsec-intent.json",
+    "headend/ipsec/swanctl-connection.conf",
+    "headend/routing/routing-intent.json",
+    "headend/routing/ip-route.commands.txt",
+    "headend/post-ipsec-nat/post-ipsec-nat-intent.json",
+    "headend/post-ipsec-nat/iptables-snippet.txt",
+]
+
+HEADEND_TEXT_FILES = [
+    "headend/ipsec/swanctl-connection.conf",
+    "headend/routing/ip-route.commands.txt",
+    "headend/post-ipsec-nat/iptables-snippet.txt",
+]
+
+PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
 
 
 def main() -> int:
@@ -60,6 +78,21 @@ def main() -> int:
         for name in REQUIRED_CUSTOMER_FILES:
             if not (bundle_dir / name).exists():
                 report["errors"].append(f"missing required file: {name}")
+
+        for name in REQUIRED_HEADEND_FILES:
+            path = bundle_dir / name
+            if not path.exists():
+                report["errors"].append(f"missing required file: {name}")
+
+        for name in HEADEND_TEXT_FILES:
+            path = bundle_dir / name
+            if not path.exists():
+                continue
+            unresolved = sorted(set(PLACEHOLDER_RE.findall(path.read_text(encoding="utf-8"))))
+            if unresolved:
+                report["errors"].append(
+                    f"headend bundle file has unresolved placeholders: {name} -> {', '.join(unresolved)}"
+                )
 
         for name in RECOMMENDED_FILES:
             if not (bundle_dir / name).exists():

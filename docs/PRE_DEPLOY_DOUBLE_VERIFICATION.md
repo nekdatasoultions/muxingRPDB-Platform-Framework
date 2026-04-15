@@ -24,10 +24,13 @@ verification path across both branches:
 7. validate the bound handoff
 8. assemble the customer bundle
 9. validate the customer bundle
-10. verify the backup baseline
-11. generate pre-change backup notes
-12. generate rollout and rollback notes
-13. run deployment readiness
+10. apply the bundle to a staged head-end root
+11. validate the staged head-end install
+12. remove the staged head-end install
+13. verify the backup baseline
+14. generate pre-change backup notes
+15. generate rollout and rollback notes
+16. run deployment readiness
 
 ## Example
 
@@ -58,7 +61,18 @@ python scripts\deployment\run_double_verification.py `
 The wrapper writes a JSON summary plus the intermediate rendered, bound, and
 packaged outputs under `build\double-verification\<customer-name>\...`.
 
+The new staged head-end root also lives there during the verification run:
+
+- `build\double-verification\<customer-name>\headend-root`
+
 ## Gate
 
 No live-node work should begin until this wrapper succeeds for the target
 customer and the resulting summary has been reviewed.
+
+One honest boundary remains:
+
+- the wrapper still expects a valid backup baseline fixture or shared baseline
+  path
+- if that input is missing, the earlier framework, bundle, and staged head-end
+  orchestration steps can still pass while the backup-gate portion fails

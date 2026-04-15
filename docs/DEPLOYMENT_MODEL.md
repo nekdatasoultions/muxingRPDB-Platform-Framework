@@ -55,6 +55,9 @@ The first deployment branch helpers are intentionally preflight-oriented:
 - [deployment_readiness_check.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/deployment_readiness_check.py)
 - [create_rollout_notes.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/create_rollout_notes.py)
 - [run_double_verification.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/run_double_verification.py)
+- [apply_headend_customer.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/deployment/apply_headend_customer.py)
+- [validate_headend_customer.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/deployment/validate_headend_customer.py)
+- [remove_headend_customer.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/deployment/remove_headend_customer.py)
 
 ## Double Verification Gate
 
@@ -75,6 +78,11 @@ handoff directory containing:
 
 The deployment branch is responsible for packaging, validating, and preflighting
 that handoff output before any live-node apply logic is added.
+
+The repo now also has a customer-scoped head-end install/apply/remove contract
+for staged roots and future on-node use:
+
+- [HEADEND_CUSTOMER_ORCHESTRATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/HEADEND_CUSTOMER_ORCHESTRATION.md)
 
 ## Current Platform Baseline
 

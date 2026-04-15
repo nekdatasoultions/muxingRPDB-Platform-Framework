@@ -85,6 +85,28 @@ python scripts\deployment\run_double_verification.py `
 - apply active head-end customer-scoped changes
 - stage standby head-end changes
 
+Suggested head-end helpers:
+
+```powershell
+python scripts\deployment\apply_headend_customer.py `
+  --bundle-dir <bundle-dir> `
+  --headend-root <staged-headend-root-or-/>
+python scripts\deployment\validate_headend_customer.py `
+  --bundle-dir <bundle-dir> `
+  --headend-root <staged-headend-root-or-/>
+```
+
+The head-end apply helper installs:
+
+- `etc\swanctl\conf.d\rpdb-customers\<customer>.conf`
+- `var\lib\rpdb-headend\customers\<customer>\...`
+
+And it generates customer-scoped:
+
+- route apply/remove scripts
+- post-IPsec NAT apply/remove scripts
+- master apply/remove wrappers
+
 ### 5. Validate
 
 - control-plane validation
@@ -100,5 +122,8 @@ python scripts\deployment\run_double_verification.py `
 
 ## Notes
 
-- This branch is still scaffolding. The concrete apply commands will be added
-  after the generated artifact layout is finalized.
+- The bundle-driven head-end install/apply/remove flow is now available for
+  repo-only staged roots and future on-node use.
+- Post-IPsec NAT still depends on the current snippet renderer. Validation will
+  warn when NAT intent is enabled but the snippet contains no executable
+  commands.

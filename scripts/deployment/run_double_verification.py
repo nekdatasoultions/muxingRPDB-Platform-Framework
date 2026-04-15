@@ -131,6 +131,7 @@ def main() -> int:
     handoff_dir = framework_root / "handoff"
     bound_dir = framework_root / "bound-handoff"
     bundle_dir = deployment_root / "bundle"
+    headend_root = deployment_root / "headend-root"
     notes_dir = deployment_root / "notes"
     prechange_note = notes_dir / "prechange.md"
     rollback_note = notes_dir / "rollback.md"
@@ -224,6 +225,45 @@ def main() -> int:
         _run_step(
             "validate_customer_bundle",
             [python, "scripts/packaging/validate_customer_bundle.py", str(bundle_dir)],
+            deployment_repo,
+            steps,
+        )
+        _run_step(
+            "apply_headend_customer",
+            [
+                python,
+                "scripts/deployment/apply_headend_customer.py",
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+            ],
+            deployment_repo,
+            steps,
+        )
+        _run_step(
+            "validate_headend_customer",
+            [
+                python,
+                "scripts/deployment/validate_headend_customer.py",
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+            ],
+            deployment_repo,
+            steps,
+        )
+        _run_step(
+            "remove_headend_customer",
+            [
+                python,
+                "scripts/deployment/remove_headend_customer.py",
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+            ],
             deployment_repo,
             steps,
         )
