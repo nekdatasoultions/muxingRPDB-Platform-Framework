@@ -124,6 +124,7 @@ The repo now has a working minimal-request provisioning path through:
 - [plan_nat_t_promotion.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/plan_nat_t_promotion.py)
 - [process_nat_t_observation.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/process_nat_t_observation.py)
 - [provision_customer_end_to_end.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/provision_customer_end_to_end.py)
+- [watch_nat_t_logs.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/watch_nat_t_logs.py)
 - [prepare_customer_pilot.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/prepare_customer_pilot.py)
 
 That path now:
@@ -143,6 +144,8 @@ That path now:
   again
 - exposes a one-file operator entrypoint where the normal command is
   `python muxer\scripts\provision_customer_end_to_end.py <customer-request.yaml>`
+- can watch muxer logs, detect UDP/500 followed by UDP/4500 for a dynamic
+  customer peer, and automatically create the NAT-T observation/package
 - can wrap the repo-only request, allocation, render, handoff, bundle,
   validation, staged head-end, and readiness checks into one pilot review
   package

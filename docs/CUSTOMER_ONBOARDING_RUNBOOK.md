@@ -210,7 +210,8 @@ customer:
 Do not add `customer_class` or `backend.cluster` for normal onboarding. The
 allocator defaults the initial package to strict non-NAT and records dynamic
 NAT-T promotion as enabled. If the muxer later observes UDP/4500 from the same
-peer, process that observation to generate a reviewed NAT-T package.
+peer, the NAT-T watcher should process the log event and generate a reviewed
+NAT-T package.
 
 Post-IPsec NAT one-to-one `/27` example:
 
@@ -274,6 +275,19 @@ python muxer\scripts\provision_customer_end_to_end.py $Request `
   --observation "$WorkRoot\nat-t-observation.json" `
   --out-dir $WorkRoot `
   --json
+```
+
+For automated detection, run the watcher against muxer log events:
+
+```powershell
+python muxer\scripts\watch_nat_t_logs.py `
+  --customer-request-root muxer\config\customer-requests `
+  --log-file C:\path\to\muxer-nat-t-events.jsonl `
+  --state-file C:\path\to\nat-t-watcher-state.json `
+  --out-dir C:\path\to\nat-t-watcher-output `
+  --package-root C:\path\to\customer-provisioning `
+  --run-provisioning `
+  --follow
 ```
 
 Review these primary outputs:

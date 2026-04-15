@@ -61,6 +61,11 @@ def _write_yaml(path: Path, payload: dict) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _write_text(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8")
+
+
 def _stage_customer_modules(build_dir: Path, provision_results: dict[str, dict]) -> Path:
     module_root = build_dir / "customer-modules"
     if module_root.exists():
@@ -133,6 +138,7 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
         str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
         str(MUXER_DIR / "scripts" / "provision_customer_end_to_end.py"),
+        str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
         str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
@@ -422,6 +428,87 @@ def main() -> int:
         "one_file_end_to_end_provisioning_entrypoint",
         {
             "customers": e2e_reports,
+        },
+    )
+
+    # Step 3e: verify automated NAT-T log watching can detect UDP/4500,
+    # correlate it to a customer request, and launch the one-file provisioning
+    # workflow without touching live systems.
+    watcher_root = BUILD_ROOT / "nat-t-log-watcher"
+    if watcher_root.exists():
+        shutil.rmtree(watcher_root)
+    watcher_root.mkdir(parents=True, exist_ok=True)
+    watcher_log = watcher_root / "muxer-events.jsonl"
+    _write_text(
+        watcher_log,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "observed_peer": "3.237.201.84",
+                        "observed_protocol": "udp",
+                        "observed_dport": 500,
+                        "observed_at": "2026-04-15T22:45:00Z",
+                    },
+                    sort_keys=True,
+                ),
+                json.dumps(
+                    {
+                        "observed_peer": "3.237.201.84",
+                        "observed_protocol": "udp",
+                        "observed_dport": 4500,
+                        "observed_at": "2026-04-15T22:45:02Z",
+                    },
+                    sort_keys=True,
+                ),
+            ]
+        ),
+    )
+    watcher_command = [
+        "python",
+        str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
+        "--customer-request",
+        str(
+            MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "vpn-customer-stage1-15-cust-0004.yaml"
+        ),
+        "--log-file",
+        str(watcher_log),
+        "--out-dir",
+        str(watcher_root / "out"),
+        "--state-file",
+        str(watcher_root / "state.json"),
+        "--package-root",
+        str(watcher_root / "packages"),
+        "--run-provisioning",
+        "--json",
+    ]
+    watcher_report = _run_json(watcher_command)
+    if watcher_report["detected_count"] != 1:
+        raise SystemExit("NAT-T watcher did not detect exactly one promotion event")
+    detected = watcher_report["detected"][0]
+    provisioning_json = (detected.get("provisioning") or {}).get("json") or {}
+    if provisioning_json.get("status") != "ready_for_review":
+        raise SystemExit("NAT-T watcher provisioning did not produce a ready package")
+    if provisioning_json.get("live_apply") is not False:
+        raise SystemExit("NAT-T watcher provisioning live_apply guard failed")
+
+    second_pass = _run_json(watcher_command)
+    if second_pass["detected_count"] != 0:
+        raise SystemExit("NAT-T watcher was not idempotent on second pass")
+    record_step(
+        "automated_nat_t_log_watcher",
+        {
+            "detected_customer": detected["customer_name"],
+            "observation": detected["observation"],
+            "package_dir": provisioning_json["package_dir"],
+            "ready_for_review": provisioning_json["ready_for_review"],
+            "live_apply": provisioning_json["live_apply"],
+            "second_pass_detected_count": second_pass["detected_count"],
+            "watch_summary": watcher_report["out_dir"] + "/watch-summary.json",
         },
     )
 

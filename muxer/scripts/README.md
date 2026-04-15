@@ -10,6 +10,11 @@ Current scaffold helpers:
     package, readiness report, bundle, and double-verification artifacts
   - accepts an optional NAT-T observation file to run the audited promotion
     workflow before packaging
+- `watch_nat_t_logs.py`
+  - watches muxer JSONL or iptables-style logs for UDP/500 then UDP/4500
+  - correlates observed peers to dynamic customer requests
+  - writes idempotent NAT-T observation files
+  - can call the one-file provisioning entrypoint automatically
 - `validate_customer_request.py`
   - validates a minimal customer provisioning request
   - reports the effective customer class and allocation pool

@@ -152,8 +152,8 @@ That means:
 - the customer is placed on the non-NAT stack
 
 If the muxer later sees UDP/4500 from that same peer, do not hand-edit the
-customer into production. Generate a repo-only NAT-T promotion package and
-review it.
+customer into production. The NAT-T watcher should generate the repo-only NAT-T
+promotion package and leave it for review.
 
 Use this committed example for the initial request shape:
 
@@ -161,8 +161,21 @@ Use this committed example for the initial request shape:
 muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml
 ```
 
-Create an observation file after the muxer has seen UDP/4500 from the same
-peer:
+The automated watcher can read muxer log events and run provisioning:
+
+```powershell
+python muxer\scripts\watch_nat_t_logs.py `
+  --customer-request-root muxer\config\customer-requests `
+  --log-file C:\path\to\muxer-nat-t-events.jsonl `
+  --state-file C:\path\to\nat-t-watcher-state.json `
+  --out-dir C:\path\to\nat-t-watcher-output `
+  --package-root C:\path\to\customer-provisioning `
+  --run-provisioning `
+  --follow
+```
+
+For repo-only testing or emergency manual review, create an observation file
+after the muxer has seen UDP/4500 from the same peer:
 
 ```powershell
 $Observation = "$WorkRoot\nat-t-observation.json"
