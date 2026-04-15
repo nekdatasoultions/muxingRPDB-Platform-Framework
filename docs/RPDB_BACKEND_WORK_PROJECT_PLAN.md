@@ -34,6 +34,15 @@ The backend platform means:
 This plan stops when the backend is ready for customer package deployment. It
 does not deploy a customer.
 
+Backend work must produce enough environment metadata for the one-command
+customer deploy orchestrator. Operators should not manually pass node targets,
+table names, artifact paths, or NAT/non-NAT head-end choices during normal
+customer onboarding.
+
+Orchestrator plan:
+
+- `docs/RPDB_ONE_COMMAND_CUSTOMER_DEPLOY_ORCHESTRATOR_PLAN.md`
+
 ## Stage 1: Confirm Backend Targets
 
 Define the exact backend targets before any backend deploy:
@@ -274,7 +283,10 @@ Output:
 - non-NAT head-end health evidence
 - database readiness evidence
 - NAT-T watcher readiness evidence
+- deployment environment file consumed by the one-command customer deploy
+  orchestrator
 
 Next plan:
 
 - `docs/RPDB_CUSTOMER_DEPLOY_PROJECT_PLAN.md`
+- `docs/RPDB_ONE_COMMAND_CUSTOMER_DEPLOY_ORCHESTRATOR_PLAN.md`

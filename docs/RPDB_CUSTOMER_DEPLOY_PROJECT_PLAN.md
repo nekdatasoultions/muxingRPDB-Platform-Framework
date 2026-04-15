@@ -22,6 +22,14 @@ Not allowed in this plan without explicit approval:
 
 Deploy reviewed RPDB customer packages one customer at a time.
 
+The normal operator interface should be one command against one customer file.
+The stages in this plan are the internal phases the orchestrator performs, not
+manual steps an operator should carry every time.
+
+Orchestrator plan:
+
+- `docs/RPDB_ONE_COMMAND_CUSTOMER_DEPLOY_ORCHESTRATOR_PLAN.md`
+
 The first planned customers are:
 
 - `legacy-cust0002` for strict non-NAT path validation
@@ -73,9 +81,10 @@ Validation:
 
 ## Stage 2: Rebuild Repo-Only Customer Package
 
-Rebuild the customer package immediately before deployment.
+Rebuild the customer package immediately before deployment. In the target
+operator model, this is performed by the one-command orchestrator.
 
-Customer 2 command:
+Internal Customer 2 command:
 
 ```powershell
 python muxer\scripts\provision_customer_end_to_end.py `
@@ -84,7 +93,7 @@ python muxer\scripts\provision_customer_end_to_end.py `
   --json
 ```
 
-Customer 4 NAT-T command shape:
+Internal Customer 4 NAT-T command shape:
 
 ```powershell
 python muxer\scripts\watch_nat_t_logs.py `
@@ -169,7 +178,9 @@ python scripts\deployment\deployment_readiness_check.py `
 
 ## Stage 5: Apply Customer Package
 
-Apply one customer package in a controlled order.
+Apply one customer package in a controlled order. In the target operator model,
+the orchestrator performs this after package, environment, backup, and approval
+gates pass.
 
 Expected apply order:
 
