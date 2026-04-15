@@ -17,7 +17,7 @@ DEFAULT_NONNAT_PARAMS = REPO_ROOT / "infra" / "cfn" / "parameters.vpn-headend.no
 
 
 def _load_parameter_map(path: Path) -> Dict[str, str]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, list):
         raise ValueError(f"expected CloudFormation parameter array in {path}")
     result: Dict[str, str] = {}
