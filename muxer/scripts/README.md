@@ -4,9 +4,15 @@ This directory holds the early customer-scoped workflow commands.
 
 Current scaffold helpers:
 
+- `provision_customer_end_to_end.py`
+  - operator-facing single entrypoint for repo-only customer provisioning
+  - takes one customer request file and writes the complete provisioning
+    package, readiness report, bundle, and double-verification artifacts
+  - accepts an optional NAT-T observation file to run the audited promotion
+    workflow before packaging
 - `validate_customer_request.py`
   - validates a minimal customer provisioning request
-  - checks customer class and backend cluster alignment
+  - reports the effective customer class and allocation pool
 - `validate_customer_allocations.py`
   - scans full customer source files
   - verifies exclusive namespace uniqueness

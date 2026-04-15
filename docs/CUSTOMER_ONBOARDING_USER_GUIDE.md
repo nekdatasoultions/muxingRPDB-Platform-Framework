@@ -334,34 +334,38 @@ For a reviewed NAT-T promotion package:
 $EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nat-active-a.yaml"
 ```
 
-Preferred one-command pilot package:
+Preferred one-script provisioning command:
 
 ```powershell
-python muxer\scripts\prepare_customer_pilot.py $Request `
+python muxer\scripts\provision_customer_end_to_end.py $Request `
   --out-dir $WorkRoot `
-  --environment-file $EnvironmentFile `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
 
-If this is a reviewed dynamic NAT-T promotion, include the observation file:
+The script validates the request, provisions allocations, renders artifacts,
+exports the handoff, binds the environment, assembles the bundle, validates it,
+exercises staged head-end install/validate/remove, and writes readiness output.
+It also chooses the default non-NAT environment automatically for normal
+requests.
+
+If this is a reviewed dynamic NAT-T promotion, point the same script at the
+observation file:
 
 ```powershell
-python muxer\scripts\prepare_customer_pilot.py $Request `
+python muxer\scripts\provision_customer_end_to_end.py $Request `
   --observation "$WorkRoot\nat-t-observation.json" `
   --out-dir $WorkRoot `
-  --environment-file $EnvironmentFile `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
 
 Review `pilot-readiness.json` first. If it says `ready_for_review`, continue
 with human review. If it says `blocked`, stop and fix the reported issue.
 
+The script also writes `provisioning-run.json`, which records the exact
+delegated command, selected environment, package path, and readiness result.
+
 The numbered commands below are the lower-level manual/debug path behind the
-pilot builder.
+single provisioning script.
 
 ### 1. Validate The Request
 

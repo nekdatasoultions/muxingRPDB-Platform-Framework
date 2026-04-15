@@ -132,6 +132,7 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
         str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
         str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
+        str(MUXER_DIR / "scripts" / "provision_customer_end_to_end.py"),
         str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
@@ -361,6 +362,66 @@ def main() -> int:
         "customer_pilot_package_builder",
         {
             "pilot_packages": pilot_reports,
+        },
+    )
+
+    # Step 3d: verify the operator-facing one-file provisioning entrypoint.
+    e2e_root = BUILD_ROOT / "end-to-end-provisioning"
+    if e2e_root.exists():
+        shutil.rmtree(e2e_root)
+    e2e_root.mkdir(parents=True, exist_ok=True)
+    e2e_specs = {
+        "legacy-cust0002": {
+            "request": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "legacy-cust0002.yaml",
+            "out_dir": e2e_root / "legacy-cust0002",
+        },
+        "vpn-customer-stage1-15-cust-0004": {
+            "request": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "vpn-customer-stage1-15-cust-0004.yaml",
+            "observation": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "vpn-customer-stage1-15-cust-0004-nat-t-observation.json",
+            "out_dir": e2e_root / "vpn-customer-stage1-15-cust-0004",
+        },
+    }
+    e2e_reports: dict[str, dict] = {}
+    for customer_name, spec in e2e_specs.items():
+        e2e_command = [
+            "python",
+            str(MUXER_DIR / "scripts" / "provision_customer_end_to_end.py"),
+            str(spec["request"]),
+            "--out-dir",
+            str(spec["out_dir"]),
+            "--json",
+        ]
+        if spec.get("observation"):
+            e2e_command.extend(["--observation", str(spec["observation"])])
+        report = _run_json(e2e_command)
+        if report["status"] != "ready_for_review":
+            raise SystemExit(f"end-to-end provisioning entrypoint did not produce a ready package: {customer_name}")
+        if report["live_apply"] is not False:
+            raise SystemExit(f"end-to-end provisioning live_apply guard failed: {customer_name}")
+        e2e_reports[customer_name] = {
+            "status": report["status"],
+            "ready_for_review": report["ready_for_review"],
+            "live_apply": report["live_apply"],
+            "package_dir": report["package_dir"],
+            "readiness_path": report["readiness_path"],
+            "dynamic_nat_t_used": report["readiness"]["dynamic_nat_t"]["used"],
+        }
+    record_step(
+        "one_file_end_to_end_provisioning_entrypoint",
+        {
+            "customers": e2e_reports,
         },
     )
 

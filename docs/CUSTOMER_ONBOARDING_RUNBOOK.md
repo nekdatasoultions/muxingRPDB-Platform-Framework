@@ -250,36 +250,35 @@ post_ipsec_nat:
     - 194.138.36.80/28
 ```
 
-## Preferred: Prepare The Complete Pilot Package
+## Preferred: Provision From One Customer File
 
-Use this command for the normal repo-only onboarding path. It validates the
-request, provisions allocations, renders artifacts, exports the handoff, binds
-the environment, assembles the bundle, validates it, exercises staged head-end
-install/validate/remove, and writes readiness output.
+Use this command for the normal repo-only onboarding path. The operator points
+the script at one customer request file and the script handles the end-to-end
+provisioning package workflow.
 
 ```powershell
-python muxer\scripts\prepare_customer_pilot.py $Request `
+python muxer\scripts\provision_customer_end_to_end.py $Request `
   --out-dir $WorkRoot `
-  --environment-file $EnvironmentFile `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
+
+This validates the request, provisions allocations, renders artifacts, exports
+the handoff, binds the environment, assembles the bundle, validates it,
+exercises staged head-end install/validate/remove, and writes readiness output.
+The script selects the default non-NAT environment for normal requests.
 
 For a reviewed dynamic NAT-T promotion event, include the observation file:
 
 ```powershell
-python muxer\scripts\prepare_customer_pilot.py $Request `
+python muxer\scripts\provision_customer_end_to_end.py $Request `
   --observation "$WorkRoot\nat-t-observation.json" `
   --out-dir $WorkRoot `
-  --environment-file $EnvironmentFile `
-  --existing-source-root muxer\config\customer-sources\examples `
-  --existing-source-root muxer\config\customer-sources\migrated `
   --json
 ```
 
 Review these primary outputs:
 
+- `$WorkRoot\provisioning-run.json`
 - `$WorkRoot\pilot-readiness.json`
 - `$WorkRoot\README.md`
 - `$WorkRoot\bundle-validation.json`
@@ -287,7 +286,7 @@ Review these primary outputs:
 - `$WorkRoot\bundle\`
 
 The remaining steps in this runbook are the lower-level manual path and the
-debug path behind the pilot builder.
+debug path behind the single provisioning script.
 
 ## Step 2: Validate The Request
 
