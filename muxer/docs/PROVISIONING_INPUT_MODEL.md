@@ -92,6 +92,25 @@ The target state is:
 - customer source files do not have to hand-author them
 - provisioning resolves them automatically from tracked pools
 
+## Current Repo Implementation
+
+The repo now has a working minimal-request provisioning path through:
+
+- [customer-request.schema.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/schema/customer-request.schema.json)
+- [defaults.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/allocation-pools/defaults.yaml)
+- [validate_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/validate_customer_request.py)
+- [validate_customer_allocations.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/validate_customer_allocations.py)
+- [provision_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/provision_customer_request.py)
+
+That path now:
+
+- validates the minimal request
+- checks existing customer sources for exclusive namespace collisions
+- allocates transport/runtime namespace values automatically
+- emits a fully allocated compatibility customer source
+- emits the merged customer module and customer SoT item
+- emits the exclusive allocation DDB item view
+
 ## Example Minimal Non-NAT Input
 
 ```yaml

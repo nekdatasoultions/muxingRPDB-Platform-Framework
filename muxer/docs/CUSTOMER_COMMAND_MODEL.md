@@ -19,6 +19,9 @@ The intended default commands are:
 
 The first scaffold scripts align to that model:
 
+- `validate_customer_request.py`
+- `validate_customer_allocations.py`
+- `provision_customer_request.py`
 - `validate_customer_source.py`
 - `build_customer_item.py`
 - `render_customer_artifacts.py`
@@ -76,12 +79,13 @@ The first safe customer-scoped pass-through write paths now also exist:
 Current boundary:
 
 - these customer-scoped write commands are implemented for pass-through mode
-- termination mode still needs its own customer-scoped path
+- termination mode is intentionally blocked for customer-scoped writes
 - `apply` remains the explicit fleet-style command
 
-That gives us a real one-customer inspection path without pretending write/apply
-is already delta-safe.
+That gives us a real one-customer path for the migration architecture we are
+actually using.
 
 The completion checklist for closing that gap lives in:
 
 - [RUNTIME_COMPLETION_PLAN.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_COMPLETION_PLAN.md)
+- [RUNTIME_MODE_BOUNDARIES.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_MODE_BOUNDARIES.md)

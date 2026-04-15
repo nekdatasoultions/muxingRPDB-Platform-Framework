@@ -14,6 +14,8 @@ We are now treating it as two related but separate layers:
 
 The intent is to make the muxer workflow customer-scoped by default:
 
+- validate one minimal request
+- auto-allocate one customer namespace set
 - source one customer
 - sync one customer
 - render one customer
@@ -23,6 +25,7 @@ Current and planned subdirectories:
 
 - `config/`
   - RPDB customer defaults and per-customer sources
+  - smart provisioning request examples and allocation pools
 - `docs/`
   - muxer and RPDB design notes
 - `scripts/`

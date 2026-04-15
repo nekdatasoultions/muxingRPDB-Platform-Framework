@@ -4,6 +4,16 @@ This directory holds the early customer-scoped workflow commands.
 
 Current scaffold helpers:
 
+- `validate_customer_request.py`
+  - validates a minimal customer provisioning request
+  - checks customer class and backend cluster alignment
+- `validate_customer_allocations.py`
+  - scans full customer source files
+  - verifies exclusive namespace uniqueness
+- `provision_customer_request.py`
+  - expands a minimal provisioning request into a fully allocated compatibility
+    customer source
+  - emits allocation summaries and exclusive allocation DDB item views
 - `validate_customer_source.py`
   - validates a single customer source file
   - loads defaults and class overrides
@@ -31,9 +41,11 @@ Current scaffold helpers:
   - copies the source YAML
   - generates muxer and head-end intent artifacts by default
   - optionally copies muxer and head-end customer artifact directories
+- `run_repo_verification.py`
+  - runs the repo-only completion proof
+  - verifies provisioning, allocation tracking, customer-scoped runtime
+    behavior, termination guards, and nftables batch render
 
-Planned next helpers:
+Current proof artifact:
 
-- sync one customer to DynamoDB
-- render one customer
-- render all customers intentionally
+- [repo-verification-summary.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/build/repo-verification/repo-verification-summary.json)

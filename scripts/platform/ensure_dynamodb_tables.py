@@ -125,11 +125,16 @@ def _lease_entry(role: str, path: Path, params: Dict[str, str]) -> Dict[str, Any
     }
 
 
+def _default_allocation_table_name(customer_sot_table: str) -> str:
+    return f"{customer_sot_table}-allocations"
+
+
 def _build_report(
     muxer_params_path: Path,
     nat_params_path: Path,
     nonnat_params_path: Path,
     region: str | None,
+    allocation_table_name: str,
 ) -> Dict[str, Any]:
     muxer_params = _load_parameter_map(muxer_params_path)
     nat_params = _load_parameter_map(nat_params_path)
@@ -147,6 +152,13 @@ def _build_report(
             "key_schema": "customer_name (HASH, String)",
             "mode": "explicit-name-from-muxer-params",
             "note": "This table is not auto-created by the imported single-muxer template and should be ensured before customer sync.",
+        },
+        "resource_allocations": {
+            "source_params": str(muxer_params_path),
+            "table_name": allocation_table_name or _default_allocation_table_name(customer_sot_table),
+            "key_schema": "resource_key (HASH, String)",
+            "mode": "explicit-name-derived-from-customer-sot",
+            "note": "This table tracks exclusive namespace reservations such as fwmark, route_table, rpdb_priority, tunnel_key, overlay_block, and interface names.",
         },
         "lease_tables": [
             _lease_entry("nat_headend_pair", nat_params_path, nat_params),
@@ -168,6 +180,16 @@ def main() -> int:
     parser.add_argument("--check-aws", action="store_true", help="Describe the tables in AWS and include existence/status in the report")
     parser.add_argument("--create-customer-sot", action="store_true", help="Create the customer SoT table if it does not exist")
     parser.add_argument(
+        "--allocation-table-name",
+        default="",
+        help="Optional explicit name for the resource allocation table. Defaults to <customer_sot>-allocations.",
+    )
+    parser.add_argument(
+        "--create-resource-allocation-table",
+        action="store_true",
+        help="Create the resource allocation table if it does not exist",
+    )
+    parser.add_argument(
         "--create-explicit-lease-tables",
         action="store_true",
         help="Create any explicitly named lease tables if they do not exist",
@@ -181,9 +203,11 @@ def main() -> int:
         Path(args.nat_headend_params).resolve(),
         Path(args.nonnat_headend_params).resolve(),
         region,
+        str(args.allocation_table_name or "").strip(),
     )
 
     customer_sot = report["customer_sot"]
+    resource_allocations = report["resource_allocations"]
     lease_tables = report["lease_tables"]
 
     if args.check_aws or args.create_customer_sot:
@@ -191,6 +215,16 @@ def main() -> int:
     if args.create_customer_sot:
         customer_sot["created"] = _ensure_table(customer_sot["table_name"], hash_key="customer_name", region=region)
         customer_sot["aws"] = _describe_table(customer_sot["table_name"], region=region)
+
+    if args.check_aws or args.create_resource_allocation_table:
+        resource_allocations["aws"] = _describe_table(resource_allocations["table_name"], region=region)
+    if args.create_resource_allocation_table:
+        resource_allocations["created"] = _ensure_table(
+            resource_allocations["table_name"],
+            hash_key="resource_key",
+            region=region,
+        )
+        resource_allocations["aws"] = _describe_table(resource_allocations["table_name"], region=region)
 
     for entry in lease_tables:
         table_name = entry["table_name"]
@@ -219,6 +253,17 @@ def main() -> int:
             print(f"  aws: exists={customer_sot['aws']['exists']} status={customer_sot['aws']['table_status'] or 'n/a'}")
         if "created" in customer_sot:
             print(f"  created: {customer_sot['created']}")
+
+        print(f"- resource_allocations: {resource_allocations['table_name']} [{resource_allocations['key_schema']}]")
+        print(f"  note: {resource_allocations['note']}")
+        if resource_allocations.get("aws") is not None:
+            print(
+                "  aws: exists="
+                f"{resource_allocations['aws']['exists']} "
+                f"status={resource_allocations['aws']['table_status'] or 'n/a'}"
+            )
+        if "created" in resource_allocations:
+            print(f"  created: {resource_allocations['created']}")
 
         for entry in lease_tables:
             table_label = entry["table_name"] or "<stack-managed>"

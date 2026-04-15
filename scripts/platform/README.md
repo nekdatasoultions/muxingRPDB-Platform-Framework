@@ -14,6 +14,8 @@ Use these when you need to stand up or validate the **base platform**:
 - non-NAT VPN head-end pair
 - supporting package artifacts
 - the platform database baseline through [ensure_dynamodb_tables.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/ensure_dynamodb_tables.py)
+  - customer SoT table
+  - resource allocation table for smart provisioning
 - the new empty-platform front door through [deploy_empty_platform.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/deploy_empty_platform.py)
 - safe rehearsal parameter generation through [prepare_empty_platform_params.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/prepare_empty_platform_params.py)
 - post-bootstrap head-end verification through [verify_headend_bootstrap.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/verify_headend_bootstrap.py)

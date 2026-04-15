@@ -34,6 +34,12 @@ The customer item describes the customer.
 The allocation item describes the reusable platform resources consumed by that
 customer.
 
+One important refinement:
+
+- **exclusive namespaces** should be reserved one owner at a time
+- **shared placement fields** should still be tracked, but not treated as
+  collision errors
+
 ## Smart Reservation Rule
 
 Reservations should be smart.
@@ -81,10 +87,16 @@ Each customer should also have tracked allocations for:
 - `overlay_block`
 - `transport_interface_name`
 - `vti_interface_name`
-- `backend_assignment`
 
-Not every customer will use every field, but the allocation model should still
-handle them consistently.
+These are the fields that should be treated as exclusive reservations.
+
+The customer record should also track shared placement values such as:
+
+- `backend_assignment`
+- `backend_role`
+
+Those values matter for placement and auditability, but they are not treated as
+one-owner-only collision slots.
 
 ## Example Allocation Values
 
@@ -162,36 +174,31 @@ Core fields:
 
 ### Resource allocation item
 
-Key:
+Current repo implementation uses a simpler exclusive-claim shape:
 
-- `PK = RESOURCE#<resource_type>#<resource_value>`
-- `SK = OWNER#<customer_name>`
+- `resource_key = <resource_type>#<resource_value>` as the primary key
 
 Core fields:
 
+- `resource_key`
 - `resource_type`
 - `resource_value`
 - `pool_name`
 - `customer_name`
 - `customer_id`
+- `customer_class`
 - `status`
 - `allocated_at`
-- `released_at`
 - `source_ref`
+- `exclusive`
 
 Example:
 
-- `PK = RESOURCE#fwmark#0x2003`
-- `SK = OWNER#legacy-cust0003`
+- `resource_key = fwmark#0x2000`
 
-### Optional customer allocation index item
+This shape is implemented in:
 
-Key:
-
-- `PK = CUSTOMER#<customer_name>`
-- `SK = RESOURCE#<resource_type>#<resource_value>`
-
-This makes it easy to list all resources owned by one customer without scanning.
+- [allocation_sot.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/src/muxerlib/allocation_sot.py)
 
 ## Provisioning Workflow
 
@@ -201,7 +208,7 @@ Normal new-customer provisioning should work like this:
 2. determine which pools apply
 3. reserve required resources from those pools
 4. write customer item with the resolved allocations
-5. write resource allocation ownership items
+5. write exclusive resource allocation ownership items
 6. render runtime artifacts from the resolved allocations
 7. apply the customer
 
@@ -260,3 +267,9 @@ Before large-scale onboarding, the RPDB control plane should be able to prove:
 - who owns every overlay block
 - who owns every customer transport interface name
 - who owns each backend assignment
+
+In the current repo implementation:
+
+- exclusive resources are what must be reserved collision-free
+- shared placement values are tracked in the customer record and allocation
+  summary, but they are not enforced as one-owner-only claims

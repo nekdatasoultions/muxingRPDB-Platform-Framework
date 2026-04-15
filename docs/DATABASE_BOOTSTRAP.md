@@ -9,6 +9,9 @@ has a clear SoT and HA-table story before any customer onboarding starts.
 
 There are two different DynamoDB table types in the current platform:
 
+The completed RPDB control-plane model now needs a third table type for smart
+resource reservations.
+
 ### 1. Customer SoT Table
 
 Purpose:
@@ -55,7 +58,38 @@ Current imported production shape:
 So for the current production-shaped bootstrap:
 
 - **customer SoT table** should be explicitly ensured
+- **resource allocation table** should be explicitly ensured for smart
+  provisioning and namespace ownership tracking
 - **head-end lease tables** are expected to be stack-managed by CloudFormation
+
+### 3. Resource Allocation Table
+
+Purpose:
+
+- track exclusive namespace reservations such as:
+  - `customer_id`
+  - `fwmark`
+  - `route_table`
+  - `rpdb_priority`
+  - `tunnel_key`
+  - `overlay_block`
+  - `transport_interface`
+  - `vti_interface`
+
+Current repo bootstrap shape:
+
+- default derived table name: `<customer_sot_table>-allocations`
+- example from the current imported production-shaped SoT:
+  - `muxingplus-customer-sot-allocations`
+- key schema:
+  - `resource_key` (HASH, String)
+
+Important note:
+
+- this table is not yet stack-managed by the imported infrastructure
+- it is a control-plane requirement for smart provisioning, not a lease/HA
+  table
+- the helper can inspect or create it explicitly
 
 ## Helper
 
@@ -83,6 +117,21 @@ Create the customer SoT table if it does not exist:
 python scripts\platform\ensure_dynamodb_tables.py --create-customer-sot
 ```
 
+Create the resource allocation table if it does not exist:
+
+```powershell
+python scripts\platform\ensure_dynamodb_tables.py --create-resource-allocation-table
+```
+
+Create both smart-provisioning tables with an explicit allocation table name:
+
+```powershell
+python scripts\platform\ensure_dynamodb_tables.py `
+  --create-customer-sot `
+  --create-resource-allocation-table `
+  --allocation-table-name muxingplus-customer-sot-rpdb-allocations
+```
+
 ## Relationship To Customer Onboarding
 
 The customer SoT table belongs in the **base platform bootstrap**.
@@ -91,8 +140,9 @@ That means:
 
 1. deploy muxer and head-end nodes
 2. ensure the customer SoT table exists
-3. validate the empty platform
-4. only then begin customer onboarding
+3. ensure the resource allocation table exists
+4. validate the empty platform
+5. only then begin customer onboarding
 
 ## References
 

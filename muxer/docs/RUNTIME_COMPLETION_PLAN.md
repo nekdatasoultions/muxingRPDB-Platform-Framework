@@ -2,12 +2,13 @@
 
 ## Purpose
 
-This document tracks the runtime work that still has to be finished before the
-RPDB muxer can be treated as customer-scoped and migration-ready.
+This document now tracks the completion state of the runtime work required to
+make the RPDB muxer customer-scoped and migration-ready for the pass-through
+architecture.
 
-The framework, customer model, and SoT shape already point in the right
-direction. The remaining gap is the runtime control plane and dataplane apply
-path.
+The framework, customer model, and SoT shape are now matched by a customer-
+scoped runtime path, an allocator-backed provisioning path, and a repo-only
+verification harness.
 
 ## What Is Already Fixed
 
@@ -20,7 +21,7 @@ path.
 This means the old implicit-priority control-plane ceiling is no longer the
 main blocker.
 
-## Current Runtime Gaps
+## Current Runtime Boundaries
 
 ### 1. Normal DynamoDB loading still scans the whole table
 
@@ -42,52 +43,48 @@ It is not the right default for:
 - removing one customer
 - validating one customer
 
-### 2. The muxer CLI is still fleet-oriented
+### 2. The muxer CLI is only partially customer-scoped outside pass-through
 
 Current behavior lives in:
 
 - `muxer/runtime-package/src/muxerlib/cli.py`
 
-Today the runtime CLI only exposes:
-
-- `apply`
-- `flush`
-- `show`
-- `render-ipsec`
-
-There is not yet a real runtime command surface for:
+Pass-through mode now has:
 
 - `show-customer`
 - `apply-customer`
 - `remove-customer`
 
-### 3. Normal apply still rebuilds full chains
+Termination mode is intentionally blocked for those customer-scoped write
+commands because it is not part of the current migration target.
+
+### 3. Fleet apply still rebuilds full chains
 
 Current behavior lives in:
 
 - `muxer/runtime-package/src/muxerlib/modes.py`
 
-In both pass-through and termination modes, the runtime currently:
+The explicit fleet `apply` path still:
 
 - flushes the active chains
 - loops over the full module list
 - rebuilds policy/tunnel/firewall state for all loaded modules
 
-That is the main reason customer onboarding/removal is still more fleet-like
-than it should be.
+That is acceptable as an explicit fleet command, but it is no longer the normal
+customer-by-customer path for pass-through mode.
 
-### 4. The dataplane is still linear iptables programming
+### 4. The live dataplane still includes legacy linear programming
 
 Current behavior lives in:
 
 - `muxer/runtime-package/src/muxerlib/modes.py`
 - `muxer/runtime-package/src/muxerlib/core.py`
 
-The runtime still issues many individual `iptables` and `ip` commands and builds
-linear rule sets.
+The live path still contains legacy per-customer `iptables` and `ip`
+programming for translation and bridge behavior.
 
-That is workable for small scale and lab use, but it is not the final scaling
-shape for growth well beyond current fleet sizes.
+The repo now has the first batched `nftables` render path, but that render path
+is not yet the live apply backend.
 
 ## Target Runtime Behavior
 
@@ -111,6 +108,10 @@ Add runtime helpers for:
 
 Keep table scan only for explicit fleet workflows.
 
+Current status:
+
+- completed
+
 ### Phase 2. Customer-scoped runtime commands
 
 Add runtime commands for:
@@ -126,7 +127,8 @@ Current status:
 - `show-customer` is implemented
 - `apply-customer` is implemented for pass-through mode
 - `remove-customer` is implemented for pass-through mode
-- termination mode still needs its customer-scoped command path
+- termination mode is intentionally blocked and documented as out of migration
+  scope
 
 ### Phase 2.5. Resource allocation tracking
 
@@ -157,6 +159,15 @@ The target provisioning contract should be operator-light:
 That contract is documented in:
 
 - [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+- [RESOURCE_NAMESPACE_CATALOG.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RESOURCE_NAMESPACE_CATALOG.md)
+
+Current status:
+
+- completed in repo code and docs
+- minimal provisioning requests now expand into fully allocated compatibility
+  customer sources
+- exclusive allocation DDB item shapes are now generated in the repo-only
+  provisioning flow
 
 ### Phase 3. Delta dataplane apply
 
@@ -173,7 +184,9 @@ Current status:
 - pass-through customer apply/remove now clears and reapplies only the selected
   customer's runtime state
 - fleet `apply` still exists and still rebuilds the full loaded module set
-- termination mode still needs equivalent customer-scoped delta behavior
+- termination mode is intentionally blocked for customer-scoped writes
+- repo-only verification proves the pass-through customer path does not flush
+  the whole chain set
 
 ### Phase 4. Scalable dataplane backend
 
@@ -186,6 +199,16 @@ Add a batching layer and then move toward:
 This is the path that makes the RPDB runtime materially better at larger fleet
 sizes.
 
+Current status:
+
+- the first batched `nftables` render path exists in:
+  - [nftables.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/src/muxerlib/nftables.py)
+  - [render_nft_passthrough.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/scripts/render_nft_passthrough.py)
+- this layer currently covers peer classification, fwmark maps, and default
+  drop render
+- live DNAT/SNAT rewrite and NFQUEUE bridge stages remain on the legacy
+  per-customer path for now
+
 ## Migration Gate
 
 Do not treat the RPDB runtime as migration-ready until all of these are true:
@@ -196,12 +219,37 @@ Do not treat the RPDB runtime as migration-ready until all of these are true:
 - the dataplane update path is at least delta-based, even if `nftables`
   migration is still in progress
 
+Current status for the pass-through migration target:
+
+- met in repo-only verification
+
 ## Exit Criteria
 
-We can call this runtime complete enough for migration when we can prove:
+We can call this runtime complete enough for pass-through migration when we can
+prove:
 
 1. one customer can be added with a customer-scoped command
 2. one customer can be removed with a customer-scoped command
 3. existing customer state is left untouched by that operation
 4. runtime no longer depends on normal fleet scan for those operations
 5. isolated-platform verification passes before any production swing
+
+## Repo-Only Verification
+
+The repo-only completion proof now lives in:
+
+- [run_repo_verification.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/run_repo_verification.py)
+
+And the generated summary lives in:
+
+- [repo-verification-summary.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/build/repo-verification/repo-verification-summary.json)
+
+That verifier proves:
+
+- minimal customer requests validate
+- smart allocation expands them into full customer records
+- allocation DDB items are generated for exclusive namespaces
+- pass-through runtime can load one customer
+- pass-through `apply-customer` and `remove-customer` stay delta-oriented
+- termination mode remains explicitly blocked
+- the first batched `nftables` render path works repo-only
