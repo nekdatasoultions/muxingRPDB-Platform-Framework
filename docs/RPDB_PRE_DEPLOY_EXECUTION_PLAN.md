@@ -249,3 +249,8 @@ Current gate:
 - Live deployment remains blocked until the separate deployment plan names the
   exact node targets, backup commands, apply commands, packet-capture checks,
   rollback commands, change window, and approval owner.
+
+Next project plans:
+
+- backend/platform work: `docs/RPDB_BACKEND_WORK_PROJECT_PLAN.md`
+- customer-by-customer deploy work: `docs/RPDB_CUSTOMER_DEPLOY_PROJECT_PLAN.md`
