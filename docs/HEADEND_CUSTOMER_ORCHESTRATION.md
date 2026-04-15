@@ -23,7 +23,8 @@ The bundle must contain these installable head-end files:
 - `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
 - `headend/post-ipsec-nat/iptables-snippet.txt`
 
-Unresolved placeholders are not allowed in the text payloads at apply time.
+Unresolved placeholders are not allowed in the text or JSON payloads at apply
+time.
 
 ## Canonical Install Layout
 
@@ -88,10 +89,30 @@ python scripts\deployment\remove_headend_customer.py `
 
 - `swanctl` customer material is installable and customer-scoped.
 - route programming is installable and customer-scoped.
-- post-IPsec NAT is currently a staged snippet plus generated helper scripts.
-- when the NAT intent enables post-IPsec NAT but the snippet contains no
-  executable lines, validation emits a warning instead of pretending that the
-  NAT apply contract is fully rendered.
+- post-IPsec NAT is installable and customer-scoped for the modeled command
+  styles.
+- one-to-one translated subnet intent renders `NETMAP` commands.
+- explicit host mappings render `DNAT` and `SNAT` commands.
+- validation checks that the rendered `swanctl` and NAT snippets match the
+  richer intent payloads before install.
 
-That keeps the deployment path honest while still integrating the head-end
-install/apply/remove flow around the artifacts we have today.
+That keeps the deployment path honest while integrating the head-end
+install/apply/remove flow around the artifacts we can verify repo-only today.
+
+## Verified Service-Intent Examples
+
+The repo-only verification harness includes:
+
+- `example-service-intent-netmap`
+- `example-service-intent-explicit-host-map`
+
+Those examples prove:
+
+- request validation
+- smart allocation
+- handoff export
+- environment binding
+- bundle validation
+- staged head-end install
+- staged head-end validation
+- staged head-end remove

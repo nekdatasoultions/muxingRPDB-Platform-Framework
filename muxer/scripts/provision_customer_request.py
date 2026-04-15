@@ -41,7 +41,13 @@ def _maybe_validate_with_jsonschema(payload: dict, schema: dict) -> bool:
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -131,20 +137,11 @@ def main() -> int:
     if args.source_out:
         _write_yaml(Path(args.source_out).resolve(), customer_source)
     if args.module_out:
-        Path(args.module_out).resolve().write_text(
-            json.dumps(customer_module, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        _write_json(Path(args.module_out).resolve(), customer_module)
     if args.item_out:
-        Path(args.item_out).resolve().write_text(
-            json.dumps(customer_item, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        _write_json(Path(args.item_out).resolve(), customer_item)
     if args.allocation_out:
-        Path(args.allocation_out).resolve().write_text(
-            json.dumps(allocation_summary, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        _write_json(Path(args.allocation_out).resolve(), allocation_summary)
 
     if args.json or not any((args.source_out, args.module_out, args.item_out, args.allocation_out)):
         print(json.dumps(result, indent=2, sort_keys=True))

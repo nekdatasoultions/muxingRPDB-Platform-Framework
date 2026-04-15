@@ -179,8 +179,11 @@ Optional per-customer IPsec overrides:
 Current repo note:
 
 - the schema and parser now model the richer compatibility fields above
-- the head-end artifact render and install path still needs to consume all of
-  those fields explicitly before the service-intent work is complete
+- the head-end artifact render now carries the key compatibility fields into
+  `ipsec-intent.json` and `swanctl-connection.conf`
+- repo-only validation checks that rendered fields such as IKE version, policy
+  lists, replay protection, DF-bit behavior, DPD, encapsulation, MOBIKE, and
+  fragmentation are represented in the staged head-end bundle
 
 ### `customer.post_ipsec_nat`
 
@@ -218,6 +221,12 @@ Target NAT intent:
 - block-preserving one-to-one mapping for subnet-to-subnet netmap behavior
 - explicit `/32` to `/32` host mappings inside a translated pool
 
+Current repo note:
+
+- one-to-one netmap intent renders deterministic `NETMAP` commands
+- explicit host mappings render deterministic `DNAT` and `SNAT` commands
+- staged head-end validation checks the expected command model before install
+
 ## Secret Handling
 
 The customer source file should never hold inline PSKs.
@@ -254,4 +263,4 @@ That model is tracked in:
 
 The machine-readable schema for this file lives at:
 
-- [customer-source.schema.json](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/schema/customer-source.schema.json)
+- [customer-source.schema.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/schema/customer-source.schema.json)

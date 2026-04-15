@@ -107,6 +107,10 @@ def _find_placeholders(text: str) -> list[str]:
     return sorted(set(PLACEHOLDER_RE.findall(text)))
 
 
+def _find_json_placeholders(payload: dict[str, Any]) -> list[str]:
+    return _find_placeholders(json.dumps(payload, sort_keys=True))
+
+
 def _executable_lines(text: str) -> list[str]:
     return [
         line.strip()
@@ -136,6 +140,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     swanctl_text = bundle.text_payloads["ipsec/swanctl-connection.conf"]
     route_text = bundle.text_payloads["routing/ip-route.commands.txt"]
     nat_text = bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"]
+    ipsec_intent = bundle.json_payloads["ipsec/ipsec-intent.json"]
     nat_intent = bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"]
 
     text_checks = {
@@ -151,6 +156,13 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
                 f"headend file has unresolved placeholders: {relative_name} -> {', '.join(unresolved)}"
             )
 
+    for relative_name, payload in bundle.json_payloads.items():
+        unresolved = _find_json_placeholders(payload)
+        if unresolved:
+            report["errors"].append(
+                f"headend JSON file has unresolved placeholders: {relative_name} -> {', '.join(unresolved)}"
+            )
+
     if "connections {" not in swanctl_text or "secrets {" not in swanctl_text:
         report["errors"].append("swanctl-connection.conf is missing required connections/secrets blocks")
 
@@ -158,14 +170,67 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     nat_lines = _executable_lines(nat_text)
     report["details"]["route_command_count"] = len(route_lines)
     report["details"]["post_ipsec_nat_command_count"] = len(nat_lines)
+    report["details"]["ipsec_ike_version"] = ipsec_intent.get("ike_version")
+    report["details"]["post_ipsec_nat_mapping_strategy"] = nat_intent.get("mapping_strategy")
+    report["details"]["post_ipsec_nat_command_model"] = nat_intent.get("rendered_command_model")
 
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")
 
-    if bool(nat_intent.get("enabled")) and not nat_lines:
-        report["warnings"].append(
-            "post-IPsec NAT is enabled in the intent, but iptables-snippet.txt contains no executable commands"
-        )
+    swanctl_expectations = {
+        "swanctl_version": f"version = {ipsec_intent.get('swanctl_version')}",
+        "rendered_ike_proposals": f"proposals = {ipsec_intent.get('rendered_ike_proposals')}",
+        "rendered_esp_proposals": f"esp_proposals = {ipsec_intent.get('rendered_esp_proposals')}",
+        "rendered_replay_window": f"replay_window = {ipsec_intent.get('rendered_replay_window')}",
+        "rendered_copy_df": f"copy_df = {ipsec_intent.get('rendered_copy_df')}",
+    }
+    for intent_key, expected_line in swanctl_expectations.items():
+        if ipsec_intent.get(intent_key) not in (None, "", []):
+            if expected_line not in swanctl_text:
+                report["errors"].append(
+                    f"swanctl-connection.conf missing rendered {intent_key}: {expected_line}"
+                )
+
+    bool_swanctl_expectations = {
+        "forceencaps": "encap",
+        "mobike": "mobike",
+        "fragmentation": "fragmentation",
+    }
+    for intent_key, swanctl_key in bool_swanctl_expectations.items():
+        if ipsec_intent.get(intent_key) is not None:
+            expected = f"{swanctl_key} = {'yes' if bool(ipsec_intent.get(intent_key)) else 'no'}"
+            if expected not in swanctl_text:
+                report["errors"].append(
+                    f"swanctl-connection.conf missing rendered {intent_key}: {expected}"
+                )
+
+    dpd_expectations = {
+        "dpddelay": "dpd_delay",
+        "dpdtimeout": "dpd_timeout",
+        "dpdaction": "dpd_action",
+    }
+    for intent_key, swanctl_key in dpd_expectations.items():
+        if ipsec_intent.get(intent_key) not in (None, ""):
+            expected = f"{swanctl_key} = {ipsec_intent.get(intent_key)}"
+            if expected not in swanctl_text:
+                report["errors"].append(
+                    f"swanctl-connection.conf missing rendered {intent_key}: {expected}"
+                )
+
+    if bool(nat_intent.get("enabled")):
+        if not nat_lines:
+            report["errors"].append(
+                "post-IPsec NAT is enabled in the intent, but iptables-snippet.txt contains no executable commands"
+            )
+        command_text = "\n".join(nat_lines)
+        strategy = str(nat_intent.get("mapping_strategy") or "")
+        mode = str(nat_intent.get("mode") or "")
+        if strategy == "one_to_one" and "NETMAP" not in command_text:
+            report["errors"].append("one_to_one post-IPsec NAT requires NETMAP commands")
+        if strategy == "explicit_host_map" and ("DNAT" not in command_text or "SNAT" not in command_text):
+            report["errors"].append("explicit_host_map post-IPsec NAT requires DNAT and SNAT commands")
+        if mode == "netmap" and not strategy and "NETMAP" not in command_text:
+            report["errors"].append("legacy netmap post-IPsec NAT requires NETMAP commands")
 
     report["valid"] = not report["errors"]
     return report
@@ -212,6 +277,10 @@ def _derive_iptables_remove_lines(nat_text: str) -> list[str]:
             removals.append(line.replace(" -I ", " -D ", 1) + " || true")
         elif line.startswith("ip rule add "):
             removals.append("ip rule del " + line.removeprefix("ip rule add ") + " || true")
+        elif line.startswith("ip route replace "):
+            removals.append("ip route del " + line.removeprefix("ip route replace ") + " || true")
+        elif line.startswith("ip route add "):
+            removals.append("ip route del " + line.removeprefix("ip route add ") + " || true")
         else:
             removals.append(f"# manual firewall cleanup required: {line}")
     return removals

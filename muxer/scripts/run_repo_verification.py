@@ -121,6 +121,8 @@ def main() -> int:
 
     # Step 1: compile the new framework/runtime modules and scripts.
     compile_targets = [
+        str(MUXER_DIR / "src" / "muxerlib" / "customer_model.py"),
+        str(MUXER_DIR / "src" / "muxerlib" / "customer_artifacts.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "allocation.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "allocation_sot.py"),
         str(MUXER_DIR / "scripts" / "validate_customer_request.py"),
@@ -156,15 +158,28 @@ def main() -> int:
     request_paths = {
         "example-minimal-nonnat": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-minimal-nonnat.yaml",
         "example-minimal-nat": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-minimal-nat.yaml",
+        "example-service-intent-netmap": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-service-intent-netmap.yaml",
+        "example-service-intent-explicit-host-map": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-service-intent-explicit-host-map.yaml",
     }
     provision_results: dict[str, dict] = {}
+    generated_sources_root = BUILD_ROOT / "generated-customer-sources"
+    if generated_sources_root.exists():
+        shutil.rmtree(generated_sources_root)
+    generated_sources_root.mkdir(parents=True, exist_ok=True)
     for name, request_path in request_paths.items():
         _run(["python", str(MUXER_DIR / "scripts" / "validate_customer_request.py"), str(request_path)])
+        source_out = generated_sources_root / name / "customer.yaml"
         provision_results[name] = _run_json(
             [
                 "python",
                 str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
                 str(request_path),
+                "--existing-source-root",
+                str(MUXER_DIR / "config" / "customer-sources"),
+                "--existing-source-root",
+                str(generated_sources_root),
+                "--source-out",
+                str(source_out),
                 "--json",
             ]
         )
@@ -176,6 +191,7 @@ def main() -> int:
                 name: result["allocation_plan"]["customer_id"]
                 for name, result in provision_results.items()
             },
+            "generated_sources_root": str(generated_sources_root),
         },
     )
 
@@ -442,110 +458,139 @@ def main() -> int:
         },
     )
 
-    # Step 10: verify the new customer-scoped head-end staging/apply/remove flow
-    # against a staged filesystem root.
-    headend_stage_dir = BUILD_ROOT / "headend-orchestration"
+    # Step 10: verify the customer-scoped head-end staging/apply/remove flow
+    # against staged filesystem roots, including the richer VPN service intent
+    # examples for one-to-one netmap and explicit host mapping.
+    # Keep these paths intentionally short so Windows repo verification does
+    # not fail on long staged artifact paths for descriptive customer names.
+    headend_stage_dir = BUILD_ROOT / "he"
     if headend_stage_dir.exists():
         shutil.rmtree(headend_stage_dir)
     headend_stage_dir.mkdir(parents=True, exist_ok=True)
-    source_path = headend_stage_dir / "customer.yaml"
-    _write_yaml(source_path, provision_results["example-minimal-nonnat"]["customer_source"])
-    export_dir = headend_stage_dir / "handoff"
-    bound_dir = headend_stage_dir / "bound-handoff"
-    bundle_dir = headend_stage_dir / "bundle"
-    headend_root = headend_stage_dir / "headend-root"
     environment_file = MUXER_DIR / "config" / "environment-defaults" / "example-environment.yaml"
+    headend_targets = [
+        "example-minimal-nonnat",
+        "example-service-intent-netmap",
+        "example-service-intent-explicit-host-map",
+    ]
+    headend_reports: dict[str, dict] = {}
+    for idx, customer_name in enumerate(headend_targets, start=1):
+        customer_stage_dir = headend_stage_dir / f"c{idx}"
+        source_path = customer_stage_dir / "customer.yaml"
+        export_dir = customer_stage_dir / "x"
+        bound_dir = customer_stage_dir / "y"
+        bundle_dir = customer_stage_dir / "b"
+        headend_root = customer_stage_dir / "r"
+        _write_yaml(source_path, provision_results[customer_name]["customer_source"])
 
-    _run(
-        [
-            "python",
-            str(MUXER_DIR / "scripts" / "export_customer_handoff.py"),
-            str(source_path),
-            "--export-dir",
-            str(export_dir),
-        ]
-    )
-    _run(
-        [
-            "python",
-            str(MUXER_DIR / "scripts" / "bind_rendered_artifacts.py"),
-            str(export_dir),
-            "--environment-file",
-            str(environment_file),
-            "--out-dir",
-            str(bound_dir),
-        ]
-    )
-    _run(
-        [
-            "python",
-            str(REPO_ROOT / "scripts" / "packaging" / "assemble_customer_bundle.py"),
-            "--customer-name",
-            "example-minimal-nonnat",
-            "--export-dir",
-            str(bound_dir),
-            "--bundle-dir",
-            str(bundle_dir),
-        ]
-    )
-    headend_bundle_validation = _run_json(
-        [
-            "python",
-            str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
-            "--bundle-dir",
-            str(bundle_dir),
-            "--json",
-        ]
-    )
-    if not headend_bundle_validation.get("valid"):
-        raise SystemExit("head-end bundle validation failed during repo verification")
-    _run(
-        [
-            "python",
-            str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
-            "--bundle-dir",
-            str(bundle_dir),
-            "--headend-root",
-            str(headend_root),
-        ]
-    )
-    installed_headend_validation = _run_json(
-        [
-            "python",
-            str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
-            "--bundle-dir",
-            str(bundle_dir),
-            "--headend-root",
-            str(headend_root),
-            "--json",
-        ]
-    )
-    if not installed_headend_validation.get("valid"):
-        raise SystemExit("installed head-end validation failed during repo verification")
-    removal_report = _run_json(
-        [
-            "python",
-            str(REPO_ROOT / "scripts" / "deployment" / "remove_headend_customer.py"),
-            "--bundle-dir",
-            str(bundle_dir),
-            "--headend-root",
-            str(headend_root),
-            "--json",
-        ]
-    )
-    installed_root = headend_root / "var" / "lib" / "rpdb-headend" / "customers" / "example-minimal-nonnat"
-    staged_conf = headend_root / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-nonnat.conf"
-    if installed_root.exists() or staged_conf.exists():
-        raise SystemExit("head-end remove left installed customer state behind")
+        _run(
+            [
+                "python",
+                str(MUXER_DIR / "scripts" / "export_customer_handoff.py"),
+                str(source_path),
+                "--export-dir",
+                str(export_dir),
+            ]
+        )
+        _run(
+            [
+                "python",
+                str(MUXER_DIR / "scripts" / "bind_rendered_artifacts.py"),
+                str(export_dir),
+                "--environment-file",
+                str(environment_file),
+                "--out-dir",
+                str(bound_dir),
+            ]
+        )
+        _run(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "packaging" / "assemble_customer_bundle.py"),
+                "--customer-name",
+                customer_name,
+                "--export-dir",
+                str(bound_dir),
+                "--bundle-dir",
+                str(bundle_dir),
+            ]
+        )
+        bundle_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
+                str(bundle_dir),
+                "--json",
+            ]
+        )
+        if not bundle_validation.get("valid"):
+            raise SystemExit(f"customer bundle validation failed during repo verification: {customer_name}")
+        headend_bundle_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--json",
+            ]
+        )
+        if not headend_bundle_validation.get("valid"):
+            raise SystemExit(f"head-end bundle validation failed during repo verification: {customer_name}")
+        _run(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+            ]
+        )
+        installed_headend_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+                "--json",
+            ]
+        )
+        if not installed_headend_validation.get("valid"):
+            raise SystemExit(f"installed head-end validation failed during repo verification: {customer_name}")
+        removal_report = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "remove_headend_customer.py"),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--headend-root",
+                str(headend_root),
+                "--json",
+            ]
+        )
+        installed_root = headend_root / "var" / "lib" / "rpdb-headend" / "customers" / customer_name
+        staged_conf = headend_root / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{customer_name}.conf"
+        if installed_root.exists() or staged_conf.exists():
+            raise SystemExit(f"head-end remove left installed customer state behind: {customer_name}")
+
+        details = headend_bundle_validation["details"]
+        headend_reports[customer_name] = {
+            "bundle_dir": str(bundle_dir),
+            "headend_root": str(headend_root),
+            "route_command_count": details["route_command_count"],
+            "post_ipsec_nat_command_count": details["post_ipsec_nat_command_count"],
+            "post_ipsec_nat_mapping_strategy": details["post_ipsec_nat_mapping_strategy"],
+            "post_ipsec_nat_command_model": details["post_ipsec_nat_command_model"],
+            "ipsec_ike_version": details["ipsec_ike_version"],
+            "installed_swanctl_conf": installed_headend_validation["details"]["installed_swanctl_conf"],
+            "removed_paths": len(removal_report["removed_paths"]),
+        }
     record_step(
         "headend_customer_orchestration",
         {
-            "bundle_dir": str(bundle_dir),
-            "headend_root": str(headend_root),
-            "route_command_count": headend_bundle_validation["details"]["route_command_count"],
-            "post_ipsec_nat_command_count": headend_bundle_validation["details"]["post_ipsec_nat_command_count"],
-            "installed_swanctl_conf": installed_headend_validation["details"]["installed_swanctl_conf"],
-            "removed_paths": len(removal_report["removed_paths"]),
+            "customers": headend_reports,
         },
     )
 

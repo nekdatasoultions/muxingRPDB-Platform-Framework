@@ -163,19 +163,33 @@ Modeled in the current schema and parser:
 - `post_ipsec_nat.mapping_strategy`
 - `post_ipsec_nat.host_mappings`
 
-Not fully carried through render and orchestration yet:
+Carried through render and repo-only orchestration:
 
 - IKE version render behavior on the head-end side
-- replay-protection render behavior
-- DF-bit handling render behavior
-- richer multi-policy rendering beyond compatibility storage
-- explicit host-mapping render/apply behavior in the head-end NAT path
+- IKE and ESP policy list rendering into `swanctl`
+- DPD render behavior
+- replay-protection render behavior through `replay_window`
+- DF-bit handling render behavior through `copy_df`
+- force-encapsulation, MOBIKE, and fragmentation render behavior
+- one-to-one netmap command rendering for block-preserving translation
+- explicit host-mapping command rendering with DNAT/SNAT pairs
+- staged head-end install, validate, and remove verification
 
 ## Next Repo Work
 
 The next implementation steps should be:
 
-1. extend the schema and typed customer model
-2. carry the richer service intent through merge and artifact render
-3. update head-end orchestration validation around the richer NAT intent
-4. add repo-only examples and verification for both mapping styles
+1. keep extending repo-only examples as new customer VPN patterns appear
+2. run isolated-node validation before any live customer migration
+3. keep live-node rollout blocked behind the double-verification gate
+
+## Verified Examples
+
+The repo contains committed examples for both NAT mapping styles:
+
+- [example-service-intent-netmap.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/customer-requests/examples/example-service-intent-netmap.yaml)
+- [example-service-intent-explicit-host-map.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
+
+The repo-only verification harness provisions both examples, renders and binds
+their customer artifacts, validates their bundles, and exercises staged
+head-end install/validate/remove.

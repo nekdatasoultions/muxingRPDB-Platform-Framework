@@ -14,7 +14,7 @@ Deploy one customer at a time with backup-first gates.
 
 Reference:
 
-- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 
 ## Planned Workflow
 
@@ -124,6 +124,7 @@ And it generates customer-scoped:
 
 - The bundle-driven head-end install/apply/remove flow is now available for
   repo-only staged roots and future on-node use.
-- Post-IPsec NAT still depends on the current snippet renderer. Validation will
-  warn when NAT intent is enabled but the snippet contains no executable
-  commands.
+- Post-IPsec NAT one-to-one netmap and explicit host-map styles now render
+  executable customer-scoped command snippets.
+- Validation fails if NAT intent is enabled and the expected command model is
+  not represented in the bundle.

@@ -197,9 +197,13 @@ Current status:
 
 - schema and parser support completed
 - richer customer request validation now accepts the new service-intent fields
+- render/export carry-through completed for the head-end artifact bundle
+- head-end validation now checks the richer `swanctl` and post-IPsec NAT
+  render output
 - repo-only verification covers valid one-to-one and explicit host-mapping
-  provisioning cases plus an invalid host-mapping rejection case
-- render/export/orchestration carry-through is still pending
+  provisioning, bundle validation, staged head-end install, staged validation,
+  and staged removal
+- invalid explicit host mappings are rejected by the parser/provisioning path
 
 ### Phase 3. Delta dataplane apply
 
@@ -285,3 +289,5 @@ That verifier proves:
 - pass-through `apply-customer` and `remove-customer` stay delta-oriented
 - termination mode remains explicitly blocked
 - the first batched `nftables` render path works repo-only
+- richer VPN service intent renders into head-end artifacts
+- one-to-one netmap and explicit host-map NAT examples stage and remove cleanly

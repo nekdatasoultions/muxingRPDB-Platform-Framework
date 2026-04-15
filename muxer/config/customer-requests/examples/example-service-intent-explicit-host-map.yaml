@@ -1,0 +1,59 @@
+schema_version: 1
+
+customer:
+  name: example-service-intent-explicit-host-map
+  customer_class: nat
+  peer:
+    public_ip: 198.51.100.45
+    remote_id: 198.51.100.45
+    psk_secret_ref: /muxingrpdb/customers/example-service-intent-explicit-host-map/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.3.154/32
+      - 10.129.3.155/32
+  backend:
+    cluster: nat
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: false
+  ipsec:
+    ike_version: ikev1
+    ike_policies:
+      - aes256-sha256-modp2048
+      - aes128-sha1-modp1024
+    esp_policies:
+      - aes256-sha256-modp2048
+    dpddelay: 30s
+    dpdtimeout: 150s
+    dpdaction: restart
+    replay_protection: false
+    pfs_required: false
+    pfs_groups:
+      - modp2048
+      - modp1536
+    forceencaps: true
+    mobike: false
+    fragmentation: false
+    clear_df_bit: false
+  post_ipsec_nat:
+    enabled: true
+    mode: explicit_map
+    mapping_strategy: explicit_host_map
+    real_subnets:
+      - 10.129.3.154/32
+      - 10.129.3.155/32
+    translated_subnets:
+      - 172.30.0.64/27
+    host_mappings:
+      - real_ip: 10.129.3.154/32
+        translated_ip: 172.30.0.70/32
+      - real_ip: 10.129.3.155/32
+        translated_ip: 172.30.0.71/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    tcp_mss_clamp: 1380

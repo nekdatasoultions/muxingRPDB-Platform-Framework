@@ -200,6 +200,25 @@ The allocator should then derive and reserve values such as:
 - `overlay_block = 169.254.60.8/30`
 - `transport_interface_name = gre-vpn-0003`
 
+## Example Service-Intent NAT Inputs
+
+The repo also carries committed examples for the richer VPN compatibility and
+post-IPsec NAT intent:
+
+- [example-service-intent-netmap.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/customer-requests/examples/example-service-intent-netmap.yaml)
+- [example-service-intent-explicit-host-map.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
+
+Those examples show:
+
+- IKE version selection
+- multiple IKE and ESP policy options
+- DPD behavior
+- replay protection
+- PFS intent
+- force-encapsulation, MOBIKE, fragmentation, and DF-bit behavior
+- `/27` one-to-one netmap translation
+- explicit `/32` to `/32` host translation inside a `/27` translated pool
+
 ## Provisioning Contract
 
 The provisioning path should work like this:
