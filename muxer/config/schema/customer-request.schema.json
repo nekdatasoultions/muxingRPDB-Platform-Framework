@@ -435,7 +435,6 @@
       "additionalProperties": false,
       "required": [
         "name",
-        "customer_class",
         "peer",
         "selectors"
       ],

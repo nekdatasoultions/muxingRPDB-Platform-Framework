@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "vpn-customer-stage1-15-cust-0004-udp4500-pilot",
+  "customer_name": "vpn-customer-stage1-15-cust-0004",
+  "observed_peer": "3.237.201.84",
+  "observed_protocol": "udp",
+  "observed_dport": 4500,
+  "initial_udp500_observed": true,
+  "packet_count": 1,
+  "observed_at": "2026-04-15T21:53:33Z",
+  "source": "repo-only-pilot"
+}

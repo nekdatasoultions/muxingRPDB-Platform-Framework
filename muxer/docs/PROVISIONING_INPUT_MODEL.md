@@ -13,9 +13,6 @@ automatically.
 The target operator input should be limited to:
 
 - `customer_name`
-- `customer_class`
-  - `nat`
-  - `strict-non-nat`
 - peer/public VPN details
   - peer public IP
   - peer remote ID if needed
@@ -23,12 +20,11 @@ The target operator input should be limited to:
 - traffic selectors
   - local subnets
   - remote subnets
-- logical placement
-  - backend cluster
-  - optional backend assignment preference
+- optional logical placement override
+  - backend assignment preference when the platform should not choose it
 - optional feature flags
   - NAT-D rewrite
-  - dynamic NAT-T promotion when UDP/4500 is observed after initial UDP/500
+  - disabling dynamic NAT-T promotion when UDP/4500 must not auto-promote
   - post-IPsec NAT
   - VTI usage if required by the customer type
 
@@ -151,10 +147,10 @@ That path now:
 ## Dynamic NAT-T Promotion Input
 
 When customer NAT behavior is unknown, the safe default request starts as
-strict non-NAT:
+strict non-NAT without the operator declaring the stack:
 
-- `customer_class: strict-non-nat`
-- `backend.cluster: non-nat`
+- omit `customer_class`
+- omit `backend.cluster`
 - `protocols.udp500: true`
 - `protocols.udp4500: false`
 - `protocols.esp50: true`
@@ -163,6 +159,11 @@ If the muxer later observes UDP/4500 from that same peer, the dynamic
 provisioning processor can generate a reviewed NAT-T promotion package. This
 package changes the customer class to `nat`, enables UDP/4500, uses NAT
 allocation pools, and writes an audit record proving `live_apply: false`.
+
+Explicit `customer_class` and `backend.cluster` remain supported for static
+compatibility examples and migrations, but the normal onboarding path should
+let the workflow select strict non-NAT first and promote only when observed
+traffic proves NAT-T is needed.
 
 The committed example is:
 
@@ -179,7 +180,6 @@ schema_version: 1
 
 customer:
   name: legacy-cust0003
-  customer_class: strict-non-nat
   peer:
     public_ip: 166.213.153.41
     psk_secret_ref: /muxingrpdb/customers/legacy-cust0003/psk
@@ -190,9 +190,6 @@ customer:
       - 172.30.0.90/32
     remote_subnets:
       - 10.129.4.12/32
-  backend:
-    cluster: non-nat
-    assignment: nonnat-pool-01
 ```
 
 The allocator should then derive and reserve values such as:
@@ -205,28 +202,25 @@ The allocator should then derive and reserve values such as:
 - `overlay_block = 169.254.0.8/30`
 - `transport_interface_name = gre-cust-0003`
 
-## Example Minimal NAT Input
+## Example NAT-T Promotion Input
 
-```yaml
-schema_version: 1
+The operator does not pre-build a NAT request for the normal workflow. The
+operator provides the same customer request shape as above, and the muxer-side
+observation feed provides the NAT-T trigger:
 
-customer:
-  name: vpn-customer-stage1-15-cust-0003
-  customer_class: nat
-  peer:
-    public_ip: 198.51.100.25
-    psk_secret_ref: /muxingrpdb/customers/vpn-customer-stage1-15-cust-0003/psk
-  selectors:
-    local_subnets:
-      - 10.20.30.0/24
-    remote_subnets:
-      - 10.99.0.0/24
-  backend:
-    cluster: nat
-    assignment: nat-pool-01
+```json
+{
+  "schema_version": 1,
+  "customer_name": "vpn-customer-stage1-15-cust-0004",
+  "observed_peer": "3.237.201.84",
+  "observed_protocol": "udp",
+  "observed_dport": 4500,
+  "initial_udp500_observed": true,
+  "packet_count": 1
+}
 ```
 
-The allocator should then derive and reserve values such as:
+The NAT-T promotion workflow should then derive and reserve values such as:
 
 - `customer_id = 41003`
 - `fwmark = 0x41003`

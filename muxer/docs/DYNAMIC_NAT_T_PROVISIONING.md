@@ -13,10 +13,10 @@ The important distinction:
 
 ## Default Starting Point
 
-When the customer NAT behavior is unknown, start with strict non-NAT:
+When the customer NAT behavior is unknown, do not ask the operator to choose a
+stack. If the request omits `customer_class` and `backend.cluster`, the
+provisioning layer starts with strict non-NAT automatically:
 
-- `customer_class: strict-non-nat`
-- `backend.cluster: non-nat`
 - `protocols.udp500: true`
 - `protocols.udp4500: false`
 - `protocols.esp50: true`
@@ -38,30 +38,35 @@ The repo-only trigger facts are:
 
 ## Customer Request Shape
 
-Dynamic customers carry this section:
+The normal dynamic request does not need a NAT/non-NAT declaration:
 
 ```yaml
-dynamic_provisioning:
-  enabled: true
-  mode: nat_t_auto_promote
-  initial_customer_class: strict-non-nat
-  initial_backend_cluster: non-nat
-  trigger:
-    protocol: udp
-    destination_port: 4500
-    require_initial_udp500_observation: true
-    observation_window_seconds: 300
-    confirmation_packets: 1
-  promotion:
-    customer_class: nat
-    backend_cluster: nat
-    protocols:
-      udp500: true
-      udp4500: true
-      esp50: false
+schema_version: 1
+
+customer:
+  name: example-dynamic-default-nonnat
+  peer:
+    public_ip: 203.0.113.55
+    psk_secret_ref: /muxingrpdb/customers/example-dynamic-default-nonnat/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+    remote_subnets:
+      - 10.129.55.12/32
 ```
 
-See the committed example:
+Omitting the stack means:
+
+- initial package uses `strict-non-nat`
+- initial backend cluster is `non-nat`
+- initial protocols are UDP/500 plus ESP/50
+- NAT-T promotion remains enabled by default
+
+Use `dynamic_provisioning.enabled: false` only when a request must opt out of
+auto-promotion. Use the full `dynamic_provisioning` section only when the
+default trigger or promotion guardrails need to be overridden.
+
+See the committed default example:
 
 - `muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml`
 
@@ -201,6 +206,7 @@ replacement package. It does not release live reservations by itself.
 
 Before any live deployment, review:
 
+- request did not preselect NAT or non-NAT unless explicitly intended
 - initial package allocated from non-NAT pools
 - promoted package allocated from NAT pools
 - promoted package enables UDP/4500

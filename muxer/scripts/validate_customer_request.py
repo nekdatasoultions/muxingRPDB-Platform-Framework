@@ -12,7 +12,7 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from muxerlib.allocation import normalize_pool_class
+from muxerlib.allocation import effective_customer_class, normalize_pool_class
 from muxerlib.customer_merge import load_yaml_file
 from muxerlib.dynamic_provisioning import validate_dynamic_initial_request
 
@@ -54,11 +54,15 @@ def main() -> int:
         str(customer_doc.get("customer_class") or ""),
         str(backend_doc.get("cluster") or ""),
     )
+    customer_class = effective_customer_class(
+        str(customer_doc.get("customer_class") or ""),
+        str(backend_doc.get("cluster") or ""),
+    )
     dynamic_validation = validate_dynamic_initial_request(request_doc)
 
     print(
         f"Validated request {customer_doc.get('name')} "
-        f"(class={customer_doc.get('customer_class')}, pool_class={pool_class})"
+        f"(effective_class={customer_class}, pool_class={pool_class})"
     )
     print(f"Schema validation: {'jsonschema' if used_jsonschema else 'schema-package-missing'}")
     if dynamic_validation.get("enabled"):

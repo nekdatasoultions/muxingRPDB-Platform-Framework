@@ -2,7 +2,6 @@ schema_version: 1
 
 customer:
   name: vpn-customer-stage1-15-cust-0004
-  customer_class: nat
   peer:
     public_ip: 3.237.201.84
     remote_id: 3.237.201.84
@@ -13,15 +12,6 @@ customer:
       - 194.138.36.80/28
     remote_subnets:
       - 10.129.3.154/32
-  backend:
-    cluster: nat
-  protocols:
-    udp500: true
-    udp4500: true
-    esp50: false
-    force_rewrite_4500_to_500: false
-  natd_rewrite:
-    enabled: false
   ipsec:
     auto: start
     remote_id: 3.237.201.84
@@ -40,7 +30,6 @@ customer:
     pfs_groups:
       - modp2048
       - modp4096
-    forceencaps: true
     mobike: false
     fragmentation: true
     clear_df_bit: true

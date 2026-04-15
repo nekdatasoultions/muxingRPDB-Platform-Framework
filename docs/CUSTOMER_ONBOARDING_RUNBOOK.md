@@ -43,7 +43,7 @@ The customer request describes service intent.
 Customer-provided intent includes:
 
 - customer name
-- NAT or strict non-NAT class
+- VPN behavior and whether NAT-T has already been observed
 - peer public IP and remote ID
 - PSK secret reference
 - IKE/IKEv2 behavior and crypto policy options
@@ -78,7 +78,7 @@ Collect and verify these facts before creating the customer request.
 Customer identity:
 
 - customer name
-- customer class: `nat` or `strict-non-nat`
+- known NAT-T behavior, if already proven
 - whether this is a new customer or a migrated legacy customer
 - whether the customer is reserved for demo use
 
@@ -115,12 +115,11 @@ Traffic intent:
 
 Placement intent:
 
-- NAT or non-NAT head-end cluster
 - preferred backend assignment, if any
 - active and standby head-end expectation
 - customer-side public IP change expectation
-- whether NAT-T should be auto-promoted when UDP/4500 is observed after the
-  initial strict non-NAT package
+- whether there is an approved reason to disable the default NAT-T
+  auto-promotion workflow
 
 Operational readiness:
 
@@ -158,24 +157,23 @@ $HeadendRoot = "$WorkRoot\headend-root"
 New-Item -ItemType Directory -Force $WorkRoot | Out-Null
 ```
 
-Choose the environment binding file:
-
-```powershell
-$EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nat-active-a.yaml"
-```
-
-For strict non-NAT:
+Choose the default initial environment binding file:
 
 ```powershell
 $EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nonnat-active-a.yaml"
+```
+
+For a reviewed NAT-T promotion package, switch to the NAT binding:
+
+```powershell
+$EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nat-active-a.yaml"
 ```
 
 ## Step 1: Create The Customer Request
 
 Start from the committed examples:
 
-- `muxer\config\customer-requests\examples\example-minimal-nat.yaml`
-- `muxer\config\customer-requests\examples\example-minimal-nonnat.yaml`
+- `muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml`
 - `muxer\config\customer-requests\examples\example-service-intent-netmap.yaml`
 - `muxer\config\customer-requests\examples\example-service-intent-explicit-host-map.yaml`
 
@@ -183,21 +181,20 @@ Create a new request file:
 
 ```powershell
 Copy-Item `
-  "muxer\config\customer-requests\examples\example-service-intent-netmap.yaml" `
+  "muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml" `
   $Request
 ```
 
 Edit the request with verified customer facts only. Do not invent peer IPs,
 selectors, PSK paths, or NAT pools.
 
-Minimum NAT request shape:
+Minimum normal request shape:
 
 ```yaml
 schema_version: 1
 
 customer:
   name: example-customer-0001
-  customer_class: nat
   peer:
     public_ip: 198.51.100.45
     remote_id: 198.51.100.45
@@ -208,31 +205,12 @@ customer:
       - 194.138.36.80/28
     remote_subnets:
       - 10.129.3.154/32
-  backend:
-    cluster: nat
 ```
 
-Minimum strict non-NAT request shape:
-
-```yaml
-schema_version: 1
-
-customer:
-  name: example-customer-0001
-  customer_class: strict-non-nat
-  peer:
-    public_ip: 203.0.113.41
-    remote_id: 203.0.113.41
-    psk_secret_ref: /muxingrpdb/customers/example-customer-0001/psk
-  selectors:
-    local_subnets:
-      - 172.31.54.39/32
-      - 194.138.36.80/28
-    remote_subnets:
-      - 10.129.4.12/32
-  backend:
-    cluster: non-nat
-```
+Do not add `customer_class` or `backend.cluster` for normal onboarding. The
+allocator defaults the initial package to strict non-NAT and records dynamic
+NAT-T promotion as enabled. If the muxer later observes UDP/4500 from the same
+peer, process that observation to generate a reviewed NAT-T package.
 
 Post-IPsec NAT one-to-one `/27` example:
 

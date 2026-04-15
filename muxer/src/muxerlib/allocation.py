@@ -19,6 +19,8 @@ POOL_CLASS_ALIASES = {
     "strict_non_nat": "non-nat",
 }
 
+DEFAULT_POOL_CLASS = "non-nat"
+
 EXCLUSIVE_RESOURCE_TYPES = (
     "customer_id",
     "fwmark",
@@ -34,6 +36,30 @@ SHARED_TRACKED_RESOURCE_TYPES = (
     "backend_assignment",
     "backend_role",
 )
+
+DEFAULT_DYNAMIC_NAT_T_PROVISIONING = {
+    "enabled": True,
+    "mode": "nat_t_auto_promote",
+    "initial_customer_class": "strict-non-nat",
+    "initial_backend_cluster": "non-nat",
+    "trigger": {
+        "protocol": "udp",
+        "destination_port": 4500,
+        "require_initial_udp500_observation": True,
+        "observation_window_seconds": 300,
+        "confirmation_packets": 1,
+    },
+    "promotion": {
+        "customer_class": "nat",
+        "backend_cluster": "nat",
+        "protocols": {
+            "udp500": True,
+            "udp4500": True,
+            "esp50": False,
+            "force_rewrite_4500_to_500": False,
+        },
+    },
+}
 
 
 def load_allocation_pools(path: str | Path) -> Dict[str, Any]:
@@ -60,20 +86,32 @@ def load_customer_source_docs(*search_roots: str | Path) -> List[Dict[str, Any]]
 
 
 def normalize_pool_class(customer_class: str, backend_cluster: str = "") -> str:
-    normalized_class = POOL_CLASS_ALIASES.get(str(customer_class or "").strip().lower())
-    if not normalized_class:
+    raw_class = str(customer_class or "").strip()
+    raw_cluster = str(backend_cluster or "").strip()
+    normalized_class = POOL_CLASS_ALIASES.get(raw_class.lower()) if raw_class else ""
+    normalized_cluster = POOL_CLASS_ALIASES.get(raw_cluster.lower()) if raw_cluster else ""
+
+    if raw_class and not normalized_class:
         raise ValueError(f"unsupported customer_class {customer_class!r}")
+    if raw_cluster and not normalized_cluster:
+        raise ValueError(f"unsupported backend.cluster {backend_cluster!r}")
+    if normalized_class and normalized_cluster and normalized_cluster != normalized_class:
+        raise ValueError(
+            f"customer_class={customer_class!r} conflicts with backend.cluster={backend_cluster!r}"
+        )
 
-    if backend_cluster:
-        normalized_cluster = POOL_CLASS_ALIASES.get(str(backend_cluster).strip().lower())
-        if not normalized_cluster:
-            raise ValueError(f"unsupported backend.cluster {backend_cluster!r}")
-        if normalized_cluster != normalized_class:
-            raise ValueError(
-                f"customer_class={customer_class!r} conflicts with backend.cluster={backend_cluster!r}"
-            )
+    return normalized_class or normalized_cluster or DEFAULT_POOL_CLASS
 
-    return normalized_class
+
+def customer_class_for_pool(pool_class: str) -> str:
+    normalized_pool = normalize_pool_class(pool_class)
+    if normalized_pool == "nat":
+        return "nat"
+    return "strict-non-nat"
+
+
+def effective_customer_class(customer_class: str, backend_cluster: str = "") -> str:
+    return customer_class_for_pool(normalize_pool_class(customer_class, backend_cluster))
 
 
 def empty_allocation_inventory() -> Dict[str, Any]:
@@ -441,6 +479,8 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
     customer_doc = copy.deepcopy(request_doc.get("customer") or {})
     backend_doc = copy.deepcopy(customer_doc.get("backend") or {})
     ipsec_doc = copy.deepcopy(customer_doc.get("ipsec") or {})
+    requested_customer_class = str(customer_doc.get("customer_class") or "").strip()
+    requested_backend_cluster = str(backend_doc.get("cluster") or "").strip()
 
     pool_class = str(allocation_plan["pool_class"])
     backend_doc["cluster"] = str(backend_doc.get("cluster") or pool_class)
@@ -470,17 +510,23 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
     rendered_customer = {
         "id": int(allocation_plan["customer_id"]),
         "name": str(customer_doc["name"]),
-        "customer_class": str(customer_doc["customer_class"]),
+        "customer_class": customer_class_for_pool(pool_class),
         "peer": copy.deepcopy(customer_doc.get("peer") or {}),
         "transport": transport_doc,
         "selectors": copy.deepcopy(customer_doc.get("selectors") or {}),
         "backend": backend_doc,
     }
 
-    for optional_key in ("protocols", "natd_rewrite", "dynamic_provisioning", "post_ipsec_nat"):
+    for optional_key in ("protocols", "natd_rewrite", "post_ipsec_nat"):
         optional_doc = customer_doc.get(optional_key)
         if isinstance(optional_doc, dict) and optional_doc:
             rendered_customer[optional_key] = copy.deepcopy(optional_doc)
+
+    dynamic_doc = customer_doc.get("dynamic_provisioning")
+    if isinstance(dynamic_doc, dict) and dynamic_doc:
+        rendered_customer["dynamic_provisioning"] = copy.deepcopy(dynamic_doc)
+    elif not requested_customer_class and not requested_backend_cluster:
+        rendered_customer["dynamic_provisioning"] = copy.deepcopy(DEFAULT_DYNAMIC_NAT_T_PROVISIONING)
 
     if ipsec_doc:
         rendered_customer["ipsec"] = ipsec_doc
@@ -499,7 +545,10 @@ def build_allocation_records(
 ) -> List[Dict[str, Any]]:
     customer_doc = request_doc.get("customer") or {}
     customer_name = str(customer_doc.get("name") or "")
-    customer_class = str(customer_doc.get("customer_class") or "")
+    customer_class = effective_customer_class(
+        str(customer_doc.get("customer_class") or ""),
+        str(((customer_doc.get("backend") or {}).get("cluster") or "")),
+    )
     customer_id = int(allocation_plan["customer_id"])
 
     records: List[Dict[str, Any]] = []
@@ -565,7 +614,10 @@ def build_allocation_summary(
     return {
         "schema_version": 1,
         "customer_name": str((request_doc.get("customer") or {}).get("name") or ""),
-        "customer_class": str((request_doc.get("customer") or {}).get("customer_class") or ""),
+        "customer_class": effective_customer_class(
+            str((request_doc.get("customer") or {}).get("customer_class") or ""),
+            str((((request_doc.get("customer") or {}).get("backend") or {}).get("cluster") or "")),
+        ),
         "pool_class": str(allocation_plan["pool_class"]),
         "slot_index": int(allocation_plan["slot_index"]),
         "source_ref": source_ref,

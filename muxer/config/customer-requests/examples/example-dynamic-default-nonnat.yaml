@@ -2,7 +2,6 @@ schema_version: 1
 
 customer:
   name: example-dynamic-default-nonnat
-  customer_class: strict-non-nat
   peer:
     public_ip: 203.0.113.55
     remote_id: 203.0.113.55
@@ -13,32 +12,6 @@ customer:
       - 194.138.36.80/28
     remote_subnets:
       - 10.129.55.12/32
-  backend:
-    cluster: non-nat
-  protocols:
-    udp500: true
-    udp4500: false
-    esp50: true
-  natd_rewrite:
-    enabled: true
-  dynamic_provisioning:
-    enabled: true
-    mode: nat_t_auto_promote
-    initial_customer_class: strict-non-nat
-    initial_backend_cluster: non-nat
-    trigger:
-      protocol: udp
-      destination_port: 4500
-      require_initial_udp500_observation: true
-      observation_window_seconds: 300
-      confirmation_packets: 1
-    promotion:
-      customer_class: nat
-      backend_cluster: nat
-      protocols:
-        udp500: true
-        udp4500: true
-        esp50: false
   ipsec:
     ike_version: ikev2
     ike_policies:
@@ -52,7 +25,6 @@ customer:
     pfs_required: false
     pfs_groups:
       - modp2048
-    forceencaps: false
     mobike: false
     fragmentation: true
     clear_df_bit: true

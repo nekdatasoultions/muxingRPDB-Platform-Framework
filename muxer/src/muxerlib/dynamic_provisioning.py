@@ -9,6 +9,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
+from .allocation import effective_customer_class, normalize_pool_class
+
 
 INITIAL_PROTOCOLS = {
     "udp500": True,
@@ -70,8 +72,22 @@ def _promotion_doc(dynamic: Dict[str, Any]) -> Dict[str, Any]:
     return promotion
 
 
+def _request_has_explicit_stack(customer: Dict[str, Any]) -> bool:
+    backend = customer.get("backend") or {}
+    return bool(str(customer.get("customer_class") or "").strip()) or bool(
+        str(backend.get("cluster") or "").strip()
+    )
+
+
+def _dynamic_enabled(customer: Dict[str, Any], dynamic: Dict[str, Any]) -> bool:
+    if "enabled" in dynamic:
+        return bool(dynamic.get("enabled"))
+    return not _request_has_explicit_stack(customer)
+
+
 def dynamic_provisioning_enabled(doc: Dict[str, Any]) -> bool:
-    return bool(_dynamic_doc(_customer_doc(doc)).get("enabled"))
+    customer = _customer_doc(doc)
+    return _dynamic_enabled(customer, _dynamic_doc(customer))
 
 
 def customer_name_from_doc(doc: Dict[str, Any]) -> str:
@@ -155,7 +171,7 @@ def validate_dynamic_initial_request(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     customer = _customer_doc(doc)
     dynamic = _dynamic_doc(customer)
-    if not bool(dynamic.get("enabled")):
+    if not _dynamic_enabled(customer, dynamic):
         return {
             "enabled": False,
             "checks": [],
@@ -169,11 +185,16 @@ def validate_dynamic_initial_request(doc: Dict[str, Any]) -> Dict[str, Any]:
     initial_backend = str(dynamic.get("initial_backend_cluster") or "non-nat")
     customer_class = str(customer.get("customer_class") or "")
     backend_cluster = str((customer.get("backend") or {}).get("cluster") or "")
-    if initial_class != "strict-non-nat" or customer_class != "strict-non-nat":
-        raise ValueError("dynamic NAT-T discovery must start as customer_class=strict-non-nat")
+    effective_initial_class = effective_customer_class(customer_class, backend_cluster)
+    effective_initial_pool = normalize_pool_class(customer_class, backend_cluster)
+    if initial_class != "strict-non-nat" or effective_initial_class != "strict-non-nat":
+        raise ValueError(
+            "dynamic NAT-T discovery must start as customer_class=strict-non-nat "
+            "or omit the stack so strict non-NAT is selected by default"
+        )
     if initial_backend != "non-nat":
         raise ValueError("dynamic NAT-T discovery must start with initial_backend_cluster=non-nat")
-    if backend_cluster and backend_cluster != "non-nat":
+    if backend_cluster and effective_initial_pool != "non-nat":
         raise ValueError("dynamic NAT-T discovery initial backend.cluster must be non-nat")
 
     protocols = _effective_protocols(INITIAL_PROTOCOLS, customer.get("protocols") or {})
@@ -205,6 +226,9 @@ def validate_dynamic_initial_request(doc: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "enabled": True,
         "mode": mode,
+        "defaulted": not _request_has_explicit_stack(customer) and "enabled" not in dynamic,
+        "initial_customer_class": effective_initial_class,
+        "initial_backend_cluster": effective_initial_pool,
         "initial_protocols": protocols,
         "trigger": {
             "protocol": "udp",
@@ -301,9 +325,15 @@ def build_nat_t_promotion_request(
         "action": "plan_nat_t_promotion",
         "live_apply": False,
         "customer_name": str(customer.get("name") or ""),
-        "source_customer_class": str(customer.get("customer_class") or ""),
+        "source_customer_class": effective_customer_class(
+            str(customer.get("customer_class") or ""),
+            str((customer.get("backend") or {}).get("cluster") or ""),
+        ),
         "target_customer_class": "nat",
-        "source_backend_cluster": str((customer.get("backend") or {}).get("cluster") or "non-nat"),
+        "source_backend_cluster": normalize_pool_class(
+            str(customer.get("customer_class") or ""),
+            str((customer.get("backend") or {}).get("cluster") or ""),
+        ),
         "target_backend_cluster": "nat",
         "observed_event": {
             "peer_ip": observed_peer_ip,

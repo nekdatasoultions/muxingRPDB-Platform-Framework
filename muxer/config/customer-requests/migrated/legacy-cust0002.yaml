@@ -2,7 +2,6 @@ schema_version: 1
 
 customer:
   name: legacy-cust0002
-  customer_class: strict-non-nat
   peer:
     public_ip: 166.213.153.39
     remote_id: 166.213.153.39
@@ -12,15 +11,6 @@ customer:
       - 172.31.54.39/32
     remote_subnets:
       - 10.129.3.154/32
-  backend:
-    cluster: non-nat
-  protocols:
-    udp500: true
-    udp4500: false
-    esp50: true
-    force_rewrite_4500_to_500: false
-  natd_rewrite:
-    enabled: true
   ipsec:
     auto: start
     remote_id: 166.213.153.39

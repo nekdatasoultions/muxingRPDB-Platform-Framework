@@ -84,7 +84,7 @@ Fill out this intake form before creating the request.
 ```text
 Customer name:
 New customer or migrated customer:
-NAT customer or strict non-NAT customer:
+Known NAT-T behavior, if already proven:
 
 Customer peer public IP:
 Customer remote ID:
@@ -114,8 +114,8 @@ Translated subnet or /27:
 Explicit host mappings:
 Core subnets participating after NAT:
 
-Requested backend cluster:
 Preferred backend assignment:
+Stack override required, if any:
 
 Customer-side public IP change required:
 SmartGateway or downstream route change required:
@@ -124,22 +124,21 @@ Rollback owner:
 Validation owner:
 ```
 
-## Decide The Customer Type
+## Default Stack Workflow
 
-Choose `nat` when the customer uses NAT-T or is expected to use UDP/4500.
+Do not choose `nat` or `strict-non-nat` in the normal customer request.
 
-Choose `strict-non-nat` when the customer must use native ESP and should not use
-UDP/4500.
+The normal workflow is:
 
-Quick decision table:
+- create the customer request with peer, selectors, IPsec compatibility, and
+  service intent
+- omit `customer_class`
+- omit `backend.cluster`
+- let provisioning default the initial package to strict non-NAT
+- process a UDP/4500 observation only if the muxer sees NAT-T from that peer
 
-```text
-Customer uses UDP/4500: nat
-Customer uses native ESP only: strict-non-nat
-Customer requires post-IPsec translation to a /27: nat
-Customer must preserve strict public identity and ESP: strict-non-nat
-Not sure: stop and review the live VPN behavior first
-```
+Use an explicit stack only for controlled compatibility or migration cases
+where engineering has already approved bypassing the default workflow.
 
 ## Dynamic NAT-T Discovery
 
@@ -210,15 +209,15 @@ muxer\config\customer-requests\
 
 Use an example as the starting point.
 
-For NAT:
+For the normal auto workflow:
 
 ```powershell
 Copy-Item `
-  "muxer\config\customer-requests\examples\example-service-intent-netmap.yaml" `
+  "muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml" `
   "muxer\config\customer-requests\CUSTOMER_NAME.yaml"
 ```
 
-For strict non-NAT:
+For static compatibility only:
 
 ```powershell
 Copy-Item `
@@ -228,24 +227,23 @@ Copy-Item `
 
 Replace `CUSTOMER_NAME` with the actual customer name.
 
-## NAT Customer Request Template
+## Normal Customer Request Template
 
-Use this shape for a NAT-T customer with `/27` post-IPsec NAT.
+Use this shape for the normal workflow. Add `post_ipsec_nat` only when the
+customer service intent requires translation. Notice that the request does not
+include `customer_class`, `backend.cluster`, or hand-authored protocol stack
+choices.
 
 ```yaml
 schema_version: 1
 
 customer:
   name: CUSTOMER_NAME
-  customer_class: nat
 
   peer:
     public_ip: CUSTOMER_PUBLIC_IP
     remote_id: CUSTOMER_REMOTE_ID
     psk_secret_ref: /muxingrpdb/customers/CUSTOMER_NAME/psk
-
-  backend:
-    cluster: nat
 
   selectors:
     local_subnets:
@@ -253,11 +251,6 @@ customer:
       - 194.138.36.80/28
     remote_subnets:
       - CUSTOMER_REAL_SUBNET_OR_HOST
-
-  protocols:
-    udp500: true
-    udp4500: true
-    esp50: false
 
   ipsec:
     ike_version: ikev2
@@ -268,7 +261,6 @@ customer:
     dpddelay: 30s
     dpdtimeout: 120s
     dpdaction: restart
-    forceencaps: true
     mobike: false
     fragmentation: true
     clear_df_bit: true
@@ -291,78 +283,22 @@ customer:
     tcp_mss_clamp: 1360
 ```
 
-Important NAT notes:
+Important service-intent notes:
 
 - `selectors.remote_subnets` is the customer-side traffic inside the VPN.
 - `post_ipsec_nat.real_subnets` is the customer-side traffic that gets
   translated after decrypt.
 - `post_ipsec_nat.translated_subnets` is what we present internally after NAT.
 - `post_ipsec_nat.core_subnets` is our side of the traffic after translation.
+- If the muxer later observes UDP/4500, the NAT-T promotion workflow sets the
+  promoted package to `customer_class: nat`, enables UDP/4500, and sets
+  `forceencaps: true` in the promoted request.
 
-## Strict Non-NAT Customer Request Template
+## Explicit Stack Override Template
 
-Use this shape for a strict non-NAT customer.
-
-```yaml
-schema_version: 1
-
-customer:
-  name: CUSTOMER_NAME
-  customer_class: strict-non-nat
-
-  peer:
-    public_ip: CUSTOMER_PUBLIC_IP
-    remote_id: CUSTOMER_REMOTE_ID
-    psk_secret_ref: /muxingrpdb/customers/CUSTOMER_NAME/psk
-
-  backend:
-    cluster: non-nat
-
-  selectors:
-    local_subnets:
-      - 172.31.54.39/32
-      - 194.138.36.80/28
-    remote_subnets:
-      - CUSTOMER_REMOTE_SUBNET_OR_HOST
-
-  protocols:
-    udp500: true
-    udp4500: false
-    esp50: true
-
-  natd_rewrite:
-    enabled: true
-    initiator_inner_ip: ""
-
-  ipsec:
-    ike_version: ikev2
-    ike_policies:
-      - aes256-sha256-modp2048
-    esp_policies:
-      - aes256-sha256
-    dpddelay: 10s
-    dpdtimeout: 120s
-    dpdaction: restart
-    forceencaps: false
-    mobike: false
-    fragmentation: true
-    clear_df_bit: true
-    replay_protection: true
-    pfs_required: false
-    pfs_groups:
-      - modp2048
-
-  post_ipsec_nat:
-    enabled: false
-    mode: disabled
-```
-
-Important strict non-NAT notes:
-
-- `udp4500` must be `false`.
-- ESP must be allowed.
-- The customer must be placed on the non-NAT head-end side.
-- Do not use post-IPsec NAT unless the design is reviewed first.
+Do not use this for normal onboarding. If engineering approves a static
+compatibility case, add `customer_class`, `backend.cluster`, and explicit
+protocols to the request and document why auto-detection is being bypassed.
 
 ## Run The Onboarding Commands
 
@@ -384,18 +320,18 @@ $HeadendRoot = "$WorkRoot\headend-root"
 New-Item -ItemType Directory -Force $WorkRoot | Out-Null
 ```
 
-Choose the right environment file.
+Choose the initial environment file.
 
-For NAT:
-
-```powershell
-$EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nat-active-a.yaml"
-```
-
-For strict non-NAT:
+For the default initial package:
 
 ```powershell
 $EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nonnat-active-a.yaml"
+```
+
+For a reviewed NAT-T promotion package:
+
+```powershell
+$EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nat-active-a.yaml"
 ```
 
 Preferred one-command pilot package:

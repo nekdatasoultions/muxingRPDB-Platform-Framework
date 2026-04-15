@@ -57,7 +57,8 @@ Selection requirements:
 - customer facts are known and verified
 - customer can be represented without touching live systems
 - customer request can be created or updated inside this repo
-- NAT/non-NAT starting class is understood
+- default starting behavior is understood
+- normal requests omit NAT/non-NAT and default to strict non-NAT first
 - target environment binding file is known
 - customer 3 variants are excluded while they are real-time/live customers
 
@@ -139,6 +140,8 @@ Review these files:
 Review points:
 
 - customer class is correct
+- request did not preselect NAT or non-NAT unless the package is a promoted
+  NAT-T artifact
 - backend cluster is correct
 - peer IP is correct
 - local selectors are correct
@@ -252,6 +255,7 @@ Current repo-only pilot candidates:
 
 - customer: `legacy-cust0002`
 - request: `muxer/config/customer-requests/migrated/legacy-cust0002.yaml`
+- stack selection in request: omitted; defaults to strict non-NAT
 - package output: `build/customer-pilots/legacy-cust0002`
 - environment binding: `muxer/config/environment-defaults/rpdb-empty-nonnat-active-a.yaml`
 - package status: `ready_for_review`
@@ -263,6 +267,8 @@ Current repo-only pilot candidates:
 
 - customer: `vpn-customer-stage1-15-cust-0004`
 - request: `muxer/config/customer-requests/migrated/vpn-customer-stage1-15-cust-0004.yaml`
+- stack selection in request: omitted; defaults to strict non-NAT
+- NAT-T observation: `muxer/config/customer-requests/migrated/vpn-customer-stage1-15-cust-0004-nat-t-observation.json`
 - package output: `build/customer-pilots/vpn-customer-stage1-15-cust-0004`
 - environment binding: `muxer/config/environment-defaults/rpdb-empty-nat-active-a.yaml`
 - package status: `ready_for_review`

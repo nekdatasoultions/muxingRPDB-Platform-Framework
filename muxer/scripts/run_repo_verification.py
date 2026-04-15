@@ -315,6 +315,11 @@ def main() -> int:
             / "config"
             / "environment-defaults"
             / "rpdb-empty-nat-active-a.yaml",
+            "observation": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "vpn-customer-stage1-15-cust-0004-nat-t-observation.json",
         },
     }
     pilot_reports: dict[str, dict] = {}
