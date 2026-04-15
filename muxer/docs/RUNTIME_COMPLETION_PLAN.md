@@ -10,6 +10,10 @@ The framework, customer model, and SoT shape are now matched by a customer-
 scoped runtime path, an allocator-backed provisioning path, and a repo-only
 verification harness.
 
+The next service-intent modeling step is tracked in:
+
+- [VPN_SERVICE_INTENT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
+
 ## What Is Already Fixed
 
 - explicit `rpdb_priority` support exists in the runtime
@@ -168,6 +172,31 @@ Current status:
   customer sources
 - exclusive allocation DDB item shapes are now generated in the repo-only
   provisioning flow
+
+### Phase 2.6. VPN service intent and richer post-IPsec NAT intent
+
+Extend the customer-side intent model so operators provide:
+
+- VPN compatibility and interoperability behavior
+- interesting traffic intent
+- richer post-IPsec NAT translation intent
+
+That includes explicit modeling for:
+
+- IKE version choice
+- replay-protection policy
+- DF-bit handling policy
+- richer multi-policy compatibility structure
+- block-preserving one-to-one translated subnet mapping
+- explicit `/32` to `/32` host mappings inside a translated pool
+
+These belong to the customer service model, not the allocator-owned namespace
+layer.
+
+Current status:
+
+- design direction documented
+- implementation pending
 
 ### Phase 3. Delta dataplane apply
 

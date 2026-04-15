@@ -14,6 +14,10 @@ Important design direction:
 - the customer source should describe the customer and service intent
 - the provisioning layer should allocate platform namespaces automatically
 
+That intent split is tracked in:
+
+- [VPN_SERVICE_INTENT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
+
 The target operator-facing contract is described in:
 
 - [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
@@ -147,6 +151,7 @@ Optional per-customer NAT-D behavior overrides:
 Optional per-customer IPsec overrides:
 
 - `auto`
+- `ike_version` (target field, not fully modeled yet)
 - `local_id`
 - `remote_id`
 - `ike`
@@ -156,14 +161,24 @@ Optional per-customer IPsec overrides:
 - `dpdaction`
 - `ikelifetime`
 - `lifetime`
+- `replay_protection` (target field, not fully modeled yet)
+- `pfs` or required-group flexibility (target field, not fully modeled yet)
 - `forceencaps`
 - `mobike`
 - `fragmentation`
+- `clear_df_bit` (target field, not fully modeled yet)
 - `mark`
 - `vti_interface`
 - `vti_routing`
 - `vti_shared`
 - `bidirectional_secret`
+
+Current repo note:
+
+- the compatibility schema already models the raw `ike` and `esp` strings plus
+  DPD, force-encap, mobility, fragmentation, and VTI fields
+- explicit `ike_version`, replay-protection control, DF-bit handling, and a
+  richer multi-policy compatibility structure still need to be added
 
 ### `customer.post_ipsec_nat`
 
@@ -173,15 +188,33 @@ Optional for the customer source, but when present it must include:
 
 Useful fields include:
 
+- `mapping_strategy` (target field, not fully modeled yet)
 - `translated_subnets`
 - `translated_source_ip`
 - `real_subnets`
 - `core_subnets`
+- `host_mappings` (target field, not fully modeled yet)
 - `interface`
 - `output_mark`
 - `tcp_mss_clamp`
 - `route_via`
 - `route_dev`
+
+Important meaning:
+
+- `selectors.remote_subnets` defines what customer-side traffic is in-scope for
+  the VPN
+- `post_ipsec_nat.real_subnets` defines which real customer-side subnets are
+  translated after IPsec
+- `post_ipsec_nat.translated_subnets` defines the translated block, such as a
+  `/27`, that we present after NAT
+- `post_ipsec_nat.core_subnets` defines our side local/core reachability for
+  that translated path
+
+Target NAT intent:
+
+- block-preserving one-to-one mapping for subnet-to-subnet netmap behavior
+- explicit `/32` to `/32` host mappings inside a translated pool
 
 ## Secret Handling
 
@@ -204,6 +237,9 @@ The target authoring experience is:
 - `customer_name`
 - `customer_class`
 - logical backend placement
+- VPN compatibility and interoperability inputs
+- interesting traffic intent
+- post-IPsec NAT intent where needed
 
 The platform should then allocate the transport/runtime namespaces
 automatically.

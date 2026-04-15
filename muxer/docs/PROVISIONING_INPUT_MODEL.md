@@ -31,6 +31,21 @@ The target operator input should be limited to:
   - post-IPsec NAT
   - VTI usage if required by the customer type
 
+This input layer should also own the VPN service and interoperability knobs
+that describe how the customer connection must behave, including:
+
+- IKEv1 vs IKEv2
+- allowed crypto policy sets
+- DPD behavior
+- replay protection policy
+- PFS flexibility and required-group behavior
+- fragmentation and force-encapsulation behavior
+- DF-bit handling default
+- whether VTI is required
+- what customer-side traffic is interesting for the VPN
+- what traffic is translated after IPsec, including `/27` one-to-one mapping
+  intent or explicit `/32` to `/32` mappings
+
 In other words, the operator should describe the customer and the desired
 service shape, not hand-allocate platform namespaces.
 
@@ -48,6 +63,9 @@ The provisioning layer should allocate and track:
 - VTI interface name
 - backend assignment
 - resolved backend role
+
+These are allocator concerns because they are collision-prone platform
+namespaces, not customer service intent.
 
 These values should come from tracked pools and should be written back into the
 canonical customer runtime record after allocation.
@@ -83,6 +101,11 @@ fields such as:
 - `transport.rpdb_priority`
 
 That keeps the framework compatible while the allocator layer is being built.
+
+The customer-provided service intent versus allocator-owned namespace split is
+tracked in:
+
+- [VPN_SERVICE_INTENT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
 
 ### Target state
 
@@ -189,6 +212,26 @@ The provisioning path should work like this:
    - allocated namespace values
 5. customer item and allocation items are written to the database
 6. runtime artifacts are rendered from the resolved record
+
+## Important Boundary
+
+The provisioning layer should not own the VPN behavior contract itself.
+
+Customer-provided:
+
+- VPN compatibility and interoperability behavior
+- interesting traffic definition
+- post-IPsec NAT behavior and translation intent
+
+Allocator-provided:
+
+- marks
+- tables
+- RPDB priorities
+- tunnel keys
+- GRE or VTI names
+- overlay addressing
+- backend slot resolution
 
 ## Migration Gate
 
