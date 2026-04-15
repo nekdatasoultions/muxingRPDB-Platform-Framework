@@ -22,10 +22,10 @@ Not allowed in this plan:
 ## Goal
 
 Use the repo-only pilot package builder to prepare the first real RPDB customer
-pilot package from verified customer facts.
+pilot packages from verified customer facts.
 
 This plan ends with a reviewable package and a human decision gate. It does not
-deploy the customer.
+deploy any customer.
 
 ## Inputs Needed
 
@@ -48,9 +48,9 @@ The pilot package requires:
   - default strict non-NAT request
   - reviewed UDP/4500 observation file when promotion is needed
 
-## Stage 1: Select Pilot Customer
+## Stage 1: Select Pilot Customers
 
-Pick one pilot customer to model in RPDB.
+Pick pilot customers to model in RPDB.
 
 Selection requirements:
 
@@ -59,16 +59,17 @@ Selection requirements:
 - customer request can be created or updated inside this repo
 - NAT/non-NAT starting class is understood
 - target environment binding file is known
+- customer 3 variants are excluded while they are real-time/live customers
 
 Validation:
 
-- selected customer is named in the plan notes or package README
+- selected customers are named in the plan notes or package README
 - no live system was queried by the package builder
 - no MUXER3 files were modified
 
 ## Stage 2: Create Or Confirm Customer Request
 
-Create or update one customer request YAML under:
+Create or update customer request YAML files under:
 
 - `muxer/config/customer-requests/`
 
@@ -88,7 +89,7 @@ Validation:
 
 ## Stage 3: Run Repo-Only Pilot Builder
 
-Run the primary command:
+Run the primary command for each selected pilot customer:
 
 ```powershell
 python muxer\scripts\prepare_customer_pilot.py muxer\config\customer-requests\<customer-name>.yaml `
@@ -179,7 +180,7 @@ Validation:
 
 ## Stage 6: Full Repo Verification
 
-After the first real pilot package is generated and reviewed, run:
+After the first real pilot packages are generated and reviewed, run:
 
 ```powershell
 python muxer\scripts\run_repo_verification.py --json
@@ -235,9 +236,9 @@ Live deployment requires a separate approved plan with:
 
 This plan is complete when:
 
-- one real customer request exists or is confirmed in the RPDB repo
-- `prepare_customer_pilot.py` produces a package for that customer
-- `pilot-readiness.json` says `ready_for_review`
+- the selected real customer requests exist or are confirmed in the RPDB repo
+- `prepare_customer_pilot.py` produces packages for the selected customers
+- each `pilot-readiness.json` says `ready_for_review`
 - generated artifacts are reviewed
 - full repo verification passes
 - changes are committed and pushed if repo files changed
@@ -247,14 +248,39 @@ This plan is complete when:
 
 ## Execution Checkpoint
 
-Current repo-only pilot candidate:
+Current repo-only pilot candidates:
 
-- customer: `legacy-cust0003`
-- request: `muxer/config/customer-requests/migrated/legacy-cust0003.yaml`
-- package output: `build/customer-pilots/legacy-cust0003`
+- customer: `legacy-cust0002`
+- request: `muxer/config/customer-requests/migrated/legacy-cust0002.yaml`
+- package output: `build/customer-pilots/legacy-cust0002`
 - environment binding: `muxer/config/environment-defaults/rpdb-empty-nonnat-active-a.yaml`
 - package status: `ready_for_review`
+- allocated customer ID: `2000`
+- allocated fwmark: `0x2000`
+- allocated route table: `2000`
+- allocated tunnel key: `2000`
 - live apply: `false`
+
+- customer: `vpn-customer-stage1-15-cust-0004`
+- request: `muxer/config/customer-requests/migrated/vpn-customer-stage1-15-cust-0004.yaml`
+- package output: `build/customer-pilots/vpn-customer-stage1-15-cust-0004`
+- environment binding: `muxer/config/environment-defaults/rpdb-empty-nat-active-a.yaml`
+- package status: `ready_for_review`
+- allocated customer ID: `41000`
+- allocated fwmark: `0x41000`
+- allocated route table: `41000`
+- allocated tunnel key: `41000`
+- live apply: `false`
+
+Excluded pilot candidates:
+
+- `legacy-cust0003`
+- `vpn-customer-stage1-15-cust-0003`
+
+Reason:
+
+- customer 3 variants are real-time/live customers and are not part of this
+  repo-only pilot package exercise.
 
 Important note:
 

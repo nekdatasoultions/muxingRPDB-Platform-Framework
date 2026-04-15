@@ -292,10 +292,35 @@ def main() -> int:
             "out_dir": pilot_root / "dynamic-nat-t",
             "observation": observation_path,
         },
+        "pilot-legacy-cust0002": {
+            "request": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "legacy-cust0002.yaml",
+            "out_dir": pilot_root / "legacy-cust0002",
+            "environment_file": MUXER_DIR
+            / "config"
+            / "environment-defaults"
+            / "rpdb-empty-nonnat-active-a.yaml",
+        },
+        "pilot-vpn-customer-stage1-15-cust-0004": {
+            "request": MUXER_DIR
+            / "config"
+            / "customer-requests"
+            / "migrated"
+            / "vpn-customer-stage1-15-cust-0004.yaml",
+            "out_dir": pilot_root / "vpn-customer-stage1-15-cust-0004",
+            "environment_file": MUXER_DIR
+            / "config"
+            / "environment-defaults"
+            / "rpdb-empty-nat-active-a.yaml",
+        },
     }
     pilot_reports: dict[str, dict] = {}
-    environment_file = MUXER_DIR / "config" / "environment-defaults" / "example-environment.yaml"
+    default_environment_file = MUXER_DIR / "config" / "environment-defaults" / "example-environment.yaml"
     for pilot_name, spec in pilot_specs.items():
+        environment_file = spec.get("environment_file", default_environment_file)
         pilot_command = [
             "python",
             str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),

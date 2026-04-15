@@ -1,0 +1,57 @@
+schema_version: 1
+
+customer:
+  name: vpn-customer-stage1-15-cust-0004
+  customer_class: nat
+  peer:
+    public_ip: 3.237.201.84
+    remote_id: 3.237.201.84
+    psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0004/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.3.154/32
+  backend:
+    cluster: nat
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: false
+    force_rewrite_4500_to_500: false
+  natd_rewrite:
+    enabled: false
+  ipsec:
+    auto: start
+    remote_id: 3.237.201.84
+    ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
+    esp_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    replay_protection: true
+    pfs_required: false
+    pfs_groups:
+      - modp2048
+      - modp4096
+    forceencaps: true
+    mobike: false
+    fragmentation: true
+    clear_df_bit: true
+  post_ipsec_nat:
+    enabled: true
+    mode: netmap
+    translated_subnets:
+      - 172.30.0.64/27
+    real_subnets:
+      - 10.129.3.154/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    tcp_mss_clamp: 1360
