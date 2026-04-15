@@ -14,6 +14,7 @@ if str(SRC_DIR) not in sys.path:
 
 from muxerlib.allocation import normalize_pool_class
 from muxerlib.customer_merge import load_yaml_file
+from muxerlib.dynamic_provisioning import validate_dynamic_initial_request
 
 
 def _load_json(path: Path) -> dict:
@@ -53,12 +54,15 @@ def main() -> int:
         str(customer_doc.get("customer_class") or ""),
         str(backend_doc.get("cluster") or ""),
     )
+    dynamic_validation = validate_dynamic_initial_request(request_doc)
 
     print(
         f"Validated request {customer_doc.get('name')} "
         f"(class={customer_doc.get('customer_class')}, pool_class={pool_class})"
     )
     print(f"Schema validation: {'jsonschema' if used_jsonschema else 'schema-package-missing'}")
+    if dynamic_validation.get("enabled"):
+        print("Dynamic provisioning: nat_t_auto_promote")
 
     if args.show_request:
         print(json.dumps(request_doc, indent=2, sort_keys=True))

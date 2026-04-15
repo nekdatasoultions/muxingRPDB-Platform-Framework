@@ -76,6 +76,15 @@ def main() -> int:
         default=[],
         help="Existing customer source roots used for collision checks. Can be specified multiple times.",
     )
+    parser.add_argument(
+        "--replace-customer",
+        action="append",
+        default=[],
+        help=(
+            "Ignore an existing customer name when planning allocations. "
+            "Use for reviewed re-provisioning flows such as NAT-T promotion."
+        ),
+    )
     parser.add_argument("--source-out", help="Optional path to write the fully allocated customer source YAML")
     parser.add_argument("--module-out", help="Optional path to write the merged customer module JSON")
     parser.add_argument("--item-out", help="Optional path to write the customer DynamoDB item JSON")
@@ -90,7 +99,15 @@ def main() -> int:
 
     pools_doc = load_allocation_pools(Path(args.allocation_pools).resolve())
     existing_roots = args.existing_source_root or [str(repo_muxer_dir / "config" / "customer-sources")]
-    inventory = build_allocation_inventory(load_customer_source_docs(*existing_roots))
+    replace_customers = {str(name).strip() for name in args.replace_customer if str(name).strip()}
+    existing_source_docs = load_customer_source_docs(*existing_roots)
+    if replace_customers:
+        existing_source_docs = [
+            doc
+            for doc in existing_source_docs
+            if str((doc.get("customer") or {}).get("name") or "").strip() not in replace_customers
+        ]
+    inventory = build_allocation_inventory(existing_source_docs)
     allocation_plan = plan_customer_allocations(request_doc, pools_doc, inventory=inventory)
     customer_source = render_allocated_customer_source(request_doc, allocation_plan)
 

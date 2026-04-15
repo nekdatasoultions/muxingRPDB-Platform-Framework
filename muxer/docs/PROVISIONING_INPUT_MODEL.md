@@ -28,6 +28,7 @@ The target operator input should be limited to:
   - optional backend assignment preference
 - optional feature flags
   - NAT-D rewrite
+  - dynamic NAT-T promotion when UDP/4500 is observed after initial UDP/500
   - post-IPsec NAT
   - VTI usage if required by the customer type
 
@@ -124,6 +125,7 @@ The repo now has a working minimal-request provisioning path through:
 - [validate_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/validate_customer_request.py)
 - [validate_customer_allocations.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/validate_customer_allocations.py)
 - [provision_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/provision_customer_request.py)
+- [plan_nat_t_promotion.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/plan_nat_t_promotion.py)
 
 That path now:
 
@@ -135,6 +137,32 @@ That path now:
 - emits a fully allocated compatibility customer source
 - emits the merged customer module and customer SoT item
 - emits the exclusive allocation DDB item view
+- can produce a repo-only NAT-T promotion request when a dynamic strict
+  non-NAT customer is later observed on UDP/4500
+
+## Dynamic NAT-T Promotion Input
+
+When customer NAT behavior is unknown, the safe default request starts as
+strict non-NAT:
+
+- `customer_class: strict-non-nat`
+- `backend.cluster: non-nat`
+- `protocols.udp500: true`
+- `protocols.udp4500: false`
+- `protocols.esp50: true`
+
+If the muxer later observes UDP/4500 from that same peer, the dynamic
+provisioning helper can generate a reviewed NAT-T promotion request. This
+promotion request changes the customer class to `nat`, enables UDP/4500, and
+uses NAT allocation pools.
+
+The committed example is:
+
+- [example-dynamic-default-nonnat.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml)
+
+The detailed model is documented in:
+
+- [DYNAMIC_NAT_T_PROVISIONING.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md)
 
 ## Example Minimal Non-NAT Input
 

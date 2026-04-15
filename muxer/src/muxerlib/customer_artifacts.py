@@ -354,6 +354,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
     selectors = module.get("selectors") or {}
     protocols = module.get("protocols") or {}
     natd_rewrite = module.get("natd_rewrite") or {}
+    dynamic_provisioning = module.get("dynamic_provisioning") or {}
     backend = module.get("backend") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
 
@@ -435,6 +436,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
                 "force_rewrite_4500_to_500": protocols.get("force_rewrite_4500_to_500"),
             },
             "natd_rewrite": natd_rewrite,
+            "dynamic_provisioning": dynamic_provisioning,
             "post_ipsec_nat_enabled": bool(post_ipsec_nat.get("enabled")),
             "post_ipsec_nat_mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
         },

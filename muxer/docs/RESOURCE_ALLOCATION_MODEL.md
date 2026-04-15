@@ -212,6 +212,20 @@ Normal new-customer provisioning should work like this:
 6. render runtime artifacts from the resolved allocations
 7. apply the customer
 
+Dynamic NAT-T promotion is a reviewed replacement flow:
+
+1. provision the initial customer from non-NAT pools
+2. observe UDP/4500 from the same peer
+3. generate a repo-only NAT promotion request
+4. provision the promoted request from NAT pools using `--replace-customer`
+   during planning
+5. review old and new allocation summaries side by side
+6. keep old allocations reserved until the live promotion succeeds or rollback
+   ownership says they can be released
+
+The `--replace-customer` flag is not a live release operation. It only prevents
+the same customer name from blocking the repo-only replacement allocation plan.
+
 Normal delete should work like this:
 
 1. load the customer item

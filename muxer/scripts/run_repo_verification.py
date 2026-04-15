@@ -125,9 +125,11 @@ def main() -> int:
         str(MUXER_DIR / "src" / "muxerlib" / "customer_artifacts.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "allocation.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "allocation_sot.py"),
+        str(MUXER_DIR / "src" / "muxerlib" / "dynamic_provisioning.py"),
         str(MUXER_DIR / "scripts" / "validate_customer_request.py"),
         str(MUXER_DIR / "scripts" / "validate_customer_allocations.py"),
         str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
+        str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
@@ -158,6 +160,7 @@ def main() -> int:
     request_paths = {
         "example-minimal-nonnat": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-minimal-nonnat.yaml",
         "example-minimal-nat": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-minimal-nat.yaml",
+        "example-dynamic-default-nonnat": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-dynamic-default-nonnat.yaml",
         "example-service-intent-netmap": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-service-intent-netmap.yaml",
         "example-service-intent-explicit-host-map": MUXER_DIR / "config" / "customer-requests" / "examples" / "example-service-intent-explicit-host-map.yaml",
     }
@@ -192,6 +195,67 @@ def main() -> int:
                 for name, result in provision_results.items()
             },
             "generated_sources_root": str(generated_sources_root),
+        },
+    )
+
+    # Step 3b: verify the repo-only dynamic NAT-T promotion planner.
+    dynamic_name = "example-dynamic-default-nonnat"
+    dynamic_promotion_dir = BUILD_ROOT / "dynamic-promotion"
+    if dynamic_promotion_dir.exists():
+        shutil.rmtree(dynamic_promotion_dir)
+    dynamic_promotion_dir.mkdir(parents=True, exist_ok=True)
+    promoted_request_path = dynamic_promotion_dir / "promoted-nat-request.yaml"
+    promotion_summary_path = dynamic_promotion_dir / "promotion-summary.json"
+    promotion_summary = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
+            str(request_paths[dynamic_name]),
+            "--observed-peer",
+            "203.0.113.55",
+            "--observed-protocol",
+            "udp",
+            "--observed-dport",
+            "4500",
+            "--initial-udp500-observed",
+            "--request-out",
+            str(promoted_request_path),
+            "--summary-out",
+            str(promotion_summary_path),
+            "--json",
+        ]
+    )
+    _run(["python", str(MUXER_DIR / "scripts" / "validate_customer_request.py"), str(promoted_request_path)])
+    promoted_source_out = dynamic_promotion_dir / "promoted-customer-source.yaml"
+    promoted_result = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
+            str(promoted_request_path),
+            "--existing-source-root",
+            str(MUXER_DIR / "config" / "customer-sources"),
+            "--existing-source-root",
+            str(generated_sources_root),
+            "--replace-customer",
+            dynamic_name,
+            "--source-out",
+            str(promoted_source_out),
+            "--json",
+        ]
+    )
+    if provision_results[dynamic_name]["allocation_plan"]["pool_class"] != "non-nat":
+        raise SystemExit("dynamic initial request did not allocate from the non-NAT pool")
+    if promoted_result["allocation_plan"]["pool_class"] != "nat":
+        raise SystemExit("dynamic NAT-T promotion did not allocate from the NAT pool")
+    record_step(
+        "dynamic_nat_t_promotion_planning",
+        {
+            "customer_name": dynamic_name,
+            "initial_pool_class": provision_results[dynamic_name]["allocation_plan"]["pool_class"],
+            "promoted_pool_class": promoted_result["allocation_plan"]["pool_class"],
+            "promoted_customer_id": promoted_result["allocation_plan"]["customer_id"],
+            "promoted_request": str(promoted_request_path),
+            "promotion_summary": promotion_summary,
         },
     )
 

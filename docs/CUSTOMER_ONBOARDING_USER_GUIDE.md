@@ -119,6 +119,7 @@ Preferred backend assignment:
 
 Customer-side public IP change required:
 SmartGateway or downstream route change required:
+Dynamic NAT-T promotion allowed:
 Rollback owner:
 Validation owner:
 ```
@@ -139,6 +140,60 @@ Customer requires post-IPsec translation to a /27: nat
 Customer must preserve strict public identity and ESP: strict-non-nat
 Not sure: stop and review the live VPN behavior first
 ```
+
+## Dynamic NAT-T Discovery
+
+When NAT behavior is unknown, start with strict non-NAT by default.
+
+That means:
+
+- UDP/500 is enabled
+- ESP/50 is enabled
+- UDP/4500 is disabled
+- the customer is placed on the non-NAT stack
+
+If the muxer later sees UDP/4500 from that same peer, do not hand-edit the
+customer into production. Generate a repo-only NAT-T promotion package and
+review it.
+
+Use this committed example for the initial request shape:
+
+```text
+muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml
+```
+
+The promotion command is:
+
+```powershell
+python muxer\scripts\plan_nat_t_promotion.py $Request `
+  --observed-peer CUSTOMER_PUBLIC_IP `
+  --observed-protocol udp `
+  --observed-dport 4500 `
+  --initial-udp500-observed `
+  --request-out "$WorkRoot\promoted-nat-request.yaml" `
+  --summary-out "$WorkRoot\promotion-summary.json" `
+  --json
+```
+
+Then validate and provision the promoted request with `--replace-customer` so
+the allocator plans the NAT replacement package without mutating the old
+non-NAT package in place.
+
+```powershell
+python muxer\scripts\validate_customer_request.py "$WorkRoot\promoted-nat-request.yaml"
+
+python muxer\scripts\provision_customer_request.py "$WorkRoot\promoted-nat-request.yaml" `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --replace-customer $CustomerName `
+  --source-out "$WorkRoot\promoted-customer-source.yaml" `
+  --module-out "$WorkRoot\promoted-customer-module.json" `
+  --item-out "$WorkRoot\promoted-customer-ddb-item.json" `
+  --allocation-out "$WorkRoot\promoted-allocation-summary.json"
+```
+
+Stop after reviewing the promotion package. Live promotion still needs its own
+approved change window.
 
 ## Create The Customer Request
 
@@ -197,7 +252,7 @@ customer:
   protocols:
     udp500: true
     udp4500: true
-    esp50: true
+    esp50: false
 
   ipsec:
     ike_version: ikev2
@@ -620,4 +675,3 @@ Onboarding is complete when:
 
 At that point, the customer is ready for deployment planning, not automatically
 deployed.
-

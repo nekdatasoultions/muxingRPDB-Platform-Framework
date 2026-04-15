@@ -119,6 +119,8 @@ Placement intent:
 - preferred backend assignment, if any
 - active and standby head-end expectation
 - customer-side public IP change expectation
+- whether NAT-T should be auto-promoted when UDP/4500 is observed after the
+  initial strict non-NAT package
 
 Operational readiness:
 
@@ -331,6 +333,62 @@ Optional merged view:
 ```powershell
 python muxer\scripts\validate_customer_source.py $AllocatedSource --show-merged
 ```
+
+## Optional: Plan Dynamic NAT-T Promotion
+
+Use this only when the customer was intentionally started as strict non-NAT and
+the muxer later observes UDP/4500 from the same peer.
+
+This step is repo-only. It creates a NAT-T promotion request and review
+summary. It does not modify live muxer state, live head-end state, or DynamoDB.
+
+```powershell
+$PromotedRequest = "$WorkRoot\promoted-nat-request.yaml"
+$PromotionSummary = "$WorkRoot\promotion-summary.json"
+$PromotedSource = "$WorkRoot\promoted-customer-source.yaml"
+$PromotedModule = "$WorkRoot\promoted-customer-module.json"
+$PromotedDdbItem = "$WorkRoot\promoted-customer-ddb-item.json"
+$PromotedAllocationSummary = "$WorkRoot\promoted-allocation-summary.json"
+```
+
+Generate the promotion request from observed UDP/4500 facts:
+
+```powershell
+python muxer\scripts\plan_nat_t_promotion.py $Request `
+  --observed-peer CUSTOMER_PUBLIC_IP `
+  --observed-protocol udp `
+  --observed-dport 4500 `
+  --initial-udp500-observed `
+  --request-out $PromotedRequest `
+  --summary-out $PromotionSummary `
+  --json
+```
+
+Validate and provision the promoted request from NAT pools:
+
+```powershell
+python muxer\scripts\validate_customer_request.py $PromotedRequest
+```
+
+```powershell
+python muxer\scripts\provision_customer_request.py $PromotedRequest `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --replace-customer $CustomerName `
+  --source-out $PromotedSource `
+  --module-out $PromotedModule `
+  --item-out $PromotedDdbItem `
+  --allocation-out $PromotedAllocationSummary
+```
+
+Review:
+
+- `$AllocationSummary` should show the initial non-NAT pool allocation
+- `$PromotedAllocationSummary` should show the proposed NAT pool allocation
+- `$PromotionSummary` should show `live_apply: false`
+- the promoted request should enable UDP/4500
+- old non-NAT reservations should not be released until the live promotion has
+  either succeeded or rollback ownership says they can be released
 
 ## Step 5: Render Customer Artifacts
 
@@ -636,4 +694,3 @@ For the first real RPDB pilot:
 3. run the repo-only onboarding flow through double verification
 4. review every artifact
 5. stop for deployment approval
-

@@ -14,6 +14,12 @@ Current scaffold helpers:
   - expands a minimal provisioning request into a fully allocated compatibility
     customer source
   - emits allocation summaries and exclusive allocation DDB item views
+  - supports reviewed same-customer replacement planning with
+    `--replace-customer`
+- `plan_nat_t_promotion.py`
+  - creates a repo-only NAT-T promotion request when a dynamic strict non-NAT
+    customer is later observed on UDP/4500
+  - writes a promotion summary without touching live nodes or DynamoDB
 - `validate_customer_source.py`
   - validates a single customer source file
   - loads defaults and class overrides

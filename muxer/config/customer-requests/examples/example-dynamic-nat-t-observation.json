@@ -1,0 +1,8 @@
+{
+  "customer_name": "example-dynamic-default-nonnat",
+  "observed_peer": "203.0.113.55",
+  "observed_protocol": "udp",
+  "observed_dport": 4500,
+  "initial_udp500_observed": true,
+  "meaning": "The same peer that was provisioned as strict non-NAT has now sent UDP/4500, so the repo-only planner should generate a NAT-T promotion request."
+}

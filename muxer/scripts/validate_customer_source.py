@@ -21,6 +21,7 @@ if str(SRC_DIR) not in sys.path:
 # - `parse_customer_source` validates and normalizes the raw customer source
 from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file
 from muxerlib.customer_model import parse_customer_source
+from muxerlib.dynamic_provisioning import validate_dynamic_initial_request
 
 
 def _load_json(path: Path) -> dict:
@@ -72,6 +73,7 @@ def main() -> int:
     # Parse the source first so we can discover the customer class and select
     # the matching class defaults automatically when none are provided.
     source = parse_customer_source(source_doc)
+    dynamic_validation = validate_dynamic_initial_request(source_doc)
     class_file = (
         Path(args.class_file).resolve()
         if args.class_file
@@ -114,6 +116,8 @@ def main() -> int:
         f"source={'jsonschema' if source_schema_used else 'parser-only'}, "
         f"ddb_item={'jsonschema' if item_schema_used else 'builder-only'}"
     )
+    if dynamic_validation.get("enabled"):
+        print("Dynamic provisioning: nat_t_auto_promote")
 
     # Optionally print the full merged module for debugging or review.
     if args.show_merged:

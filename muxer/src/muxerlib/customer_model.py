@@ -67,6 +67,34 @@ class NatdRewrite:
 
 
 @dataclass(frozen=True)
+class DynamicProvisioningTrigger:
+    protocol: str = "udp"
+    destination_port: int = 4500
+    require_initial_udp500_observation: bool = True
+    observation_window_seconds: int = 300
+    confirmation_packets: int = 1
+
+
+@dataclass(frozen=True)
+class DynamicProvisioningPromotion:
+    customer_class: str = "nat"
+    backend_cluster: str = "nat"
+    backend_assignment: str = ""
+    backend_role: str = ""
+    protocols: Optional[Protocols] = None
+
+
+@dataclass(frozen=True)
+class DynamicProvisioning:
+    enabled: bool
+    mode: str = "nat_t_auto_promote"
+    initial_customer_class: str = "strict-non-nat"
+    initial_backend_cluster: str = "non-nat"
+    trigger: Optional[DynamicProvisioningTrigger] = None
+    promotion: Optional[DynamicProvisioningPromotion] = None
+
+
+@dataclass(frozen=True)
 class Ipsec:
     auto: str = ""
     ike_version: str = ""
@@ -129,6 +157,7 @@ class Customer:
     backend: Optional[Backend] = None
     protocols: Optional[Protocols] = None
     natd_rewrite: Optional[NatdRewrite] = None
+    dynamic_provisioning: Optional[DynamicProvisioning] = None
     ipsec: Optional[Ipsec] = None
     post_ipsec_nat: Optional[PostIpsecNat] = None
 
@@ -345,6 +374,69 @@ def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
     )
 
 
+def _normalize_dynamic_provisioning(doc: Dict[str, Any]) -> DynamicProvisioning:
+    trigger_doc = doc.get("trigger") or {}
+    promotion_doc = doc.get("promotion") or {}
+    promotion_protocols = promotion_doc.get("protocols") or {}
+    mode = str(doc.get("mode") or "nat_t_auto_promote").strip()
+    initial_customer_class = str(doc.get("initial_customer_class") or "strict-non-nat")
+    initial_backend_cluster = str(doc.get("initial_backend_cluster") or "non-nat")
+    if mode != "nat_t_auto_promote":
+        raise ValueError("customer.dynamic_provisioning.mode must be nat_t_auto_promote")
+    if initial_customer_class != "strict-non-nat":
+        raise ValueError("customer.dynamic_provisioning.initial_customer_class must be strict-non-nat")
+    if initial_backend_cluster != "non-nat":
+        raise ValueError("customer.dynamic_provisioning.initial_backend_cluster must be non-nat")
+
+    trigger = DynamicProvisioningTrigger(
+        protocol=str(trigger_doc.get("protocol") or "udp").strip().lower(),
+        destination_port=int(trigger_doc.get("destination_port") or 4500),
+        require_initial_udp500_observation=bool(
+            trigger_doc.get("require_initial_udp500_observation", True)
+        ),
+        observation_window_seconds=int(trigger_doc.get("observation_window_seconds") or 300),
+        confirmation_packets=int(trigger_doc.get("confirmation_packets") or 1),
+    )
+    if trigger.protocol != "udp":
+        raise ValueError("customer.dynamic_provisioning.trigger.protocol must be udp")
+    if trigger.destination_port != 4500:
+        raise ValueError("customer.dynamic_provisioning.trigger.destination_port must be 4500")
+    if trigger.observation_window_seconds < 1:
+        raise ValueError("customer.dynamic_provisioning.trigger.observation_window_seconds must be positive")
+    if trigger.confirmation_packets < 1:
+        raise ValueError("customer.dynamic_provisioning.trigger.confirmation_packets must be positive")
+
+    promotion = DynamicProvisioningPromotion(
+        customer_class=str(promotion_doc.get("customer_class") or "nat"),
+        backend_cluster=str(promotion_doc.get("backend_cluster") or "nat"),
+        backend_assignment=str(promotion_doc.get("backend_assignment") or ""),
+        backend_role=str(promotion_doc.get("backend_role") or ""),
+        protocols=(
+            Protocols(
+                udp500=promotion_protocols.get("udp500"),
+                udp4500=promotion_protocols.get("udp4500"),
+                esp50=promotion_protocols.get("esp50"),
+                force_rewrite_4500_to_500=promotion_protocols.get("force_rewrite_4500_to_500"),
+            )
+            if isinstance(promotion_protocols, dict) and promotion_protocols
+            else None
+        ),
+    )
+    if promotion.customer_class != "nat":
+        raise ValueError("customer.dynamic_provisioning.promotion.customer_class must be nat")
+    if promotion.backend_cluster != "nat":
+        raise ValueError("customer.dynamic_provisioning.promotion.backend_cluster must be nat")
+
+    return DynamicProvisioning(
+        enabled=bool(doc.get("enabled")),
+        mode=mode,
+        initial_customer_class=initial_customer_class,
+        initial_backend_cluster=initial_backend_cluster,
+        trigger=trigger,
+        promotion=promotion,
+    )
+
+
 # Parse a raw customer source document into the typed RPDB customer model.
 # This is the main normalization step before defaults/class merge happens.
 def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
@@ -356,6 +448,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     backend = customer.get("backend") or {}
     protocols = customer.get("protocols") or {}
     natd_rewrite = customer.get("natd_rewrite") or {}
+    dynamic_provisioning = customer.get("dynamic_provisioning")
     ipsec = customer.get("ipsec") or {}
     post_ipsec_nat = customer.get("post_ipsec_nat")
 
@@ -421,6 +514,11 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     initiator_inner_ip=str(natd_rewrite.get("initiator_inner_ip") or ""),
                 )
                 if isinstance(natd_rewrite, dict) and natd_rewrite
+                else None
+            ),
+            dynamic_provisioning=(
+                _normalize_dynamic_provisioning(dynamic_provisioning)
+                if isinstance(dynamic_provisioning, dict)
                 else None
             ),
             ipsec=(

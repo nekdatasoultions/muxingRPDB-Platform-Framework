@@ -45,6 +45,7 @@ customer:
   backend: ...
   protocols: ...
   natd_rewrite: ...
+  dynamic_provisioning: ...
   ipsec: ...
   post_ipsec_nat: ...
 ```
@@ -145,6 +146,31 @@ Optional per-customer NAT-D behavior overrides:
 
 - `enabled`
 - `initiator_inner_ip`
+
+### `customer.dynamic_provisioning`
+
+Optional repo-only promotion intent for customers that start as strict non-NAT
+while NAT-T behavior is still unknown.
+
+Supported mode:
+
+- `nat_t_auto_promote`
+
+The section records:
+
+- initial class: `strict-non-nat`
+- initial backend: `non-nat`
+- trigger protocol: `udp`
+- trigger destination port: `4500`
+- promotion class: `nat`
+- promotion backend: `nat`
+
+This section does not apply live changes by itself. The promotion helper
+generates a reviewed NAT request when UDP/4500 is observed from the same peer.
+
+Detailed model:
+
+- [DYNAMIC_NAT_T_PROVISIONING.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md)
 
 ### `customer.ipsec`
 

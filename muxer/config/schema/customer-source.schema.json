@@ -216,6 +216,92 @@
         }
       }
     },
+    "dynamic_provisioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "nat_t_auto_promote"
+          ]
+        },
+        "initial_customer_class": {
+          "type": "string",
+          "enum": [
+            "strict-non-nat"
+          ]
+        },
+        "initial_backend_cluster": {
+          "type": "string",
+          "enum": [
+            "non-nat"
+          ]
+        },
+        "trigger": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "udp"
+              ]
+            },
+            "destination_port": {
+              "type": "integer",
+              "const": 4500
+            },
+            "require_initial_udp500_observation": {
+              "type": "boolean"
+            },
+            "observation_window_seconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "confirmation_packets": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "promotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "customer_class": {
+              "type": "string",
+              "enum": [
+                "nat"
+              ]
+            },
+            "backend_cluster": {
+              "type": "string",
+              "enum": [
+                "nat"
+              ]
+            },
+            "backend_assignment": {
+              "type": "string",
+              "minLength": 1
+            },
+            "backend_role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "protocols": {
+              "$ref": "#/$defs/protocols"
+            }
+          }
+        }
+      }
+    },
     "ipsec": {
       "type": "object",
       "additionalProperties": false,
@@ -469,6 +555,9 @@
         },
         "natd_rewrite": {
           "$ref": "#/$defs/natd_rewrite"
+        },
+        "dynamic_provisioning": {
+          "$ref": "#/$defs/dynamic_provisioning"
         },
         "ipsec": {
           "$ref": "#/$defs/ipsec"
