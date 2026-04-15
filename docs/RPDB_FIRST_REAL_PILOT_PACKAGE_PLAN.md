@@ -244,3 +244,20 @@ This plan is complete when:
 - no MUXER3 files were touched
 - no live nodes were touched
 - no production DynamoDB writes occurred
+
+## Execution Checkpoint
+
+Current repo-only pilot candidate:
+
+- customer: `legacy-cust0003`
+- request: `muxer/config/customer-requests/migrated/legacy-cust0003.yaml`
+- package output: `build/customer-pilots/legacy-cust0003`
+- environment binding: `muxer/config/environment-defaults/rpdb-empty-nonnat-active-a.yaml`
+- package status: `ready_for_review`
+- live apply: `false`
+
+Important note:
+
+- The generated pilot package is ignored by Git under `build/`.
+- The committed source of truth for reproducing the package is the customer
+  request plus the pilot builder command.

@@ -16,6 +16,10 @@ That includes resources such as:
 - VTI interface name
 - backend assignment
 
+When a request indicates VTI usage, the allocator also derives the IPsec mark
+from the allocated `fwmark` as `<fwmark>/0xffffffff`. The operator should not
+hand-author this mark in the request.
+
 Without explicit allocation tracking, provisioning has to guess what is free.
 That does not scale safely.
 

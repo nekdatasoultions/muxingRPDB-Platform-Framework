@@ -451,6 +451,7 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
 
     if allocation_plan.get("vti_interface"):
         ipsec_doc["vti_interface"] = str(allocation_plan["vti_interface"])
+        ipsec_doc["mark"] = f"{allocation_plan['fwmark']}/0xffffffff"
 
     transport_doc = {
         "mark": str(allocation_plan["fwmark"]),

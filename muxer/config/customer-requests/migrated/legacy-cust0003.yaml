@@ -1,0 +1,39 @@
+schema_version: 1
+
+customer:
+  name: legacy-cust0003
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 166.213.153.41
+    remote_id: 166.213.153.41
+    psk_secret_ref: /muxingrpdb/dev/customers/legacy-cust0003/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+      - 172.30.0.90/32
+    remote_subnets:
+      - 10.129.4.12/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+    force_rewrite_4500_to_500: false
+  natd_rewrite:
+    enabled: true
+  ipsec:
+    auto: start
+    remote_id: 166.213.153.41
+    ike: aes256-sha2_256;modp2048,aes256-sha2_256;modp4096!
+    esp: aes256-sha256!
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    vti_routing: no
+    vti_shared: yes
+    bidirectional_secret: true
+  post_ipsec_nat:
+    enabled: false
+    mode: disabled
