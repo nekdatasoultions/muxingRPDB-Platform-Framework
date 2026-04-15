@@ -9,6 +9,15 @@ customer module. It is the input that gets merged with shared defaults and
 class defaults before it is written to DynamoDB and rendered into customer
 artifacts.
 
+Important design direction:
+
+- the customer source should describe the customer and service intent
+- the provisioning layer should allocate platform namespaces automatically
+
+The target operator-facing contract is described in:
+
+- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+
 ## File Location
 
 Each customer should live at:
@@ -80,6 +89,15 @@ Optional:
 - `tunnel_type`
 - `tunnel_ttl`
 - `rpdb_priority`
+
+Current state:
+
+- these fields are still accepted and used by the compatibility runtime
+
+Target state:
+
+- these fields should become allocator-owned by default
+- the operator should not need to hand-assign them for normal provisioning
 
 ### `customer.selectors`
 
@@ -177,6 +195,22 @@ psk_secret_ref: /muxingrpdb/customers/<customer-name>/psk
 
 The source file is allowed to reference the secret, but the secret value should
 not live in Git.
+
+## Target Minimal Authoring Shape
+
+The target authoring experience is:
+
+- normal site-to-site VPN inputs
+- `customer_name`
+- `customer_class`
+- logical backend placement
+
+The platform should then allocate the transport/runtime namespaces
+automatically.
+
+That model is tracked in:
+
+- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
 
 ## Validation Target
 

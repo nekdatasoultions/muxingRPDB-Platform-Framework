@@ -149,6 +149,15 @@ This is a growth requirement, not an optional cleanup item. Provisioning should
 reserve and release these resources explicitly instead of inferring "next free"
 values from files or rendered state.
 
+The target provisioning contract should be operator-light:
+
+- operators provide normal site-to-site inputs plus customer name and class
+- the platform allocates namespace-heavy transport/runtime fields automatically
+
+That contract is documented in:
+
+- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+
 ### Phase 3. Delta dataplane apply
 
 Refactor the runtime so normal customer changes do not require:

@@ -34,6 +34,28 @@ The customer item describes the customer.
 The allocation item describes the reusable platform resources consumed by that
 customer.
 
+## Smart Reservation Rule
+
+Reservations should be smart.
+
+That means provisioning should not expect operators to hand-pick values like:
+
+- `fwmark`
+- `route_table`
+- `rpdb_priority`
+- `tunnel_key`
+- overlay block
+- interface names
+- backend assignment slot
+
+Instead, the operator should provide the normal site-to-site VPN inputs and the
+platform should reserve the required namespaces automatically, then track their
+ownership in the database.
+
+The target operator-facing contract is described in:
+
+- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+
 ## What Must Be Tracked
 
 ### Customer record
