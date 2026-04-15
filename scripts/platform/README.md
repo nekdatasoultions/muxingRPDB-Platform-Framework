@@ -25,7 +25,7 @@ The muxer runtime source for this repo now lives under:
 - [muxer/runtime-package](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package)
 
 That means the empty-platform wrapper packages the RPDB runtime from this repo
-rather than reaching back into the sibling `MUXER3` repo.
+rather than reaching back into any sibling legacy muxer repo.
 
 Use the other script areas for RPDB-native customer lifecycle work:
 

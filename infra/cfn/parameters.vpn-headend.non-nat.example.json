@@ -29,7 +29,7 @@
   { "ParameterKey": "SharedEfsFileSystemId", "ParameterValue": "" },
   { "ParameterKey": "SharedEfsAccessPointId", "ParameterValue": "" },
   { "ParameterKey": "SharedEfsMountPath", "ParameterValue": "/Shared" },
-  { "ParameterKey": "ProjectPackageS3Uri", "ParameterValue": "s3://example-bucket/Code/Muxingplus-Platform-Framework/infra-bundle.zip" },
+  { "ParameterKey": "ProjectPackageS3Uri", "ParameterValue": "s3://example-bucket/Code/muxingRPDB-Platform-Framework/infra-bundle.zip" },
   { "ParameterKey": "EipAllocationId", "ParameterValue": "" },
   { "ParameterKey": "LeaseTableName", "ParameterValue": "" },
   { "ParameterKey": "FlowSyncMode", "ParameterValue": "conntrackd" },

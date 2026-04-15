@@ -31,7 +31,7 @@
   { "ParameterKey": "CustomerSotTableName", "ParameterValue": "muxingplus-customer-sot-example" },
   { "ParameterKey": "EipAllocationId", "ParameterValue": "eipalloc-xxxxxxxx" },
   { "ParameterKey": "RecoveryLambdaS3Bucket", "ParameterValue": "bucket-name" },
-  { "ParameterKey": "RecoveryLambdaS3Key", "ParameterValue": "Code/Muxingplus-Platform-Framework/muxer-recovery-lambda.zip" },
+  { "ParameterKey": "RecoveryLambdaS3Key", "ParameterValue": "Code/muxingRPDB-Platform-Framework/muxer-recovery-lambda.zip" },
   { "ParameterKey": "RecoveryScheduleExpression", "ParameterValue": "rate(1 minute)" },
   { "ParameterKey": "RecoveryScheduleState", "ParameterValue": "DISABLED" },
   { "ParameterKey": "RecoveryLambdaTimeout", "ParameterValue": "180" },

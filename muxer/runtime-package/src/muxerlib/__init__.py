@@ -1,2 +1,1 @@
-"""MUXER3 modular library package."""
-
+"""RPDB muxer runtime library package."""
