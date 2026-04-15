@@ -19,6 +19,21 @@ DEFAULT_REGION = "us-east-1"
 DEFAULT_PREPARED_DIR = REPO_ROOT / "build" / "empty-platform" / "current-prod-shape-rpdb-empty"
 DEFAULT_NAT_PARAMS = DEFAULT_PREPARED_DIR / "parameters.vpn-headend.nat.graviton-efs.us-east-1.json"
 DEFAULT_NONNAT_PARAMS = DEFAULT_PREPARED_DIR / "parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json"
+VERIFY_TMP_DIR = REPO_ROOT / "build" / "verify-headend-bootstrap"
+SERVICE_PROBE_SCRIPT = r"""echo HOST=$(hostname)
+if command -v swanctl >/dev/null 2>&1 || test -x /opt/strongswan/sbin/swanctl; then echo SWANCTL_PRESENT=true; else echo SWANCTL_PRESENT=false; fi
+for s in strongswan conntrackd muxingplus-ha; do
+  enabled=$(systemctl is-enabled "$s" 2>/dev/null || true)
+  active=$(systemctl is-active "$s" 2>/dev/null || true)
+  failed=$(systemctl is-failed "$s" 2>/dev/null || true)
+  test -n "$enabled" || enabled=unknown
+  test -n "$active" || active=unknown
+  test -n "$failed" || failed=unknown
+  printf "SERVICE:%s:enabled=%s\n" "$s" "$enabled"
+  printf "SERVICE:%s:active=%s\n" "$s" "$active"
+  printf "SERVICE:%s:failed=%s\n" "$s" "$failed"
+done
+for mp in /Shared /LOG /Application; do findmnt "$mp" >/dev/null 2>&1 && echo "MOUNT:$mp=true" || echo "MOUNT:$mp=false"; done"""
 
 
 def _aws_env() -> Dict[str, str]:
@@ -40,8 +55,25 @@ def _run_aws(args: List[str]) -> Any:
     return json.loads(stdout or "{}")
 
 
+def _run_local(args: List[str], *, cwd: Path | None = None, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        check=False,
+        capture_output=True,
+        cwd=str(cwd) if cwd else None,
+        env=_aws_env(),
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _repo_temp_dir() -> Path:
+    VERIFY_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    return VERIFY_TMP_DIR
+
+
 def _load_parameter_map(path: Path) -> Dict[str, str]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, list):
         raise ValueError(f"expected CloudFormation parameter array in {path}")
 
@@ -109,6 +141,32 @@ def _instance_status_map(region: str, instance_ids: Iterable[str]) -> Dict[str, 
                 and item.get("SystemStatus", {}).get("Status") == "ok"
             ),
         }
+    return result
+
+
+def _instance_details_map(region: str, instance_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    ids = list(instance_ids)
+    payload = _run_aws(
+        [
+            "ec2",
+            "describe-instances",
+            "--region",
+            region,
+            "--instance-ids",
+            *ids,
+            "--output",
+            "json",
+        ]
+    )
+    result: Dict[str, Dict[str, Any]] = {}
+    for reservation in payload.get("Reservations") or []:
+        for item in reservation.get("Instances") or []:
+            result[str(item["InstanceId"])] = {
+                "availability_zone": item.get("Placement", {}).get("AvailabilityZone"),
+                "private_ip": item.get("PrivateIpAddress"),
+                "public_ip": item.get("PublicIpAddress"),
+                "state": item.get("State", {}).get("Name"),
+            }
     return result
 
 
@@ -182,19 +240,8 @@ def _console_summary(region: str, instance_id: str) -> Dict[str, Any]:
 
 
 def _send_ssm_service_probe(region: str, instance_ids: List[str]) -> str:
-    commands = [
-        "echo HOST=$(hostname)",
-        "command -v swanctl >/dev/null 2>&1 && echo SWANCTL_PRESENT=true || echo SWANCTL_PRESENT=false",
-        (
-            'for s in strongswan conntrackd muxingplus-ha; do '
-            'printf "SERVICE:%s:enabled=%s\\n" "$s" "$(systemctl is-enabled \\"$s\\" 2>/dev/null || echo unknown)"; '
-            'printf "SERVICE:%s:active=%s\\n" "$s" "$(systemctl is-active \\"$s\\" 2>/dev/null || echo unknown)"; '
-            'printf "SERVICE:%s:failed=%s\\n" "$s" "$(systemctl is-failed \\"$s\\" 2>/dev/null || echo unknown)"; '
-            "done"
-        ),
-        'for mp in /Shared /LOG /Application; do findmnt "$mp" >/dev/null 2>&1 && echo "MOUNT:$mp=true" || echo "MOUNT:$mp=false"; done',
-    ]
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="ascii") as handle:
+    commands = [line for line in SERVICE_PROBE_SCRIPT.splitlines() if line.strip()]
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="ascii", dir=_repo_temp_dir()) as handle:
         json.dump({"commands": commands}, handle)
         temp_path = handle.name
     try:
@@ -268,8 +315,6 @@ def _parse_ssm_plugin_output(output: str) -> Dict[str, Any]:
             key, _, value = key_value.partition("=")
             services.setdefault(service_name, {})[key] = value.strip()
         elif line.startswith("MOUNT:"):
-            _, mount_point, value = line.partition("=")[0].split(":", 1)[0], line.partition(":")[2].split("=", 1)[0], line.partition("=")[2]
-            # Re-parse cleanly for readability.
             name = line.split(":", 1)[1].split("=", 1)[0]
             mounts[name] = line.partition("=")[2].strip().lower() == "true"
 
@@ -296,6 +341,156 @@ def _parse_ssm_plugin_output(output: str) -> Dict[str, Any]:
     }
 
 
+def _restrict_private_key(path: Path) -> None:
+    if os.name == "nt":
+        identity = _run_local(["whoami"]).stdout.strip()
+        if not identity:
+            raise RuntimeError("unable to determine current Windows identity for private-key ACL")
+        completed = _run_local(["icacls", str(path), "/inheritance:r", "/grant:r", f"{identity}:F"])
+        if completed.returncode != 0:
+            raise RuntimeError(f"failed to restrict private-key ACL: {completed.stderr.strip()}")
+    else:
+        path.chmod(0o600)
+
+
+def _generate_eic_key(key_dir: Path) -> Dict[str, str]:
+    key_name = "rpdb-headend-verify"
+    private_key = key_dir / key_name
+    public_key = key_dir / f"{key_name}.pub"
+    completed = _run_local(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key_name, "-C", "rpdb-headend-verify"],
+        cwd=key_dir,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"ssh-keygen failed: {completed.stderr.strip()}")
+    _restrict_private_key(private_key)
+    return {
+        "key_name": key_name,
+        "private_key": str(private_key),
+        "public_key": public_key.read_text(encoding="ascii").strip(),
+    }
+
+
+def _send_eic_key(region: str, instance_id: str, availability_zone: str, ssh_user: str, public_key: str) -> None:
+    _run_aws(
+        [
+            "ec2-instance-connect",
+            "send-ssh-public-key",
+            "--region",
+            region,
+            "--instance-id",
+            instance_id,
+            "--availability-zone",
+            availability_zone,
+            "--instance-os-user",
+            ssh_user,
+            "--ssh-public-key",
+            public_key,
+            "--output",
+            "json",
+        ]
+    )
+
+
+def _ssh_service_probe(
+    *,
+    region: str,
+    bastion_instance_id: str,
+    target_instance_id: str,
+    details: Dict[str, Dict[str, Any]],
+    ssh_user: str,
+    key_dir: Path,
+    key_name: str,
+    public_key: str,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    bastion = details.get(bastion_instance_id) or {}
+    target = details.get(target_instance_id) or {}
+    bastion_public_ip = str(bastion.get("public_ip") or "")
+    bastion_az = str(bastion.get("availability_zone") or "")
+    target_private_ip = str(target.get("private_ip") or "")
+    target_az = str(target.get("availability_zone") or "")
+    if not bastion_public_ip or not bastion_az:
+        raise RuntimeError(f"bastion {bastion_instance_id} is missing public IP or AZ")
+    if not target_private_ip or not target_az:
+        raise RuntimeError(f"target {target_instance_id} is missing private IP or AZ")
+
+    _send_eic_key(region, bastion_instance_id, bastion_az, ssh_user, public_key)
+    _send_eic_key(region, target_instance_id, target_az, ssh_user, public_key)
+
+    known_hosts = "NUL" if os.name == "nt" else "/dev/null"
+    proxy_command = (
+        f"ssh -i {key_name} -o BatchMode=yes -o StrictHostKeyChecking=no "
+        f"-o UserKnownHostsFile={known_hosts} -o ConnectTimeout=8 "
+        f"-W %h:%p {ssh_user}@{bastion_public_ip}"
+    )
+    completed = _run_local(
+        [
+            "ssh",
+            "-i",
+            key_name,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=2",
+            "-o",
+            f"ProxyCommand={proxy_command}",
+            f"{ssh_user}@{target_private_ip}",
+            SERVICE_PROBE_SCRIPT,
+        ],
+        cwd=key_dir,
+        timeout=timeout_seconds,
+    )
+    output = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+    return {
+        "status": "Success" if completed.returncode == 0 else "Failed",
+        "status_details": "SSHBastionFallback",
+        "response_code": completed.returncode,
+        "transport": "ssh-bastion",
+        "bastion_instance_id": bastion_instance_id,
+        "target_private_ip": target_private_ip,
+        "parsed": _parse_ssm_plugin_output(completed.stdout) if completed.stdout else {},
+        "stderr": completed.stderr.strip(),
+        "output": output,
+    }
+
+
+def _ssh_fallback_service_probes(
+    *,
+    region: str,
+    bastion_instance_id: str,
+    target_instance_ids: List[str],
+    details: Dict[str, Dict[str, Any]],
+    ssh_user: str,
+    timeout_seconds: int,
+) -> Dict[str, Dict[str, Any]]:
+    results: Dict[str, Dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory(prefix="eic-", dir=_repo_temp_dir()) as temp_dir:
+        key_dir = Path(temp_dir)
+        key = _generate_eic_key(key_dir)
+        for target_instance_id in target_instance_ids:
+            results[target_instance_id] = _ssh_service_probe(
+                region=region,
+                bastion_instance_id=bastion_instance_id,
+                target_instance_id=target_instance_id,
+                details=details,
+                ssh_user=ssh_user,
+                key_dir=key_dir,
+                key_name=key["key_name"],
+                public_key=key["public_key"],
+                timeout_seconds=timeout_seconds,
+            )
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify post-bootstrap health for empty-platform head ends.")
     parser.add_argument("--region", default=DEFAULT_REGION, help="AWS region")
@@ -312,6 +507,22 @@ def main() -> int:
         type=int,
         default=180,
         help="How long to wait for the SSM service probe to complete",
+    )
+    parser.add_argument(
+        "--ssh-fallback-bastion-instance-id",
+        help="Optional muxer/bastion instance ID used for EC2 Instance Connect service probes when SSM is degraded",
+    )
+    parser.add_argument("--ssh-user", default="ec2-user", help="OS user for EC2 Instance Connect SSH fallback")
+    parser.add_argument(
+        "--ssh-timeout-seconds",
+        type=int,
+        default=45,
+        help="Per-node timeout for SSH fallback service probes",
+    )
+    parser.add_argument(
+        "--allow-ssm-degraded-with-ssh-fallback",
+        action="store_true",
+        help="Allow overall health when SSM is offline/delayed but the SSH bastion fallback proves service health",
     )
     parser.add_argument("--json", action="store_true", help="Emit the full verification document as JSON")
     args = parser.parse_args()
@@ -346,6 +557,10 @@ def main() -> int:
 
     instance_ids = [node["instance_id"] for node in nodes]
     instance_status = _instance_status_map(args.region, instance_ids)
+    instance_details = _instance_details_map(
+        args.region,
+        [*instance_ids, *([args.ssh_fallback_bastion_instance_id] if args.ssh_fallback_bastion_instance_id else [])],
+    )
     ssm_inventory = _ssm_inventory_map(args.region, instance_ids)
 
     for node in nodes:
@@ -376,25 +591,60 @@ def main() -> int:
                 "status": item.get("Status"),
                 "status_details": item.get("StatusDetails"),
                 "response_code": plugin.get("ResponseCode"),
+                "transport": "ssm",
                 "parsed": _parse_ssm_plugin_output(str(plugin.get("Output") or "")) if plugin.get("Output") else {},
             }
+
+    ssh_fallback_status = {
+        "enabled": bool(args.ssh_fallback_bastion_instance_id),
+        "bastion_instance_id": args.ssh_fallback_bastion_instance_id or "",
+        "attempted_instance_ids": [],
+        "succeeded_instance_ids": [],
+        "failed_instance_ids": [],
+    }
+    if args.ssh_fallback_bastion_instance_id:
+        needs_fallback = [
+            node["instance_id"]
+            for node in nodes
+            if not service_results.get(node["instance_id"], {})
+            .get("parsed", {})
+            .get("checks", {})
+            .get("service_probe_ok")
+        ]
+        ssh_fallback_status["attempted_instance_ids"] = needs_fallback
+        if needs_fallback:
+            fallback_results = _ssh_fallback_service_probes(
+                region=args.region,
+                bastion_instance_id=args.ssh_fallback_bastion_instance_id,
+                target_instance_ids=needs_fallback,
+                details=instance_details,
+                ssh_user=args.ssh_user,
+                timeout_seconds=args.ssh_timeout_seconds,
+            )
+            for instance_id, result in fallback_results.items():
+                service_results[instance_id] = result
+                if result.get("parsed", {}).get("checks", {}).get("service_probe_ok"):
+                    ssh_fallback_status["succeeded_instance_ids"].append(instance_id)
+                else:
+                    ssh_fallback_status["failed_instance_ids"].append(instance_id)
 
     overall_ok = True
     for node in nodes:
         node["service_probe"] = service_results.get(node["instance_id"], {})
+        service_probe_ok = bool(node["service_probe"].get("parsed", {}).get("checks", {}).get("service_probe_ok"))
+        ssh_fallback_used = node["service_probe"].get("transport") == "ssh-bastion"
+        management_access_ok = bool(node["ssm"].get("online")) or (
+            args.allow_ssm_degraded_with_ssh_fallback and ssh_fallback_used and service_probe_ok
+        )
         checks = {
             "ec2_ok": bool(node["ec2"].get("ec2_ok")),
             "bootstrap_ok": bool(node["console"].get("bootstrap_ok")),
             "ssm_online": bool(node["ssm"].get("online")),
+            "management_access_ok": management_access_ok,
+            "service_probe_ok": service_probe_ok,
         }
-        if node["ssm"].get("online"):
-            checks["service_probe_ok"] = bool(
-                node["service_probe"].get("parsed", {}).get("checks", {}).get("service_probe_ok")
-            )
-        else:
-            checks["service_probe_ok"] = False
         node["checks"] = checks
-        node["healthy"] = all(checks.values())
+        node["healthy"] = checks["ec2_ok"] and checks["bootstrap_ok"] and checks["management_access_ok"] and checks["service_probe_ok"]
         overall_ok = overall_ok and node["healthy"]
 
     summary = {
@@ -402,6 +652,7 @@ def main() -> int:
         "nat_stack_name": nat_stack_name,
         "nonnat_stack_name": nonnat_stack_name,
         "service_probe": service_probe_status,
+        "ssh_fallback": ssh_fallback_status,
         "overall_ok": overall_ok,
         "nodes": nodes,
     }
@@ -416,6 +667,7 @@ def main() -> int:
                 f"ec2_ok={node['checks']['ec2_ok']} "
                 f"bootstrap_ok={node['checks']['bootstrap_ok']} "
                 f"ssm_online={node['checks']['ssm_online']} "
+                f"management_access_ok={node['checks']['management_access_ok']} "
                 f"service_probe_ok={node['checks']['service_probe_ok']}"
             )
 
