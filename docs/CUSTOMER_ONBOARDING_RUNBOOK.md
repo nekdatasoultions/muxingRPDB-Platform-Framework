@@ -272,6 +272,45 @@ post_ipsec_nat:
     - 194.138.36.80/28
 ```
 
+## Preferred: Prepare The Complete Pilot Package
+
+Use this command for the normal repo-only onboarding path. It validates the
+request, provisions allocations, renders artifacts, exports the handoff, binds
+the environment, assembles the bundle, validates it, exercises staged head-end
+install/validate/remove, and writes readiness output.
+
+```powershell
+python muxer\scripts\prepare_customer_pilot.py $Request `
+  --out-dir $WorkRoot `
+  --environment-file $EnvironmentFile `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --json
+```
+
+For a reviewed dynamic NAT-T promotion event, include the observation file:
+
+```powershell
+python muxer\scripts\prepare_customer_pilot.py $Request `
+  --observation "$WorkRoot\nat-t-observation.json" `
+  --out-dir $WorkRoot `
+  --environment-file $EnvironmentFile `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --json
+```
+
+Review these primary outputs:
+
+- `$WorkRoot\pilot-readiness.json`
+- `$WorkRoot\README.md`
+- `$WorkRoot\bundle-validation.json`
+- `$WorkRoot\double-verification.json`
+- `$WorkRoot\bundle\`
+
+The remaining steps in this runbook are the lower-level manual path and the
+debug path behind the pilot builder.
+
 ## Step 2: Validate The Request
 
 ```powershell

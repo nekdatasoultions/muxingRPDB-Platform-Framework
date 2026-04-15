@@ -83,6 +83,13 @@ Add:
 
 - `muxer/scripts/prepare_customer_pilot.py`
 
+Implementation status:
+
+- script added
+- normal NAT packaging supported
+- strict non-NAT packaging supported
+- dynamic NAT-T observation packaging supported
+
 Inputs:
 
 - customer request YAML

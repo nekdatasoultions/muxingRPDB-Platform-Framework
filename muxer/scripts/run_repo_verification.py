@@ -132,6 +132,7 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
         str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
         str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
+        str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
@@ -268,6 +269,68 @@ def main() -> int:
             "promoted_request": artifacts["promoted_request"],
             "audit": artifacts["audit"],
             "promotion_summary": workflow_result["promotion_summary"],
+        },
+    )
+
+    # Step 3c: verify the one-command repo-only pilot package builder for
+    # standalone NAT, strict non-NAT, and dynamic NAT-T promotion packages.
+    pilot_root = BUILD_ROOT / "pilot-packages"
+    if pilot_root.exists():
+        shutil.rmtree(pilot_root)
+    pilot_root.mkdir(parents=True, exist_ok=True)
+    pilot_specs = {
+        "strict-non-nat": {
+            "request": request_paths["example-minimal-nonnat"],
+            "out_dir": pilot_root / "strict-non-nat",
+        },
+        "nat": {
+            "request": request_paths["example-service-intent-netmap"],
+            "out_dir": pilot_root / "nat",
+        },
+        "dynamic-nat-t": {
+            "request": request_paths[dynamic_name],
+            "out_dir": pilot_root / "dynamic-nat-t",
+            "observation": observation_path,
+        },
+    }
+    pilot_reports: dict[str, dict] = {}
+    environment_file = MUXER_DIR / "config" / "environment-defaults" / "example-environment.yaml"
+    for pilot_name, spec in pilot_specs.items():
+        pilot_command = [
+            "python",
+            str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
+            str(spec["request"]),
+            "--out-dir",
+            str(spec["out_dir"]),
+            "--environment-file",
+            str(environment_file),
+            "--json",
+        ]
+        if spec.get("observation"):
+            pilot_command.extend(["--observation", str(spec["observation"])])
+        report = _run_json(pilot_command)
+        if report["status"] != "ready_for_review":
+            raise SystemExit(f"pilot package builder did not produce a ready package: {pilot_name}")
+        if report["live_apply"] is not False:
+            raise SystemExit(f"pilot package builder live_apply guard failed: {pilot_name}")
+        if pilot_name == "dynamic-nat-t":
+            if not report["dynamic_nat_t"]["used"]:
+                raise SystemExit("dynamic pilot package did not include NAT-T audit")
+            if report["customer"]["customer_class"] != "nat":
+                raise SystemExit("dynamic pilot package did not promote to NAT")
+        pilot_reports[pilot_name] = {
+            "customer_name": report["customer"]["name"],
+            "customer_class": report["customer"]["customer_class"],
+            "backend_cluster": report["customer"]["backend_cluster"],
+            "package_dir": str(spec["out_dir"]),
+            "ready_for_review": report["ready_for_review"],
+            "live_apply": report["live_apply"],
+            "dynamic_nat_t_used": report["dynamic_nat_t"]["used"],
+        }
+    record_step(
+        "customer_pilot_package_builder",
+        {
+            "pilot_packages": pilot_reports,
         },
     )
 

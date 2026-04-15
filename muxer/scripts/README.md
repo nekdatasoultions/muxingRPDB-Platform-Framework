@@ -26,6 +26,13 @@ Current scaffold helpers:
     view, allocation views, promotion summary, and audit record
   - is idempotent for repeat observations of the same customer, peer,
     protocol, and destination port
+- `prepare_customer_pilot.py`
+  - prepares a complete repo-only pilot review package from one customer
+    request
+  - writes the allocated source, module, DynamoDB item view, allocation item
+    views, rendered artifacts, handoff, bound bundle, validation reports,
+    readiness report, and package README
+  - can include the audited dynamic NAT-T observation flow before packaging
 - `validate_customer_source.py`
   - validates a single customer source file
   - loads defaults and class overrides

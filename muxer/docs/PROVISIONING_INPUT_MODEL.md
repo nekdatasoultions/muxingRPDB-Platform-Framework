@@ -127,6 +127,7 @@ The repo now has a working minimal-request provisioning path through:
 - [provision_customer_request.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/provision_customer_request.py)
 - [plan_nat_t_promotion.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/plan_nat_t_promotion.py)
 - [process_nat_t_observation.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/process_nat_t_observation.py)
+- [prepare_customer_pilot.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/prepare_customer_pilot.py)
 
 That path now:
 
@@ -143,6 +144,9 @@ That path now:
 - can process the UDP/4500 observation through an idempotent audit workflow so
   repeat observations return the existing staged package instead of allocating
   again
+- can wrap the repo-only request, allocation, render, handoff, bundle,
+  validation, staged head-end, and readiness checks into one pilot review
+  package
 
 ## Dynamic NAT-T Promotion Input
 

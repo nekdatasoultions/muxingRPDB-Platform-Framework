@@ -398,6 +398,35 @@ For strict non-NAT:
 $EnvironmentFile = "muxer\config\environment-defaults\rpdb-empty-nonnat-active-a.yaml"
 ```
 
+Preferred one-command pilot package:
+
+```powershell
+python muxer\scripts\prepare_customer_pilot.py $Request `
+  --out-dir $WorkRoot `
+  --environment-file $EnvironmentFile `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --json
+```
+
+If this is a reviewed dynamic NAT-T promotion, include the observation file:
+
+```powershell
+python muxer\scripts\prepare_customer_pilot.py $Request `
+  --observation "$WorkRoot\nat-t-observation.json" `
+  --out-dir $WorkRoot `
+  --environment-file $EnvironmentFile `
+  --existing-source-root muxer\config\customer-sources\examples `
+  --existing-source-root muxer\config\customer-sources\migrated `
+  --json
+```
+
+Review `pilot-readiness.json` first. If it says `ready_for_review`, continue
+with human review. If it says `blocked`, stop and fix the reported issue.
+
+The numbered commands below are the lower-level manual/debug path behind the
+pilot builder.
+
 ### 1. Validate The Request
 
 ```powershell

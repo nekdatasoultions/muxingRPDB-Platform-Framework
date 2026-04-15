@@ -134,6 +134,29 @@ is:
 - `status: already_planned`
 - `new_allocation_created: false`
 
+## Pilot Package Command
+
+For operator onboarding, prefer the pilot package builder. It calls the audited
+observation workflow and then packages the promoted NAT-T customer into the
+standard repo-only review folder.
+
+```powershell
+python muxer\scripts\prepare_customer_pilot.py `
+  muxer\config\customer-requests\examples\example-dynamic-default-nonnat.yaml `
+  --observation muxer\config\customer-requests\examples\example-dynamic-nat-t-observation.json `
+  --out-dir build\customer-pilots\example-dynamic-default-nonnat `
+  --environment-file muxer\config\environment-defaults\example-environment.yaml `
+  --json
+```
+
+Review:
+
+- `pilot-readiness.json`
+- `README.md`
+- `bundle-validation.json`
+- `double-verification.json`
+- `dynamic-nat-t\...\audit.json`
+
 ## Lower-Level Promotion Command
 
 Generate a NAT-T promotion request:
