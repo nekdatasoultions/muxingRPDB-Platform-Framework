@@ -128,6 +128,27 @@ Current status:
 - `remove-customer` is implemented for pass-through mode
 - termination mode still needs its customer-scoped command path
 
+### Phase 2.5. Resource allocation tracking
+
+Add DB-backed tracking for reusable namespaces such as:
+
+- `fwmark`
+- `route_table`
+- `rpdb_priority`
+- `tunnel_key`
+- overlay block
+- transport interface name
+- VTI interface name
+- backend assignment
+
+The allocation model and examples live in:
+
+- [RESOURCE_ALLOCATION_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
+
+This is a growth requirement, not an optional cleanup item. Provisioning should
+reserve and release these resources explicitly instead of inferring "next free"
+values from files or rendered state.
+
 ### Phase 3. Delta dataplane apply
 
 Refactor the runtime so normal customer changes do not require:
