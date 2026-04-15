@@ -195,8 +195,11 @@ layer.
 
 Current status:
 
-- design direction documented
-- implementation pending
+- schema and parser support completed
+- richer customer request validation now accepts the new service-intent fields
+- repo-only verification covers valid one-to-one and explicit host-mapping
+  provisioning cases plus an invalid host-mapping rejection case
+- render/export/orchestration carry-through is still pending
 
 ### Phase 3. Delta dataplane apply
 

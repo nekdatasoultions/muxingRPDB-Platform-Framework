@@ -128,6 +128,8 @@ The repo now has a working minimal-request provisioning path through:
 That path now:
 
 - validates the minimal request
+- accepts richer VPN compatibility intent and richer post-IPsec NAT intent in
+  the request schema
 - checks existing customer sources for exclusive namespace collisions
 - allocates transport/runtime namespace values automatically
 - emits a fully allocated compatibility customer source

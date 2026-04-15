@@ -138,30 +138,38 @@ Intent:
 
 ## Current Repo State
 
-Already modeled in the current compatibility schema:
+Modeled in the current schema and parser:
 
 - `ipsec.ike`
 - `ipsec.esp`
+- `ipsec.ike_version`
+- `ipsec.ike_policies`
+- `ipsec.esp_policies`
 - `ipsec.dpddelay`
 - `ipsec.dpdtimeout`
 - `ipsec.dpdaction`
+- `ipsec.replay_protection`
+- `ipsec.pfs_required`
+- `ipsec.pfs_groups`
 - `ipsec.forceencaps`
 - `ipsec.mobike`
 - `ipsec.fragmentation`
+- `ipsec.clear_df_bit`
 - `ipsec.mark`
 - `ipsec.vti_interface`
 - `ipsec.vti_routing`
 - `ipsec.vti_shared`
 - `post_ipsec_nat.*`
+- `post_ipsec_nat.mapping_strategy`
+- `post_ipsec_nat.host_mappings`
 
-Not fully modeled yet:
+Not fully carried through render and orchestration yet:
 
-- explicit `ike_version`
-- explicit replay-protection control
-- explicit DF-bit policy
-- richer multi-policy compatibility structure beyond raw `ike` and `esp`
-- explicit `mapping_strategy` for post-IPsec NAT
-- explicit host-mapping entries for `/32` to `/32` translations
+- IKE version render behavior on the head-end side
+- replay-protection render behavior
+- DF-bit handling render behavior
+- richer multi-policy rendering beyond compatibility storage
+- explicit host-mapping render/apply behavior in the head-end NAT path
 
 ## Next Repo Work
 

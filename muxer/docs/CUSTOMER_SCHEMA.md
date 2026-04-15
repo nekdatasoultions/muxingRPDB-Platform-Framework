@@ -151,22 +151,25 @@ Optional per-customer NAT-D behavior overrides:
 Optional per-customer IPsec overrides:
 
 - `auto`
-- `ike_version` (target field, not fully modeled yet)
+- `ike_version`
 - `local_id`
 - `remote_id`
 - `ike`
 - `esp`
+- `ike_policies`
+- `esp_policies`
 - `dpddelay`
 - `dpdtimeout`
 - `dpdaction`
 - `ikelifetime`
 - `lifetime`
-- `replay_protection` (target field, not fully modeled yet)
-- `pfs` or required-group flexibility (target field, not fully modeled yet)
+- `replay_protection`
+- `pfs_required`
+- `pfs_groups`
 - `forceencaps`
 - `mobike`
 - `fragmentation`
-- `clear_df_bit` (target field, not fully modeled yet)
+- `clear_df_bit`
 - `mark`
 - `vti_interface`
 - `vti_routing`
@@ -175,10 +178,9 @@ Optional per-customer IPsec overrides:
 
 Current repo note:
 
-- the compatibility schema already models the raw `ike` and `esp` strings plus
-  DPD, force-encap, mobility, fragmentation, and VTI fields
-- explicit `ike_version`, replay-protection control, DF-bit handling, and a
-  richer multi-policy compatibility structure still need to be added
+- the schema and parser now model the richer compatibility fields above
+- the head-end artifact render and install path still needs to consume all of
+  those fields explicitly before the service-intent work is complete
 
 ### `customer.post_ipsec_nat`
 
@@ -188,12 +190,12 @@ Optional for the customer source, but when present it must include:
 
 Useful fields include:
 
-- `mapping_strategy` (target field, not fully modeled yet)
+- `mapping_strategy`
 - `translated_subnets`
 - `translated_source_ip`
 - `real_subnets`
 - `core_subnets`
-- `host_mappings` (target field, not fully modeled yet)
+- `host_mappings`
 - `interface`
 - `output_mark`
 - `tcp_mss_clamp`
