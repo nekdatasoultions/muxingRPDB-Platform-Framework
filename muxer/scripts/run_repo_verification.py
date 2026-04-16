@@ -145,10 +145,18 @@ def main() -> int:
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "backend_customer_lib.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "apply_backend_customer.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "remove_backend_customer.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "validate_backend_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "remove_headend_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "muxer_customer_lib.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "apply_muxer_customer.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "remove_muxer_customer.py"),
+        str(REPO_ROOT / "scripts" / "deployment" / "validate_muxer_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "run_double_verification.py"),
     ]
     _run(["python", "-m", "py_compile", *compile_targets])
@@ -1123,6 +1131,282 @@ def main() -> int:
         "headend_customer_orchestration",
         {
             "customers": headend_reports,
+        },
+    )
+
+    # Step 11: prove staged backend, muxer, and selected head-end installs can
+    # coexist per customer, and that rollback removes only the target customer.
+    phase4_stage_dir = BUILD_ROOT / "phase4"
+    if phase4_stage_dir.exists():
+        shutil.rmtree(phase4_stage_dir)
+    phase4_stage_dir.mkdir(parents=True, exist_ok=True)
+    backend_root = phase4_stage_dir / "be"
+    muxer_root = phase4_stage_dir / "mx"
+    non_nat_headend_root = phase4_stage_dir / "hn"
+    nat_headend_root = phase4_stage_dir / "ht"
+
+    customer2_package_dir = Path(str(customer2_deploy["package"]["package_dir"])).resolve()
+    customer4_package_dir = Path(str(customer4_deploy["package"]["package_dir"])).resolve()
+    phase4_specs = {
+        "legacy-cust0002": {
+            "package_dir": customer2_package_dir,
+            "bundle_dir": customer2_package_dir / "bundle",
+            "headend_root": non_nat_headend_root,
+        },
+        "vpn-customer-stage1-15-cust-0004": {
+            "package_dir": customer4_package_dir,
+            "bundle_dir": customer4_package_dir / "bundle",
+            "headend_root": nat_headend_root,
+        },
+    }
+
+    def _phase4_validate(customer_name: str) -> dict[str, dict]:
+        spec = phase4_specs[customer_name]
+        backend_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_backend_customer.py"),
+                "--package-dir",
+                str(spec["package_dir"]),
+                "--backend-root",
+                str(backend_root),
+                "--json",
+            ]
+        )
+        if not backend_validation.get("valid"):
+            raise SystemExit(f"installed backend validation failed during repo verification: {customer_name}")
+
+        muxer_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_muxer_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--muxer-root",
+                str(muxer_root),
+                "--json",
+            ]
+        )
+        if not muxer_validation.get("valid"):
+            raise SystemExit(f"installed muxer validation failed during repo verification: {customer_name}")
+
+        headend_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--headend-root",
+                str(spec["headend_root"]),
+                "--json",
+            ]
+        )
+        if not headend_validation.get("valid"):
+            raise SystemExit(f"installed head-end validation failed during repo verification: {customer_name}")
+
+        return {
+            "backend": backend_validation,
+            "muxer": muxer_validation,
+            "headend": headend_validation,
+        }
+
+    def _phase4_apply(customer_name: str) -> dict[str, dict]:
+        spec = phase4_specs[customer_name]
+        backend_bundle_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_backend_customer.py"),
+                "--package-dir",
+                str(spec["package_dir"]),
+                "--json",
+            ]
+        )
+        if not backend_bundle_validation.get("valid"):
+            raise SystemExit(f"backend package validation failed during repo verification: {customer_name}")
+
+        muxer_bundle_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_muxer_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--json",
+            ]
+        )
+        if not muxer_bundle_validation.get("valid"):
+            raise SystemExit(f"muxer bundle validation failed during repo verification: {customer_name}")
+
+        headend_bundle_validation = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "validate_headend_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--json",
+            ]
+        )
+        if not headend_bundle_validation.get("valid"):
+            raise SystemExit(f"head-end bundle validation failed during repo verification: {customer_name}")
+
+        backend_apply = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "apply_backend_customer.py"),
+                "--package-dir",
+                str(spec["package_dir"]),
+                "--backend-root",
+                str(backend_root),
+                "--json",
+            ]
+        )
+        muxer_apply = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "apply_muxer_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--muxer-root",
+                str(muxer_root),
+                "--json",
+            ]
+        )
+        headend_apply = _run_json(
+            [
+                "python",
+                str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
+                "--bundle-dir",
+                str(spec["bundle_dir"]),
+                "--headend-root",
+                str(spec["headend_root"]),
+                "--json",
+            ]
+        )
+        installed = _phase4_validate(customer_name)
+        return {
+            "bundle_backend": backend_bundle_validation,
+            "bundle_muxer": muxer_bundle_validation,
+            "bundle_headend": headend_bundle_validation,
+            "apply_backend": backend_apply,
+            "apply_muxer": muxer_apply,
+            "apply_headend": headend_apply,
+            "installed": installed,
+        }
+
+    def _phase4_remove(customer_name: str) -> dict[str, dict]:
+        spec = phase4_specs[customer_name]
+        return {
+            "backend": _run_json(
+                [
+                    "python",
+                    str(REPO_ROOT / "scripts" / "deployment" / "remove_backend_customer.py"),
+                    "--customer-name",
+                    customer_name,
+                    "--backend-root",
+                    str(backend_root),
+                    "--json",
+                ]
+            ),
+            "muxer": _run_json(
+                [
+                    "python",
+                    str(REPO_ROOT / "scripts" / "deployment" / "remove_muxer_customer.py"),
+                    "--customer-name",
+                    customer_name,
+                    "--muxer-root",
+                    str(muxer_root),
+                    "--json",
+                ]
+            ),
+            "headend": _run_json(
+                [
+                    "python",
+                    str(REPO_ROOT / "scripts" / "deployment" / "remove_headend_customer.py"),
+                    "--customer-name",
+                    customer_name,
+                    "--headend-root",
+                    str(spec["headend_root"]),
+                    "--json",
+                ]
+            ),
+        }
+
+    def _phase4_assert_customer_absent(customer_name: str) -> None:
+        for path in (
+            backend_root / "var" / "lib" / "rpdb-backend" / "customers" / customer_name,
+            backend_root / "var" / "lib" / "rpdb-backend" / "allocations" / customer_name,
+            muxer_root / "var" / "lib" / "rpdb-muxer" / "customers" / customer_name,
+            muxer_root / "etc" / "muxer" / "customer-modules" / customer_name,
+            non_nat_headend_root / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
+            nat_headend_root / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
+        ):
+            if path.exists():
+                raise SystemExit(f"staged rollback left customer state behind: {path}")
+
+    phase4_reports: dict[str, dict] = {}
+    customer2_first_apply = _phase4_apply("legacy-cust0002")
+    _phase4_assert_customer_absent("vpn-customer-stage1-15-cust-0004")
+    customer2_second_apply = _phase4_apply("legacy-cust0002")
+    customer4_first_apply = _phase4_apply("vpn-customer-stage1-15-cust-0004")
+    customer4_second_apply = _phase4_apply("vpn-customer-stage1-15-cust-0004")
+    customer4_remove = _phase4_remove("vpn-customer-stage1-15-cust-0004")
+    _phase4_assert_customer_absent("vpn-customer-stage1-15-cust-0004")
+    customer2_after_customer4_remove = _phase4_validate("legacy-cust0002")
+    customer2_remove = _phase4_remove("legacy-cust0002")
+    _phase4_assert_customer_absent("legacy-cust0002")
+
+    phase4_reports["legacy-cust0002"] = {
+        "first_apply": {
+            "backend_root": customer2_first_apply["installed"]["backend"]["details"]["installed_customer_root"],
+            "allocation_root": customer2_first_apply["installed"]["backend"]["details"]["installed_allocation_root"],
+            "muxer_root": customer2_first_apply["installed"]["muxer"]["details"]["installed_root"],
+            "headend_root": customer2_first_apply["installed"]["headend"]["details"]["installed_root"],
+            "allocation_count": customer2_first_apply["bundle_backend"]["details"]["allocation_count"],
+            "route_command_count": customer2_first_apply["bundle_headend"]["details"]["route_command_count"],
+            "firewall_command_count": customer2_first_apply["bundle_muxer"]["details"]["firewall_command_count"],
+        },
+        "idempotent_reapply": {
+            "backend_root": customer2_second_apply["installed"]["backend"]["details"]["installed_customer_root"],
+            "muxer_root": customer2_second_apply["installed"]["muxer"]["details"]["installed_root"],
+            "headend_root": customer2_second_apply["installed"]["headend"]["details"]["installed_root"],
+        },
+        "final_cleanup": {
+            "backend_removed_paths": len(customer2_remove["backend"]["removed_paths"]),
+            "muxer_removed_paths": len(customer2_remove["muxer"]["removed_paths"]),
+            "headend_removed_paths": len(customer2_remove["headend"]["removed_paths"]),
+        },
+    }
+    phase4_reports["vpn-customer-stage1-15-cust-0004"] = {
+        "first_apply": {
+            "backend_root": customer4_first_apply["installed"]["backend"]["details"]["installed_customer_root"],
+            "allocation_root": customer4_first_apply["installed"]["backend"]["details"]["installed_allocation_root"],
+            "muxer_root": customer4_first_apply["installed"]["muxer"]["details"]["installed_root"],
+            "headend_root": customer4_first_apply["installed"]["headend"]["details"]["installed_root"],
+            "allocation_count": customer4_first_apply["bundle_backend"]["details"]["allocation_count"],
+            "route_command_count": customer4_first_apply["bundle_headend"]["details"]["route_command_count"],
+            "firewall_command_count": customer4_first_apply["bundle_muxer"]["details"]["firewall_command_count"],
+        },
+        "idempotent_reapply": {
+            "backend_root": customer4_second_apply["installed"]["backend"]["details"]["installed_customer_root"],
+            "muxer_root": customer4_second_apply["installed"]["muxer"]["details"]["installed_root"],
+            "headend_root": customer4_second_apply["installed"]["headend"]["details"]["installed_root"],
+        },
+        "targeted_rollback": {
+            "backend_removed_paths": len(customer4_remove["backend"]["removed_paths"]),
+            "muxer_removed_paths": len(customer4_remove["muxer"]["removed_paths"]),
+            "headend_removed_paths": len(customer4_remove["headend"]["removed_paths"]),
+            "customer2_still_present": customer2_after_customer4_remove["backend"]["valid"]
+            and customer2_after_customer4_remove["muxer"]["valid"]
+            and customer2_after_customer4_remove["headend"]["valid"],
+        },
+    }
+    record_step(
+        "staged_apply_and_targeted_rollback_gate",
+        {
+            "backend_root": str(backend_root),
+            "muxer_root": str(muxer_root),
+            "non_nat_headend_root": str(non_nat_headend_root),
+            "nat_headend_root": str(nat_headend_root),
+            "customers": phase4_reports,
         },
     )
 
