@@ -142,6 +142,7 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
@@ -151,6 +152,27 @@ def main() -> int:
     ]
     _run(["python", "-m", "py_compile", *compile_targets])
     record_step("compile_targets", {"count": len(compile_targets)})
+
+    # Step 1b: validate the repo-only deployment environment contract.
+    environment_validation = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
+            str(MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml"),
+            "--json",
+        ]
+    )
+    if not environment_validation.get("valid"):
+        raise SystemExit("deployment environment contract validation failed")
+    record_step(
+        "deployment_environment_contract_validation",
+        {
+            "environment_name": environment_validation.get("environment_name"),
+            "targets": environment_validation.get("targets"),
+            "aws_calls": environment_validation.get("aws_calls"),
+            "live_node_access": environment_validation.get("live_node_access"),
+        },
+    )
 
     # Step 2: validate existing full customer sources for collision-free namespaces.
     allocation_validation = _run_json(

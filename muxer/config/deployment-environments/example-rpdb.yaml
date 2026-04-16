@@ -1,0 +1,110 @@
+schema_version: 1
+
+environment:
+  name: example-rpdb
+  description: Repo-only example RPDB deployment environment for one-command customer deploy planning.
+  aws:
+    region: us-east-1
+    account_hint: rpdb-example
+  access:
+    method: ssm
+    ssm:
+      region: us-east-1
+      document_name: AWS-RunShellScript
+  live_apply:
+    enabled: false
+    requires_approval: true
+
+targets:
+  muxer:
+    name: rpdb-empty-muxer-active
+    role: muxer
+    rpdb_managed: true
+    selector:
+      type: tag
+      key: Name
+      value: rpdb-empty-muxer-active
+      private_ip: 172.31.127.237
+    access:
+      method: ssm
+  headends:
+    nat:
+      active:
+        name: rpdb-empty-nat-headend-active-a
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: rpdb-empty-nat-headend-active-a
+          private_ip: 172.31.40.222
+        access:
+          method: ssm
+      standby:
+        name: rpdb-empty-nat-headend-standby-b
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: rpdb-empty-nat-headend-standby-b
+          private_ip: 172.31.141.222
+        access:
+          method: ssm
+    non_nat:
+      active:
+        name: rpdb-empty-nonnat-headend-active-a
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: rpdb-empty-nonnat-headend-active-a
+          private_ip: 172.31.40.223
+        access:
+          method: ssm
+      standby:
+        name: rpdb-empty-nonnat-headend-standby-b
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: rpdb-empty-nonnat-headend-standby-b
+          private_ip: 172.31.141.223
+        access:
+          method: ssm
+
+datastores:
+  customer_sot_table: muxingplus-customer-sot-rpdb-empty
+  allocation_table: muxingplus-customer-sot-rpdb-empty-allocations
+
+artifacts:
+  bucket: baines-networking
+  prefix: Code/RPDB/example-rpdb/customer-deploy
+
+backups:
+  baseline_root: s3://baines-networking/RPDB/example-rpdb/backups/baseline
+  muxer: s3://baines-networking/RPDB/example-rpdb/backups/baseline/muxer
+  nat_headend: s3://baines-networking/RPDB/example-rpdb/backups/baseline/nat-headend
+  non_nat_headend: s3://baines-networking/RPDB/example-rpdb/backups/baseline/non-nat-headend
+
+nat_t_watcher:
+  log_source:
+    type: file
+    path: /var/log/rpdb/muxer-events.jsonl
+  state_root: build/nat-t-watcher/state
+  output_root: build/nat-t-watcher/out
+  package_root: build/nat-t-watcher/packages
+
+customer_requests:
+  allowed_roots:
+    - muxer/config/customer-requests/migrated
+    - muxer/config/customer-requests/examples
+  blocked_customers:
+    - legacy-cust0003
+    - vpn-customer-stage1-15-cust-0003
+
+owners:
+  validation: rpdb-validation-owner
+  rollback: rpdb-rollback-owner
