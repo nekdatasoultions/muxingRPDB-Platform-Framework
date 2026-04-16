@@ -6,7 +6,13 @@ from __future__ import annotations
 import ipaddress
 from typing import Any, Dict, List
 
-from .customers import calc_overlay, customer_natd_flags, customer_protocol_flags, customer_tunnel_settings
+from .customers import (
+    calc_overlay,
+    customer_headend_egress_sources,
+    customer_natd_flags,
+    customer_protocol_flags,
+    customer_tunnel_settings,
+)
 from .variables import strict_non_nat_customer
 
 
@@ -361,6 +367,7 @@ def derive_customer_transport(
     cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
     mark_hex = hex(int(str(module["mark"]), 0)) if "mark" in module else hex(int(allocation["base_mark"], 0) + cid)
     table_id = int(module["table"]) if "table" in module else int(allocation["base_table"]) + cid
+    headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
 
     if "overlay" in module and module["overlay"]:
         mux_overlay = str(module["overlay"]["mux_ip"])
@@ -374,6 +381,7 @@ def derive_customer_transport(
         "transport_local_mode": transport_local_mode,
         "local_underlay_ip": cust_inside_ip,
         "backend_underlay_ip": cust_backend_ul,
+        "headend_egress_sources": headend_egress_sources,
         "mark_hex": mark_hex,
         "table_id": table_id,
         "tunnel": {
@@ -459,21 +467,22 @@ def derive_passthrough_dataplane(
                         "nat",
                         ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst],
                     )
-                post_src = transport["backend_underlay_ip"]
                 if force_4500_to_500:
-                    _append_rule(
-                        nat_postrouting,
-                        "Present backend UDP/500 replies as UDP/4500 toward the NAT-T peer",
-                        "nat",
-                        ["-A", nat_post_chain, "-o", pub_if, "-s", post_src, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
-                    )
+                    for egress_source in transport["headend_egress_sources"]:
+                        _append_rule(
+                            nat_postrouting,
+                            "Present head-end UDP/500 replies as UDP/4500 toward the NAT-T peer",
+                            "nat",
+                            ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
+                        )
                 else:
-                    _append_rule(
-                        nat_postrouting,
-                        "SNAT backend UDP/500 replies back to the muxer public-side identity",
-                        "nat",
-                        ["-A", nat_post_chain, "-o", pub_if, "-s", post_src, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip],
-                    )
+                    for egress_source in transport["headend_egress_sources"]:
+                        _append_rule(
+                            nat_postrouting,
+                            "SNAT head-end UDP/500 replies back to the muxer public-side identity",
+                            "nat",
+                            ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip],
+                        )
 
     if force_4500_to_500:
         _append_rule(
@@ -497,12 +506,13 @@ def derive_passthrough_dataplane(
                         "nat",
                         ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"],
                     )
-                _append_rule(
-                    nat_postrouting,
-                    "SNAT backend UDP/4500 replies back to muxer public identity in forced bridge mode",
-                    "nat",
-                    ["-A", nat_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
-                )
+                for egress_source in transport["headend_egress_sources"]:
+                    _append_rule(
+                        nat_postrouting,
+                        "SNAT head-end UDP/4500 replies back to muxer public identity in forced bridge mode",
+                        "nat",
+                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
+                    )
         _append_rule(
             mangle_postrouting,
             "Userspace bridge queue for translating outbound backend UDP/500 replies into customer NAT-T format",
@@ -538,12 +548,13 @@ def derive_passthrough_dataplane(
                         "nat",
                         ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst],
                     )
-                _append_rule(
-                    nat_postrouting,
-                    "SNAT backend UDP/4500 replies back to the muxer public identity",
-                    "nat",
-                    ["-A", nat_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip],
-                )
+                for egress_source in transport["headend_egress_sources"]:
+                    _append_rule(
+                        nat_postrouting,
+                        "SNAT head-end UDP/4500 replies back to the muxer public identity",
+                        "nat",
+                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip],
+                    )
 
     if esp50:
         _append_rule(
@@ -573,12 +584,13 @@ def derive_passthrough_dataplane(
                         "nat",
                         ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst],
                     )
-                _append_rule(
-                    nat_postrouting,
-                    "SNAT outbound ESP from the backend back to the muxer public identity",
-                    "nat",
-                    ["-A", nat_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip],
-                )
+                for egress_source in transport["headend_egress_sources"]:
+                    _append_rule(
+                        nat_postrouting,
+                        "SNAT outbound ESP from the head end back to the muxer public identity",
+                        "nat",
+                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip],
+                    )
 
     if default_drop:
         for drop_dst in sorted({public_ip, public_priv_ip}):

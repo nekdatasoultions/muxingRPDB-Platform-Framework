@@ -225,8 +225,15 @@ End-to-end validation:
 
 - customer-side interesting traffic reaches expected core subnet
 - return traffic follows expected customer path
+- customer/right side can initiate traffic and bring up or use the tunnel
+- core/left side can initiate traffic and bring up or use the tunnel
+- packet captures prove encrypted traffic on the public edge and cleartext only
+  on the intended protected interfaces for both initiation directions
+- strict non-NAT customers using UDP/500 and ESP/50 prove return-path ESP SNAT
+  for the head-end public identity to the muxer public ENI private IP
 - NAT-T customer uses UDP/4500 path when promoted
 - non-NAT customer uses UDP/500 and ESP/50 path
+- validation fails if only one side can initiate successfully
 
 ## Stage 7: Rollback Decision
 

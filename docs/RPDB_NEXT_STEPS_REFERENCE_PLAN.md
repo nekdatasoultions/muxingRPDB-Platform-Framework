@@ -46,6 +46,7 @@ Important guardrails:
 Primary reference:
 
 - `docs/RPDB_ONE_COMMAND_CUSTOMER_DEPLOY_ORCHESTRATOR_PLAN.md`
+- `docs/RPDB_SNAT_AND_ORCHESTRATOR_PROJECT_PLAN.md`
 
 Target operator command:
 
@@ -139,6 +140,44 @@ Validation:
 - target choices appear in `execution-plan.json`
 - legacy/MUXER3 targets are rejected
 
+## Step 3A: Add Head-End Egress Source SNAT Contract
+
+Close the NAT-T version of the left/core-initiation failure found on the old
+stack. RPDB must not assume that encrypted return traffic always leaves the VPN
+head end sourced from only the backend underlay IP.
+
+Required behavior:
+
+- model every valid head-end encrypted egress source for a customer
+- always include the selected backend underlay IP
+- allow the environment or bound package to add public identity, loopback, or
+  other source aliases when the head end can emit traffic from them
+- generate muxer public-side SNAT for every valid egress source
+- apply that SNAT to UDP/500, UDP/4500, and ESP/50 when each protocol is
+  enabled for the customer
+- block live apply if a NAT-T customer lacks UDP/4500 SNAT coverage for all
+  valid head-end egress sources
+- block live apply if a strict non-NAT customer lacks ESP/50 SNAT coverage for
+  all valid head-end egress sources
+
+Implementation targets:
+
+- customer/environment model: add a head-end egress source list or equivalent
+  bound artifact field
+- artifact renderer: include the egress source list in muxer firewall intent
+- runtime muxer apply: render SNAT rules for each source/protocol pair
+- validators: fail when protocol coverage is incomplete
+- deploy orchestrator: include the coverage check in dry-run and pre-live gates
+
+Validation:
+
+- Customer 2 non-NAT dry-run proves UDP/500 and ESP/50 SNAT coverage
+- Customer 4 NAT-T dry-run proves UDP/500 and UDP/4500 SNAT coverage
+- tests include a NAT-T head end with a source alias different from backend
+  underlay IP
+- execution plan shows the exact SNAT sources and protocols
+- bidirectional initiation validation remains blocked until both sides work
+
 ## Step 4: Add Backup Gate To Dry-Run
 
 Dry-run should check whether the live apply would be allowed.
@@ -222,6 +261,7 @@ This next block is complete when:
 - one dry-run command works for Customer 4 NAT-T
 - Customer 3 remains blocked
 - target resolution is automatic
+- head-end egress source SNAT coverage is generated and validated
 - operator does not choose NAT/non-NAT
 - operator does not choose muxer/head-end targets
 - execution plans are written and reviewable

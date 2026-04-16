@@ -35,6 +35,8 @@ backend_underlay_ip: 172.31.40.211
 backend_roles:
   nat-active:
     active_az: us-east-1a
+    egress_source_ips:
+      - 54.204.221.89
     ip_by_az:
       us-east-1a:
         underlay_ip: 172.31.40.221
@@ -42,6 +44,8 @@ backend_roles:
         underlay_ip: 172.31.141.221
   nonnat-active:
     active_az: us-east-1a
+    egress_source_ips:
+      - 54.204.221.89
     ip_by_az:
       us-east-1a:
         underlay_ip: 172.31.40.220

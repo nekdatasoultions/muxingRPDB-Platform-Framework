@@ -677,6 +677,8 @@ After an approved live deployment, validate in this order:
 - NAT or non-NAT head-end GRE interface is up
 - head-end IPsec configuration exists
 - head-end IPsec SA is established
+- customer/right initiated traffic brings up or uses the tunnel
+- core/left initiated traffic brings up or uses the tunnel
 - post-IPsec NAT rules exist when required
 - packet capture proves ingress from customer
 - packet capture proves decrypt on head end
@@ -684,6 +686,10 @@ After an approved live deployment, validate in this order:
 - packet capture proves traffic reaches the core destination
 - packet capture proves return traffic reaches the head end
 - packet capture proves return traffic reaches the customer
+- packet capture proves encrypted public-edge traffic for both initiation
+  directions
+- strict non-NAT UDP/500 and ESP/50 customers prove return-path ESP SNAT from
+  the head-end public identity to the muxer public ENI private IP
 - application-level test passes
 
 ## Rollback Checklist
@@ -722,6 +728,7 @@ Stop and fix before moving forward when:
 - rollback notes are incomplete
 - SSM or SSH management path is not accepted for the change window
 - live customer facts do not match the request
+- only one side can initiate the tunnel successfully
 
 ## Current Recommended Next Action
 

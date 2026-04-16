@@ -50,6 +50,7 @@ class Backend:
     cluster: str = ""
     assignment: str = ""
     underlay_ip: str = ""
+    egress_source_ips: Optional[List[str]] = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,23 @@ def _as_optional_list(value: Any) -> Optional[List[str]]:
         return None
     items = _as_list(value)
     return items or None
+
+
+def _as_optional_ipv4_list(value: Any, path: str) -> Optional[List[str]]:
+    items = _as_optional_list(value)
+    if not items:
+        return None
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(items):
+        try:
+            normalized_ip = str(ipaddress.ip_address(str(item).strip()))
+        except ValueError as exc:
+            raise ValueError(f"{path}[{idx}] must be a valid IPv4 address") from exc
+        if normalized_ip not in seen:
+            normalized.append(normalized_ip)
+            seen.add(normalized_ip)
+    return normalized or None
 
 
 # YAML will happily parse an unquoted hex mark like `0x41001` as an integer.
@@ -494,6 +512,10 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     cluster=str(backend.get("cluster") or ""),
                     assignment=str(backend.get("assignment") or ""),
                     underlay_ip=str(backend.get("underlay_ip") or ""),
+                    egress_source_ips=_as_optional_ipv4_list(
+                        backend.get("egress_source_ips"),
+                        "customer.backend.egress_source_ips",
+                    ),
                 )
                 if isinstance(backend, dict) and backend
                 else None

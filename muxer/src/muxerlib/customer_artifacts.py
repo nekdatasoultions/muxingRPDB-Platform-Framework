@@ -58,6 +58,78 @@ def _render_copy_df(ipsec: Dict[str, Any]) -> str | None:
     return "no" if bool(ipsec.get("clear_df_bit")) else "yes"
 
 
+def _append_unique(values: List[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if text and text not in values:
+        values.append(text)
+
+
+def _render_headend_egress_sources(backend: Dict[str, Any], ipsec: Dict[str, Any]) -> List[str]:
+    sources: List[str] = []
+    for value in backend.get("egress_source_ips") or []:
+        _append_unique(sources, value)
+    _append_unique(sources, backend.get("underlay_ip") or _placeholder("BACKEND_UNDERLAY_IP"))
+    left_public = str(ipsec.get("left_public") or "").strip()
+    if left_public and left_public != "%defaultroute":
+        _append_unique(sources, left_public)
+    _append_unique(sources, _placeholder("HEADEND_PUBLIC_IP"))
+    return sources
+
+
+def _enabled_snat_protocols(protocols: Dict[str, Any]) -> List[Dict[str, str]]:
+    enabled: List[Dict[str, str]] = []
+    if bool(protocols.get("udp500")):
+        enabled.append({"name": "udp500", "protocol": "udp", "sport": "500"})
+    if bool(protocols.get("udp4500")):
+        enabled.append({"name": "udp4500", "protocol": "udp", "sport": "4500"})
+    if bool(protocols.get("esp50")):
+        enabled.append({"name": "esp50", "protocol": "50", "sport": ""})
+    return enabled
+
+
+def _build_snat_coverage(
+    *,
+    peer_ip: str,
+    backend: Dict[str, Any],
+    protocols: Dict[str, Any],
+    ipsec: Dict[str, Any],
+) -> Dict[str, Any]:
+    egress_sources = _render_headend_egress_sources(backend, ipsec)
+    protocol_specs = _enabled_snat_protocols(protocols)
+    rules: List[Dict[str, str]] = []
+    peer_cidr = f"{peer_ip}/32" if peer_ip and "/" not in peer_ip else peer_ip
+    for source_ip in egress_sources:
+        for protocol_spec in protocol_specs:
+            parts = [
+                "-A",
+                "MUXER_NAT_POST",
+                "-o",
+                _placeholder("MUXER_PUBLIC_IFACE"),
+                "-s",
+                source_ip,
+                "-d",
+                peer_cidr,
+                "-p",
+                protocol_spec["protocol"],
+            ]
+            if protocol_spec["sport"]:
+                parts.extend(["--sport", protocol_spec["sport"]])
+            parts.extend(["-j", "SNAT", "--to-source", _placeholder("MUXER_PUBLIC_PRIVATE_IP")])
+            rules.append(
+                {
+                    "source_ip": source_ip,
+                    "protocol": protocol_spec["name"],
+                    "iptables": "iptables -t nat " + " ".join(parts),
+                }
+            )
+    return {
+        "required": True,
+        "egress_sources": egress_sources,
+        "protocols": [spec["name"] for spec in protocol_specs],
+        "rules": rules,
+    }
+
+
 def _cidr_to_host(cidr_text: str) -> str:
     network = ipaddress.ip_network(str(cidr_text), strict=False)
     return str(network.network_address)
@@ -356,7 +428,22 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
     natd_rewrite = module.get("natd_rewrite") or {}
     dynamic_provisioning = module.get("dynamic_provisioning") or {}
     backend = module.get("backend") or {}
+    ipsec = module.get("ipsec") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
+    snat_coverage = _build_snat_coverage(
+        peer_ip=str(peer.get("public_ip") or ""),
+        backend=backend,
+        protocols=protocols,
+        ipsec=ipsec,
+    )
+    snat_lines = [
+        "# Customer-scoped muxer firewall snippet",
+        f"# peer: {peer.get('public_ip')}",
+        f"# fwmark: {transport.get('mark')}",
+        f"# udp500={protocols.get('udp500')} udp4500={protocols.get('udp4500')} esp50={protocols.get('esp50')}",
+        "# head-end egress SNAT coverage",
+    ]
+    snat_lines.extend(rule["iptables"] for rule in snat_coverage["rules"])
 
     return {
         "customer/customer-summary.json": {
@@ -439,16 +526,10 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "dynamic_provisioning": dynamic_provisioning,
             "post_ipsec_nat_enabled": bool(post_ipsec_nat.get("enabled")),
             "post_ipsec_nat_mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
+            "headend_egress_sources": snat_coverage["egress_sources"],
+            "snat_coverage": snat_coverage,
         },
-        "firewall/iptables-snippet.txt": "\n".join(
-            [
-                "# Customer-scoped muxer firewall snippet",
-                f"# peer: {peer.get('public_ip')}",
-                f"# fwmark: {transport.get('mark')}",
-                f"# udp500={protocols.get('udp500')} udp4500={protocols.get('udp4500')} esp50={protocols.get('esp50')}",
-            ]
-        )
-        + "\n",
+        "firewall/iptables-snippet.txt": "\n".join(snat_lines) + "\n",
     }
 
 

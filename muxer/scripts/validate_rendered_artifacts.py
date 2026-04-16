@@ -8,10 +8,44 @@ import json
 from pathlib import Path
 
 REQUIRED_ROOTS = ["muxer", "headend"]
+PROTOCOL_FIELD_MAP = {
+    "udp500": ("udp500",),
+    "udp4500": ("udp4500",),
+    "esp50": ("esp50",),
+}
 
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_snat_coverage(report: dict, firewall_intent_path: Path) -> None:
+    if not firewall_intent_path.exists():
+        report["errors"].append("missing required file: muxer/firewall/firewall-intent.json")
+        return
+
+    intent = _load_json(firewall_intent_path)
+    protocols = intent.get("protocols") or {}
+    coverage = intent.get("snat_coverage") or {}
+    sources = [str(value).strip() for value in coverage.get("egress_sources") or [] if str(value).strip()]
+    rules = coverage.get("rules") or []
+    if not sources:
+        report["errors"].append("SNAT coverage missing head-end egress sources")
+        return
+
+    rule_pairs = {
+        (str(rule.get("source_ip") or "").strip(), str(rule.get("protocol") or "").strip())
+        for rule in rules
+    }
+    for protocol_name, field_names in PROTOCOL_FIELD_MAP.items():
+        enabled = any(bool(protocols.get(field_name)) for field_name in field_names)
+        if not enabled:
+            continue
+        for source in sources:
+            if (source, protocol_name) not in rule_pairs:
+                report["errors"].append(
+                    f"SNAT coverage missing {protocol_name} for head-end egress source {source}"
+                )
 
 
 def main() -> int:
@@ -52,6 +86,8 @@ def main() -> int:
                         report["errors"].append(
                             f"missing rendered file: {root_name}/{relative_name}"
                         )
+
+            _validate_snat_coverage(report, render_dir / "muxer" / "firewall" / "firewall-intent.json")
 
             customer_name = manifest.get("customer_name")
             customer_class = manifest.get("customer_class")

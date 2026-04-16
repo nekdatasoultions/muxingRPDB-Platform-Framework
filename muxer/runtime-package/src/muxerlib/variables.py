@@ -127,6 +127,67 @@ def _coerce_backend_ip(value: Any, context: str) -> str:
     return raw
 
 
+def _append_egress_source(sources: List[str], value: Any, context: str) -> None:
+    raw = str(value or "").strip()
+    if not raw or raw == "%defaultroute":
+        return
+    try:
+        normalized = str(ipaddress.ip_address(raw))
+    except ValueError as exc:
+        raise SystemExit(f"{context}: invalid egress source IP {raw!r}") from exc
+    if normalized not in sources:
+        sources.append(normalized)
+
+
+def _append_egress_sources(sources: List[str], values: Any, context: str) -> None:
+    if values in (None, ""):
+        return
+    if isinstance(values, str):
+        values = [item.strip() for item in values.split(",") if item.strip()]
+    if not isinstance(values, list):
+        raise SystemExit(f"{context}: egress sources must be a list or comma-separated string")
+    for idx, value in enumerate(values):
+        _append_egress_source(sources, value, f"{context}[{idx}]")
+
+
+def resolve_backend_role_egress_sources(role_name: str, muxer_doc: Dict[str, Any], *, preferred_az: str = "") -> List[str]:
+    role = str(role_name or "").strip()
+    if not role:
+        return []
+
+    catalog = backend_role_catalog(muxer_doc)
+    role_doc = catalog.get(role)
+    if not isinstance(role_doc, dict):
+        return []
+
+    sources: List[str] = []
+    _append_egress_sources(sources, role_doc.get("egress_source_ips"), f"backend_roles.{role}.egress_source_ips")
+    _append_egress_sources(sources, role_doc.get("egress_sources"), f"backend_roles.{role}.egress_sources")
+    _append_egress_sources(sources, role_doc.get("source_aliases"), f"backend_roles.{role}.source_aliases")
+
+    ip_by_az = role_doc.get("ip_by_az") or role_doc.get("az_map") or {}
+    active_az = str(role_doc.get("active_az") or preferred_az or "").strip()
+    if active_az and isinstance(ip_by_az, dict):
+        az_entry = ip_by_az.get(active_az)
+        if isinstance(az_entry, dict):
+            _append_egress_sources(
+                sources,
+                az_entry.get("egress_source_ips"),
+                f"backend_roles.{role}.ip_by_az.{active_az}.egress_source_ips",
+            )
+            _append_egress_sources(
+                sources,
+                az_entry.get("egress_sources"),
+                f"backend_roles.{role}.ip_by_az.{active_az}.egress_sources",
+            )
+            _append_egress_sources(
+                sources,
+                az_entry.get("source_aliases"),
+                f"backend_roles.{role}.ip_by_az.{active_az}.source_aliases",
+            )
+    return sources
+
+
 def resolve_backend_role(role_name: str, muxer_doc: Dict[str, Any], *, preferred_az: str = "") -> str:
     role = str(role_name or "").strip()
     if not role:
@@ -188,6 +249,32 @@ def resolve_backend_identity(module: Dict[str, Any], muxer_doc: Dict[str, Any]) 
             resolved.get("backend_underlay_ip"),
             f"{resolved.get('name', 'customer')}.backend_underlay_ip",
         )
+
+    egress_sources: List[str] = []
+    _append_egress_sources(
+        egress_sources,
+        resolved.get("headend_egress_sources") or resolved.get("headend_egress_source_ips"),
+        f"{resolved.get('name', 'customer')}.headend_egress_sources",
+    )
+    original_backend = ((resolved.get("_rpdb_original") or {}).get("backend") or {})
+    _append_egress_sources(
+        egress_sources,
+        original_backend.get("egress_source_ips"),
+        f"{resolved.get('name', 'customer')}._rpdb_original.backend.egress_source_ips",
+    )
+    if backend_role:
+        for source_ip in resolve_backend_role_egress_sources(
+            backend_role,
+            muxer_doc,
+            preferred_az=preferred_az,
+        ):
+            _append_egress_source(
+                egress_sources,
+                source_ip,
+                f"backend_roles.{backend_role}.egress_source_ips",
+            )
+    if egress_sources:
+        resolved["headend_egress_sources"] = egress_sources
 
     return resolved
 

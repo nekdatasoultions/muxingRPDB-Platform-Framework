@@ -608,6 +608,7 @@ Do not touch live nodes until the deployment owner approves:
 - exact rollback steps
 - exact backup locations
 - exact validation commands
+- exact customer-to-core and core-to-customer initiation tests
 
 ## Live Deployment Is Separate
 
@@ -623,6 +624,7 @@ Before live deployment, confirm:
 - rollback owner is available
 - validation owner is available
 - customer contact is available
+- bidirectional tunnel initiation validation is assigned
 
 ## Common Mistakes
 
@@ -658,6 +660,7 @@ Onboarding is complete when:
 - staged head-end validation succeeds
 - staged head-end remove succeeds
 - generated artifacts are reviewed
+- customer-to-core and core-to-customer initiation tests are defined
 - live deployment stop gate is acknowledged
 
 At that point, the customer is ready for deployment planning, not automatically

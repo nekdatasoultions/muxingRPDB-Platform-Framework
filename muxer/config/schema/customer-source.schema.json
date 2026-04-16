@@ -183,6 +183,13 @@
         },
         "underlay_ip": {
           "$ref": "#/$defs/ipv4"
+        },
+        "egress_source_ips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ipv4"
+          },
+          "uniqueItems": true
         }
       }
     },

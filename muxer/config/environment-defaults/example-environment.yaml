@@ -3,8 +3,10 @@ schema_version: 1
 environment:
   name: example-dev
   bindings:
+    MUXER_PUBLIC_IFACE: ens34
     MUXER_TRANSPORT_IP: 172.31.34.89
     MUXER_UNDERLAY_IFACE: ens34
+    MUXER_PUBLIC_PRIVATE_IP: 172.31.34.89
     PSK_FROM_SECRET_REF: resolved-from-secret-store
   backend_resolver:
     roles:

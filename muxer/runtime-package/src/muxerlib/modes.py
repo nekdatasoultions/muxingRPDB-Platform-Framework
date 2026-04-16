@@ -25,6 +25,7 @@ from .core import (
 from .customers import (
     calc_overlay,
     customer_natd_flags,
+    customer_headend_egress_sources,
     customer_protocol_flags,
     customer_tunnel_settings,
     subnet_list,
@@ -190,6 +191,7 @@ def apply_passthrough(
         cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
         ipaddress.ip_address(cust_inside_ip)
         ipaddress.ip_address(cust_backend_ul)
+        headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
         if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
             ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
         mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
@@ -233,9 +235,11 @@ def apply_passthrough(
                     for nat_pre_target in nat_preroute_targets:
                         must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
                     if force_4500_to_500:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
+                        for egress_source in headend_egress_sources:
+                            must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
                     else:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
+                        for egress_source in headend_egress_sources:
+                            must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
 
             if natd_dpi_enabled and natd_rewrite_enabled:
                 qnat_in = [
@@ -323,7 +327,8 @@ def apply_passthrough(
                 if nat_rewrite:
                     for nat_pre_target in nat_preroute_targets:
                         must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"])
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
+                    for egress_source in headend_egress_sources:
+                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
             if nfqueue_enabled:
                 qin = [
                     "iptables",
@@ -439,7 +444,8 @@ def apply_passthrough(
                 if nat_rewrite:
                     for nat_pre_target in nat_preroute_targets:
                         must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
+                    for egress_source in headend_egress_sources:
+                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
 
         if esp50:
             must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"])
@@ -449,7 +455,8 @@ def apply_passthrough(
                 if nat_rewrite:
                     for nat_pre_target in nat_preroute_targets:
                         must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
+                    for egress_source in headend_egress_sources:
+                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
 
     if default_drop:
         for drop_dst in sorted({public_ip, public_priv_ip}):
@@ -540,6 +547,7 @@ def apply_customer_passthrough(
     cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
     ipaddress.ip_address(cust_inside_ip)
     ipaddress.ip_address(cust_backend_ul)
+    headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
     if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
         ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
     mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
@@ -579,9 +587,11 @@ def apply_customer_passthrough(
                 for nat_pre_target in nat_preroute_targets:
                     must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
                 if force_4500_to_500:
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
+                    for egress_source in headend_egress_sources:
+                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
                 else:
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
+                    for egress_source in headend_egress_sources:
+                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
 
         if natd_dpi_enabled and natd_rewrite_enabled:
             qnat_in = [
@@ -616,7 +626,8 @@ def apply_customer_passthrough(
             if nat_rewrite:
                 for nat_pre_target in nat_preroute_targets:
                     must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"])
-                must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
+                for egress_source in headend_egress_sources:
+                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
         if nfqueue_enabled:
             qin = [
                 "iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr,
@@ -661,7 +672,8 @@ def apply_customer_passthrough(
             if nat_rewrite:
                 for nat_pre_target in nat_preroute_targets:
                     must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
+                for egress_source in headend_egress_sources:
+                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
 
     if esp50:
         must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"])
@@ -671,7 +683,8 @@ def apply_customer_passthrough(
             if nat_rewrite:
                 for nat_pre_target in nat_preroute_targets:
                     must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", cust_backend_ul, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
+                for egress_source in headend_egress_sources:
+                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
 
     _ensure_passthrough_default_drop(
         default_drop=default_drop,

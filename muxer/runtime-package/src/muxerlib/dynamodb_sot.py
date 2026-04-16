@@ -150,6 +150,14 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
     if backend_underlay_ip:
         compat["backend_underlay_ip"] = backend_underlay_ip
 
+    egress_source_ips = [
+        str(source_ip).strip()
+        for source_ip in (backend.get("egress_source_ips") or [])
+        if str(source_ip).strip()
+    ]
+    if egress_source_ips:
+        compat["headend_egress_sources"] = egress_source_ips
+
     interface = str(transport.get("interface") or "").strip()
     if interface:
         compat["ipip_ifname"] = interface
@@ -219,6 +227,8 @@ def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_a
         backend_doc["role"] = str(module["backend_role"])
     if module.get("backend_underlay_ip"):
         backend_doc["underlay_ip"] = str(module["backend_underlay_ip"])
+    if module.get("headend_egress_sources"):
+        backend_doc["egress_source_ips"] = list(module["headend_egress_sources"])
 
     transport_doc = original.setdefault("transport", {})
     if module.get("ipip_ifname"):

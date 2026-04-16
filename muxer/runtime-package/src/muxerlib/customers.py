@@ -50,6 +50,37 @@ def customer_natd_flags(module: Dict[str, Any]) -> Tuple[bool, str]:
     return enabled, inner_ip
 
 
+def _append_source_ip(sources: List[str], value: Any) -> None:
+    raw = str(value or "").strip()
+    if not raw or raw == "%defaultroute":
+        return
+    normalized = str(ipaddress.ip_address(raw))
+    if normalized not in sources:
+        sources.append(normalized)
+
+
+def customer_headend_egress_sources(module: Dict[str, Any], backend_underlay_ip: str) -> List[str]:
+    """Return every encrypted-source IP the muxer must SNAT for this customer."""
+
+    sources: List[str] = []
+    _append_source_ip(sources, backend_underlay_ip)
+    for field_name in ("headend_egress_sources", "headend_egress_source_ips"):
+        for source_ip in module.get(field_name) or []:
+            _append_source_ip(sources, source_ip)
+
+    backend = module.get("backend") or {}
+    for source_ip in backend.get("egress_source_ips") or []:
+        _append_source_ip(sources, source_ip)
+
+    original_backend = ((module.get("_rpdb_original") or {}).get("backend") or {})
+    for source_ip in original_backend.get("egress_source_ips") or []:
+        _append_source_ip(sources, source_ip)
+
+    ipsec_cfg = module.get("ipsec", {}) or {}
+    _append_source_ip(sources, ipsec_cfg.get("left_public"))
+    return sources
+
+
 def customer_tunnel_settings(module: Dict[str, Any], name: str, cid: int) -> Tuple[str, str, int, int | None]:
     mode = str(module.get("tunnel_type", "ipip")).strip().lower()
     if mode not in {"ipip", "gre"}:
@@ -68,4 +99,3 @@ def customer_tunnel_settings(module: Dict[str, Any], name: str, cid: int) -> Tup
         key = 1000 + cid
 
     return mode, ifname, ttl, key
-

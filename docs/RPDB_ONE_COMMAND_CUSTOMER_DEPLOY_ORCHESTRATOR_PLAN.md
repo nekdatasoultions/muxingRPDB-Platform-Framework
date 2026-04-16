@@ -277,6 +277,11 @@ Traffic validation:
 - NAT-T customer uses UDP/4500 path
 - interesting traffic reaches expected local/core subnet
 - return traffic follows expected customer path
+- customer/right initiated traffic brings up or uses the tunnel
+- core/left initiated traffic brings up or uses the tunnel
+- strict non-NAT UDP/500 and ESP/50 customers prove return-path ESP SNAT from
+  the head-end public identity to the muxer public ENI private IP
+- validation fails if only one side can initiate successfully
 
 ### Phase 8: Rollback
 

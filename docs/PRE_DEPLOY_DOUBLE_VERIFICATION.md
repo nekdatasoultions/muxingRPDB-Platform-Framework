@@ -70,6 +70,15 @@ The new staged head-end root also lives there during the verification run:
 No live-node work should begin until this wrapper succeeds for the target
 customer and the resulting summary has been reviewed.
 
+The review must include bidirectional initiation evidence:
+
+- customer/right initiated traffic brings up or uses the tunnel
+- core/left initiated traffic brings up or uses the tunnel
+- packet captures prove the encrypted public-edge path for both directions
+- strict non-NAT UDP/500 and ESP/50 customers prove return-path ESP SNAT from
+  the head-end public identity to the muxer public ENI private IP
+- the deployment is blocked if only one side can initiate successfully
+
 One honest boundary remains:
 
 - the wrapper still expects a valid backup baseline fixture or shared baseline

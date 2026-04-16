@@ -3,6 +3,7 @@ schema_version: 1
 environment:
   name: current-dev-nonnat-active-a
   bindings:
+    MUXER_PUBLIC_IFACE: ens34
     MUXER_TRANSPORT_IP: 172.31.69.213
     MUXER_UNDERLAY_IFACE: ens34
     MUXER_PUBLIC_EDGE_IP: 54.204.221.89
