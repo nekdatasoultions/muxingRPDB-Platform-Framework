@@ -66,6 +66,45 @@ def _write_text(path: Path, payload: str) -> None:
     path.write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8")
 
 
+def _resolve_repo_path(path_like: str) -> Path:
+    path = Path(path_like)
+    return path if path.is_absolute() else (REPO_ROOT / path).resolve()
+
+
+def _build_staged_live_environment(environment_path: Path, *, name: str, root: Path) -> dict:
+    document = yaml.safe_load(
+        (
+            MUXER_DIR / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    document["environment"]["name"] = name
+    document["environment"]["aws"]["account_hint"] = name
+    document["targets"]["muxer"]["selector"]["value"] = str(root / "muxer-root")
+    document["targets"]["headends"]["nat"]["active"]["selector"]["value"] = str(root / "nat-active-root")
+    document["targets"]["headends"]["nat"]["standby"]["selector"]["value"] = str(root / "nat-standby-root")
+    document["targets"]["headends"]["non_nat"]["active"]["selector"]["value"] = str(root / "nonnat-active-root")
+    document["targets"]["headends"]["non_nat"]["standby"]["selector"]["value"] = str(root / "nonnat-standby-root")
+    document["datastores"]["staged_root"] = str(root / "datastores")
+    document["artifacts"]["staged_root"] = str(root / "artifacts")
+    document["backups"]["baseline_root"] = str(root / "backups" / "baseline")
+    document["backups"]["muxer"] = str(root / "backups" / "baseline" / "muxer")
+    document["backups"]["nat_headend"] = str(root / "backups" / "baseline" / "nat-headend")
+    document["backups"]["non_nat_headend"] = str(root / "backups" / "baseline" / "non-nat-headend")
+    document["nat_t_watcher"]["log_source"]["path"] = str(root / "logs" / "muxer-events.jsonl")
+    document["nat_t_watcher"]["state_root"] = str(root / "nat-t-watcher" / "state")
+    document["nat_t_watcher"]["output_root"] = str(root / "nat-t-watcher" / "out")
+    document["nat_t_watcher"]["package_root"] = str(root / "nat-t-watcher" / "packages")
+    for path in (
+        root / "backups" / "baseline" / "muxer",
+        root / "backups" / "baseline" / "nat-headend",
+        root / "backups" / "baseline" / "non-nat-headend",
+        root / "logs",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    _write_yaml(environment_path, document)
+    return document
+
+
 def _stage_customer_modules(build_dir: Path, provision_results: dict[str, dict]) -> Path:
     module_root = build_dir / "customer-modules"
     if module_root.exists():
@@ -144,6 +183,7 @@ def main() -> int:
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "backend_customer_lib.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "apply_backend_customer.py"),
@@ -158,6 +198,7 @@ def main() -> int:
         str(REPO_ROOT / "scripts" / "deployment" / "remove_muxer_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "validate_muxer_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "run_double_verification.py"),
+        str(REPO_ROOT / "scripts" / "platform" / "verify_empty_platform_readiness.py"),
     ]
     _run(["python", "-m", "py_compile", *compile_targets])
     record_step("compile_targets", {"count": len(compile_targets)})
@@ -180,6 +221,27 @@ def main() -> int:
             "targets": environment_validation.get("targets"),
             "aws_calls": environment_validation.get("aws_calls"),
             "live_node_access": environment_validation.get("live_node_access"),
+        },
+    )
+
+    staged_environment_validation = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
+            str(MUXER_DIR / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"),
+            "--allow-live-apply",
+            "--json",
+        ]
+    )
+    if not staged_environment_validation.get("valid"):
+        raise SystemExit("staged deployment environment contract validation failed")
+    record_step(
+        "staged_live_deployment_environment_contract_validation",
+        {
+            "environment_name": staged_environment_validation.get("environment_name"),
+            "targets": staged_environment_validation.get("targets"),
+            "aws_calls": staged_environment_validation.get("aws_calls"),
+            "live_node_access": staged_environment_validation.get("live_node_access"),
         },
     )
 
@@ -657,11 +719,11 @@ def main() -> int:
     # Step 3f: verify automated NAT-T log watching can detect UDP/4500,
     # correlate it to a customer request, and launch the one-file provisioning
     # workflow without touching live systems.
-    watcher_root = BUILD_ROOT / "nat-t-log-watcher"
+    watcher_root = BUILD_ROOT / "ntw"
     if watcher_root.exists():
         shutil.rmtree(watcher_root)
     watcher_root.mkdir(parents=True, exist_ok=True)
-    watcher_log = watcher_root / "muxer-events.jsonl"
+    watcher_log = watcher_root / "l.jsonl"
     _write_text(
         watcher_log,
         "\n".join(
@@ -687,6 +749,12 @@ def main() -> int:
             ]
         ),
     )
+    watcher_env_path = watcher_root / "e.yaml"
+    _build_staged_live_environment(
+        watcher_env_path,
+        name="repo-verification-phase8-watcher",
+        root=watcher_root / "roots",
+    )
     watcher_command = [
         "python",
         str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
@@ -701,23 +769,29 @@ def main() -> int:
         "--log-file",
         str(watcher_log),
         "--out-dir",
-        str(watcher_root / "out"),
+        str(watcher_root / "o"),
         "--state-file",
-        str(watcher_root / "state.json"),
+        str(watcher_root / "s.json"),
         "--package-root",
-        str(watcher_root / "packages"),
+        str(watcher_root / "p"),
+        "--environment",
+        str(watcher_env_path),
         "--run-provisioning",
+        "--approve",
         "--json",
     ]
     watcher_report = _run_json(watcher_command)
     if watcher_report["detected_count"] != 1:
         raise SystemExit("NAT-T watcher did not detect exactly one promotion event")
     detected = watcher_report["detected"][0]
-    provisioning_json = (detected.get("provisioning") or {}).get("json") or {}
-    if provisioning_json.get("status") != "ready_for_review":
-        raise SystemExit("NAT-T watcher provisioning did not produce a ready package")
-    if provisioning_json.get("live_apply") is not False:
-        raise SystemExit("NAT-T watcher provisioning live_apply guard failed")
+    provisioning = detected.get("provisioning") or {}
+    provisioning_json = provisioning.get("json") or {}
+    if provisioning.get("mode") != "deploy_customer":
+        raise SystemExit("NAT-T watcher did not call the customer deploy orchestrator")
+    if provisioning_json.get("status") != "applied":
+        raise SystemExit("NAT-T watcher orchestrator flow did not apply the staged customer")
+    if provisioning_json.get("live_apply") is not True:
+        raise SystemExit("NAT-T watcher orchestrator flow did not enter the approved staged path")
 
     second_pass = _run_json(watcher_command)
     if second_pass["detected_count"] != 0:
@@ -727,8 +801,9 @@ def main() -> int:
         {
             "detected_customer": detected["customer_name"],
             "observation": detected["observation"],
-            "package_dir": provisioning_json["package_dir"],
-            "ready_for_review": provisioning_json["ready_for_review"],
+            "environment_file": str(watcher_env_path),
+            "deploy_mode": provisioning["mode"],
+            "deploy_status": provisioning_json["status"],
             "live_apply": provisioning_json["live_apply"],
             "second_pass_detected_count": second_pass["detected_count"],
             "watch_summary": watcher_report["out_dir"] + "/watch-summary.json",
@@ -750,6 +825,28 @@ def main() -> int:
         {
             "allocation_ddb_items": allocation_item_counts,
             "resource_allocation_table": bootstrap_report["resource_allocations"]["table_name"],
+        },
+    )
+
+    empty_platform_readiness = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "platform" / "verify_empty_platform_readiness.py"),
+            "--prepare-params",
+            "--json",
+        ]
+    )
+    if not empty_platform_readiness.get("ready"):
+        raise SystemExit("empty platform readiness wrapper did not report ready")
+    record_step(
+        "empty_platform_readiness_gate",
+        {
+            "ready": empty_platform_readiness["ready"],
+            "prepared_dir": empty_platform_readiness["prepared_dir"],
+            "baseline_dir": empty_platform_readiness["baseline_dir"],
+            "customer_sot_table": (
+                ((empty_platform_readiness.get("checks") or {}).get("database") or {}).get("customer_sot") or {}
+            ).get("table_name"),
         },
     )
 
@@ -1407,6 +1504,227 @@ def main() -> int:
             "non_nat_headend_root": str(non_nat_headend_root),
             "nat_headend_root": str(nat_headend_root),
             "customers": phase4_reports,
+        },
+    )
+
+    phase6_root = BUILD_ROOT / "p6"
+    if phase6_root.exists():
+        shutil.rmtree(phase6_root)
+    phase6_root.mkdir(parents=True, exist_ok=True)
+    phase6_env_path = phase6_root / "e.yaml"
+    _build_staged_live_environment(
+        phase6_env_path,
+        name="repo-verification-phase6-staged-live",
+        root=phase6_root / "r",
+    )
+    phase6_env_validation = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
+            str(phase6_env_path),
+            "--allow-live-apply",
+            "--json",
+        ]
+    )
+    if not phase6_env_validation.get("valid"):
+        raise SystemExit("Phase 6 staged-live environment validation failed")
+
+    phase6_customer2_dry_run = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            str(phase6_env_path),
+            "--out-dir",
+            str(phase6_root / "c2d"),
+            "--dry-run",
+            "--json",
+        ]
+    )
+    if phase6_customer2_dry_run.get("status") != "dry_run_ready":
+        raise SystemExit("Phase 6 Customer 2 staged dry-run did not report dry_run_ready")
+    if not ((phase6_customer2_dry_run.get("live_gate") or {}).get("allow_live_apply_now")):
+        raise SystemExit("Phase 6 Customer 2 staged dry-run did not become approval-ready")
+
+    phase6_customer2_apply = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            str(phase6_env_path),
+            "--out-dir",
+            str(phase6_root / "c2a"),
+            "--approve",
+            "--json",
+        ]
+    )
+    if phase6_customer2_apply.get("status") != "applied" or phase6_customer2_apply.get("live_apply") is not True:
+        raise SystemExit("Phase 6 Customer 2 staged approved apply did not succeed")
+    if (phase6_customer2_apply.get("selected_targets") or {}).get("headend_family") != "non_nat":
+        raise SystemExit("Phase 6 Customer 2 staged approved apply chose the wrong head-end family")
+
+    phase6_customer4_apply = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004.yaml"
+            ),
+            "--environment",
+            str(phase6_env_path),
+            "--observation",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004-nat-t-observation.json"
+            ),
+            "--out-dir",
+            str(phase6_root / "c4a"),
+            "--approve",
+            "--json",
+        ]
+    )
+    if phase6_customer4_apply.get("status") != "applied" or phase6_customer4_apply.get("live_apply") is not True:
+        raise SystemExit("Phase 6 Customer 4 staged approved apply did not succeed")
+    if (phase6_customer4_apply.get("selected_targets") or {}).get("headend_family") != "nat":
+        raise SystemExit("Phase 6 Customer 4 staged approved apply chose the wrong head-end family")
+
+    phase6_artifacts: dict[str, dict[str, str]] = {}
+    for customer_name, report in (
+        ("legacy-cust0002", phase6_customer2_apply),
+        ("vpn-customer-stage1-15-cust-0004", phase6_customer4_apply),
+    ):
+        apply = report.get("apply") or {}
+        journal_path = _resolve_repo_path(str(apply.get("apply_journal") or ""))
+        rollback_plan_path = _resolve_repo_path(str(apply.get("rollback_plan") or ""))
+        published_root = _resolve_repo_path(str((apply.get("published_artifacts") or {}).get("run_root") or ""))
+        if not journal_path.exists():
+            raise SystemExit(f"Phase 6 apply journal missing for {customer_name}")
+        if not rollback_plan_path.exists():
+            raise SystemExit(f"Phase 6 rollback plan missing for {customer_name}")
+        if not published_root.exists():
+            raise SystemExit(f"Phase 6 published artifact root missing for {customer_name}")
+        phase6_artifacts[customer_name] = {
+            "apply_journal": str(journal_path),
+            "rollback_plan": str(rollback_plan_path),
+            "published_root": str(published_root),
+        }
+    record_step(
+        "approved_staged_live_apply_gate",
+        {
+            "environment_file": str(phase6_env_path),
+            "customer2_status": phase6_customer2_apply["status"],
+            "customer2_headend_family": phase6_customer2_apply["selected_targets"]["headend_family"],
+            "customer4_status": phase6_customer4_apply["status"],
+            "customer4_headend_family": phase6_customer4_apply["selected_targets"]["headend_family"],
+            "artifacts": phase6_artifacts,
+        },
+    )
+
+    phase7_root = BUILD_ROOT / "p7"
+    if phase7_root.exists():
+        shutil.rmtree(phase7_root)
+    phase7_root.mkdir(parents=True, exist_ok=True)
+    phase7_env_path = phase7_root / "e.yaml"
+    _build_staged_live_environment(
+        phase7_env_path,
+        name="repo-verification-phase7-auto-rollback",
+        root=phase7_root / "r",
+    )
+    failure_prep = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            str(phase7_env_path),
+            "--out-dir",
+            str(phase7_root / "f"),
+            "--dry-run",
+            "--json",
+        ]
+    )
+    if failure_prep.get("status") != "dry_run_ready":
+        raise SystemExit("Phase 7 failure preparation dry-run did not succeed")
+    failure_package_dir = _resolve_repo_path(str((failure_prep.get("package") or {}).get("package_dir") or ""))
+    broken_headend_file = failure_package_dir / "bundle" / "headend" / "ipsec" / "swanctl-connection.conf"
+    if not broken_headend_file.exists():
+        raise SystemExit("Phase 7 failure preparation could not find head-end swanctl bundle input")
+    broken_headend_file.unlink()
+
+    phase7_failure_result = _run_python_json(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+            import yaml
+
+            repo_root = Path(os.environ["RPDB_REPO_ROOT"]).resolve()
+            sys.path.insert(0, str((repo_root / "scripts" / "customers").resolve()))
+
+            from live_apply_lib import execute_staged_live_apply
+
+            environment_doc = yaml.safe_load(
+                Path(os.environ["RPDB_ENVIRONMENT"]).read_text(encoding="utf-8")
+            )
+            result = execute_staged_live_apply(
+                customer_name=os.environ["RPDB_CUSTOMER_NAME"],
+                package_dir=Path(os.environ["RPDB_PACKAGE_DIR"]).resolve(),
+                bundle_dir=Path(os.environ["RPDB_BUNDLE_DIR"]).resolve(),
+                deploy_dir=Path(os.environ["RPDB_DEPLOY_DIR"]).resolve(),
+                target_selection=json.loads(os.environ["RPDB_TARGET_SELECTION"]),
+                environment_doc=environment_doc,
+                execution_plan_path=Path(os.environ["RPDB_EXECUTION_PLAN"]).resolve(),
+            )
+            print(json.dumps(result))
+            """
+        ),
+        extra_env={
+            "RPDB_REPO_ROOT": str(REPO_ROOT),
+            "RPDB_ENVIRONMENT": str(phase7_env_path),
+            "RPDB_CUSTOMER_NAME": "legacy-cust0002",
+            "RPDB_PACKAGE_DIR": str(failure_package_dir),
+            "RPDB_BUNDLE_DIR": str(failure_package_dir / "bundle"),
+            "RPDB_DEPLOY_DIR": str(phase7_root / "fr"),
+            "RPDB_EXECUTION_PLAN": str(_resolve_repo_path(failure_prep["artifacts"]["execution_plan"])),
+            "RPDB_TARGET_SELECTION": json.dumps(failure_prep["selected_targets"]),
+        },
+    )
+    if phase7_failure_result.get("status") != "rolled_back":
+        raise SystemExit("Phase 7 staged failure did not roll back automatically")
+    for path in (
+        phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "customer-modules" / "legacy-cust0002",
+        phase7_root / "r" / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
+    ):
+        if path.exists():
+            raise SystemExit(f"Phase 7 auto-rollback left customer state behind: {path}")
+    record_step(
+        "post_apply_auto_rollback_gate",
+        {
+            "environment_file": str(phase7_env_path),
+            "status": phase7_failure_result["status"],
+            "error": phase7_failure_result["error"],
+            "rollback_plan": _resolve_repo_path(phase7_failure_result["rollback_plan"]).as_posix(),
+            "apply_journal": _resolve_repo_path(phase7_failure_result["apply_journal"]).as_posix(),
         },
     )
 

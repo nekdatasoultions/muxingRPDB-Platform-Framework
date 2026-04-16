@@ -82,6 +82,18 @@ def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
     return docs
 
 
+def _uses_staged_access(document: dict[str, Any]) -> bool:
+    environment_access = ((document.get("environment") or {}).get("access") or {}).get("method")
+    if environment_access == "staged":
+        return True
+    for target in _target_docs(document):
+        if ((target.get("access") or {}).get("method")) == "staged":
+            return True
+        if ((target.get("selector") or {}).get("type")) == "staged":
+            return True
+    return False
+
+
 def _validate_schema(report: dict[str, Any], document: dict[str, Any], schema_path: Path) -> None:
     if not schema_path.exists():
         report["errors"].append(f"schema file not found: {schema_path}")
@@ -103,6 +115,8 @@ def _validate_guardrails(report: dict[str, Any], document: dict[str, Any], *, al
     environment = document.get("environment") or {}
     customer_requests = document.get("customer_requests") or {}
     owners = document.get("owners") or {}
+    datastores = document.get("datastores") or {}
+    artifacts = document.get("artifacts") or {}
 
     live_apply = environment.get("live_apply") or {}
     if bool(live_apply.get("enabled")) and not allow_live_apply:
@@ -144,6 +158,16 @@ def _validate_guardrails(report: dict[str, Any], document: dict[str, Any], *, al
         report["errors"].append("owners.validation is required")
     if not str(owners.get("rollback") or "").strip():
         report["errors"].append("owners.rollback is required")
+
+    if _uses_staged_access(document):
+        if str(datastores.get("mode") or "").strip() != "staged":
+            report["errors"].append("datastores.mode must be staged when staged access is used")
+        if not str(datastores.get("staged_root") or "").strip():
+            report["errors"].append("datastores.staged_root is required when staged access is used")
+        if str(artifacts.get("mode") or "").strip() != "staged":
+            report["errors"].append("artifacts.mode must be staged when staged access is used")
+        if not str(artifacts.get("staged_root") or "").strip():
+            report["errors"].append("artifacts.staged_root is required when staged access is used")
 
 
 def _target_summary(document: dict[str, Any]) -> dict[str, Any]:

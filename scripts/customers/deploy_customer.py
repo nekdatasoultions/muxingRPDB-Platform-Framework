@@ -17,6 +17,7 @@ if str(MUXER_SRC) not in sys.path:
     sys.path.insert(0, str(MUXER_SRC))
 
 from muxerlib.customer_merge import load_yaml_file
+from live_apply_lib import execute_staged_live_apply
 
 PLACEHOLDER_VALUES = {
     "",
@@ -67,15 +68,18 @@ def _run_json(command: list[str]) -> tuple[int, dict[str, Any] | None, str, str]
     return completed.returncode, payload, completed.stdout, completed.stderr
 
 
-def _environment_validation(environment: str) -> tuple[int, dict[str, Any] | None, str, str]:
-    return _run_json(
-        [
-            sys.executable,
-            "scripts/customers/validate_deployment_environment.py",
-            environment,
-            "--json",
-        ]
-    )
+def _environment_validation(
+    environment: str, *, allow_live_apply: bool = False
+) -> tuple[int, dict[str, Any] | None, str, str]:
+    command = [
+        sys.executable,
+        "scripts/customers/validate_deployment_environment.py",
+        environment,
+        "--json",
+    ]
+    if allow_live_apply:
+        command.append("--allow-live-apply")
+    return _run_json(command)
 
 
 def _validate_customer_request(customer_file: Path) -> tuple[int, str, str]:
@@ -114,6 +118,7 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     selected_pair = headends.get(headend_key) or {}
     return {
         "mode": "dry_run",
+        "environment_access_method": ((environment_doc.get("environment") or {}).get("access") or {}).get("method"),
         "muxer": targets.get("muxer"),
         "headend_family": headend_key,
         "headend_active": selected_pair.get("active"),
@@ -188,10 +193,17 @@ def _evaluate_dry_run_gate(
             errors.append(f"owner reference missing for {key}")
 
     environment_live_apply = (((environment_doc or {}).get("environment") or {}).get("live_apply") or {})
-    allow_live_apply_now = bool(environment_live_apply.get("enabled")) and False
-    live_apply_reasons = ["Phase 3 remains dry-run only"]
+    environment_access_method = str(
+        (((environment_doc or {}).get("environment") or {}).get("access") or {}).get("method") or ""
+    ).strip()
+    allow_live_apply_now = bool(environment_live_apply.get("enabled")) and environment_access_method == "staged"
+    live_apply_reasons: list[str] = []
     if not bool(environment_live_apply.get("enabled")):
         live_apply_reasons.append("environment live_apply.enabled is false")
+    elif environment_access_method != "staged":
+        live_apply_reasons.append(
+            f"live apply adapter not yet implemented for access method {environment_access_method or 'unknown'}"
+        )
 
     status = "dry_run_ready" if not errors else "blocked"
     return {
@@ -226,6 +238,11 @@ def _build_execution_plan(
     dry_run_gate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     readiness = (package_report or {}).get("readiness") or {}
+    live_gate_status = (dry_run_gate or {}).get("status") or "blocked"
+    allow_live_apply_now = bool((dry_run_gate or {}).get("allow_live_apply_now"))
+    live_apply_reasons = (dry_run_gate or {}).get("live_apply_reasons")
+    if live_apply_reasons is None:
+        live_apply_reasons = ["live apply is not yet available"]
     return {
         "schema_version": 1,
         "action": "deploy_customer",
@@ -282,10 +299,10 @@ def _build_execution_plan(
             "write_execution_plan",
         ],
         "live_gate": {
-            "status": (dry_run_gate or {}).get("status") or "blocked",
-            "approve_supported": False,
-            "allow_live_apply_now": False,
-            "reasons": (dry_run_gate or {}).get("live_apply_reasons") or ["Phase 3 remains dry-run only"],
+            "status": live_gate_status,
+            "approve_supported": allow_live_apply_now,
+            "allow_live_apply_now": allow_live_apply_now,
+            "reasons": live_apply_reasons,
             "no_live_nodes_touched": True,
             "no_aws_calls": True,
             "no_dynamodb_writes": True,
@@ -319,15 +336,15 @@ def main() -> int:
     package_dir = deploy_dir / "package"
     errors: list[str] = []
     dry_run_gate = None
-
-    if args.approve:
-        errors.append("--approve is not enabled in Phase 3; live apply remains disabled")
+    apply_result: dict[str, Any] | None = None
 
     request_code, request_stdout, request_stderr = _validate_customer_request(customer_file)
     if request_code != 0:
         errors.append(f"customer request validation failed: {request_stderr or request_stdout}".strip())
 
-    env_code, env_validation, env_stdout, env_stderr = _environment_validation(args.environment)
+    env_code, env_validation, env_stdout, env_stderr = _environment_validation(
+        args.environment, allow_live_apply=True
+    )
     environment_doc = None
     if env_code != 0 or not env_validation or not env_validation.get("valid"):
         errors.append(f"deployment environment validation failed: {env_stderr or env_stdout}".strip())
@@ -380,12 +397,75 @@ def main() -> int:
         target_selection=target_selection,
         dry_run_gate=dry_run_gate,
     )
-    _write_json(deploy_dir / "execution-plan.json", execution_plan)
+    execution_plan_path = deploy_dir / "execution-plan.json"
+
+    if args.approve and not errors:
+        environment_live_apply = (((environment_doc or {}).get("environment") or {}).get("live_apply") or {})
+        access_method = str(
+            (((environment_doc or {}).get("environment") or {}).get("access") or {}).get("method") or ""
+        ).strip()
+        if not bool(environment_live_apply.get("enabled")):
+            errors.append("environment live_apply.enabled is false")
+        elif access_method != "staged":
+            errors.append(
+                f"approved live apply is not yet implemented for access method {access_method or 'unknown'}"
+            )
+        else:
+            _write_json(execution_plan_path, execution_plan)
+            apply_result = execute_staged_live_apply(
+                customer_name=customer_name,
+                package_dir=package_dir,
+                bundle_dir=package_dir / "bundle",
+                deploy_dir=deploy_dir,
+                target_selection=target_selection or {},
+                environment_doc=environment_doc or {},
+                execution_plan_path=execution_plan_path,
+            )
+            if apply_result.get("status") != "applied":
+                errors.append(str(apply_result.get("error") or "approved apply did not complete successfully"))
+
+    if apply_result is not None:
+        apply_status = str(apply_result.get("status") or "blocked")
+        apply_succeeded = apply_status == "applied"
+        execution_plan["phase"] = "phase6_approved_live_apply_adapter"
+        execution_plan["status"] = "applied" if apply_succeeded else apply_status
+        execution_plan["dry_run"] = False
+        execution_plan["approved"] = True
+        execution_plan["live_apply"] = apply_succeeded
+        execution_plan["errors"] = errors
+        execution_plan["execution_order"] = [
+            *execution_plan["execution_order"],
+            "publish_customer_artifacts",
+            "apply_backend_customer",
+            "validate_backend_customer",
+            "apply_muxer_customer",
+            "validate_muxer_customer",
+            "apply_headend_customer_active",
+            "validate_headend_customer_active",
+            "apply_headend_customer_standby",
+            "validate_headend_customer_standby",
+            "write_apply_journal",
+            "write_rollback_plan",
+        ]
+        execution_plan["live_gate"] = {
+            "status": "applied" if apply_succeeded else apply_status,
+            "approve_supported": True,
+            "allow_live_apply_now": True,
+            "reasons": [] if apply_succeeded else [str(apply_result.get("error") or "approved apply failed")],
+            "no_live_nodes_touched": True,
+            "no_aws_calls": True,
+            "no_dynamodb_writes": True,
+            "staged_roots_only": True,
+        }
+        execution_plan["apply"] = apply_result
+
+    _write_json(execution_plan_path, execution_plan)
 
     if args.json:
         print(json.dumps(execution_plan, indent=2, sort_keys=True))
     else:
-        print(f"Customer deploy dry-run: {status}")
+        mode_label = "approved staged apply" if execution_plan.get("approved") else "dry-run"
+        print(f"Customer deploy {mode_label}: {execution_plan['status']}")
         print(f"- customer: {customer_name}")
         print(f"- execution plan: {_repo_relative(deploy_dir / 'execution-plan.json')}")
         for error in errors:

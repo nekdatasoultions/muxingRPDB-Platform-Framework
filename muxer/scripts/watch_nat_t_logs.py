@@ -267,24 +267,43 @@ def _build_observation_event(
     }
 
 
-def _run_end_to_end_provisioning(
+def _run_customer_flow(
     *,
     repo_root: Path,
     watch: CustomerWatch,
     observation_path: Path,
     package_root: Path,
+    deployment_environment: str | None,
+    approve: bool,
 ) -> dict[str, Any]:
-    package_dir = package_root / watch.name
-    command = [
-        sys.executable,
-        "muxer/scripts/provision_customer_end_to_end.py",
-        str(watch.request_path),
-        "--observation",
-        str(observation_path),
-        "--out-dir",
-        str(package_dir),
-        "--json",
-    ]
+    output_dir = package_root / watch.name
+    if deployment_environment:
+        command = [
+            sys.executable,
+            "scripts/customers/deploy_customer.py",
+            "--customer-file",
+            str(watch.request_path),
+            "--environment",
+            deployment_environment,
+            "--observation",
+            str(observation_path),
+            "--out-dir",
+            str(output_dir),
+            "--json",
+        ]
+        if approve:
+            command.append("--approve")
+    else:
+        command = [
+            sys.executable,
+            "muxer/scripts/provision_customer_end_to_end.py",
+            str(watch.request_path),
+            "--observation",
+            str(observation_path),
+            "--out-dir",
+            str(output_dir),
+            "--json",
+        ]
     completed = subprocess.run(
         command,
         cwd=str(repo_root),
@@ -304,6 +323,7 @@ def _run_end_to_end_provisioning(
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "json": parsed,
+        "mode": "deploy_customer" if deployment_environment else "provision_customer_end_to_end",
     }
 
 
@@ -317,6 +337,8 @@ def _process_events(
     package_root: Path,
     run_provisioning: bool,
     reprocess: bool,
+    deployment_environment: str | None,
+    approve: bool,
 ) -> dict[str, Any]:
     watches_by_peer = {watch.peer_ip: watch for watch in watches.values()}
     observations_dir = out_dir / "observations"
@@ -390,11 +412,13 @@ def _process_events(
             cstate.setdefault("planned_idempotency_keys", []).append(idempotency_key)
             provisioning: dict[str, Any] | None = None
             if run_provisioning:
-                provisioning = _run_end_to_end_provisioning(
+                provisioning = _run_customer_flow(
                     repo_root=repo_root,
                     watch=watch,
                     observation_path=observation_path,
                     package_root=package_root,
+                    deployment_environment=deployment_environment,
+                    approve=approve,
                 )
             detected.append(
                 {
@@ -423,6 +447,8 @@ def _build_summary(
     out_dir: Path,
     package_root: Path,
     loop_result: dict[str, Any],
+    deployment_environment: str | None,
+    approve: bool,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -432,6 +458,8 @@ def _build_summary(
         "state_file": str(state_file),
         "out_dir": str(out_dir),
         "package_root": str(package_root),
+        "deployment_environment": deployment_environment,
+        "approved_apply_requested": approve,
         "watched_customers": {
             name: {
                 "peer_ip": watch.peer_ip,
@@ -485,7 +513,16 @@ def main() -> int:
         default=str(repo_root / "build" / "customer-provisioning"),
         help="Package root used when --run-provisioning is enabled",
     )
+    parser.add_argument(
+        "--environment",
+        help="Optional RPDB deployment environment. When set, detected NAT-T events call deploy_customer.py instead of package-only provisioning.",
+    )
     parser.add_argument("--run-provisioning", action="store_true", help="Run one-file provisioning after detection")
+    parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Pass --approve through to deploy_customer.py when --environment is set",
+    )
     parser.add_argument("--reprocess", action="store_true", help="Read logs from the beginning instead of stored offsets")
     parser.add_argument("--follow", action="store_true", help="Continue polling log files instead of exiting")
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0, help="Polling interval for --follow")
@@ -510,6 +547,9 @@ def main() -> int:
     out_dir = Path(args.out_dir).resolve()
     package_root = Path(args.package_root).resolve()
 
+    if args.approve and not args.environment:
+        parser.error("--approve requires --environment")
+
     while True:
         state = _load_json(state_file)
         loop_result = _process_events(
@@ -521,6 +561,8 @@ def main() -> int:
             package_root=package_root,
             run_provisioning=bool(args.run_provisioning),
             reprocess=bool(args.reprocess),
+            deployment_environment=args.environment,
+            approve=bool(args.approve),
         )
         _write_json(state_file, state)
         summary = _build_summary(
@@ -531,6 +573,8 @@ def main() -> int:
             out_dir=out_dir,
             package_root=package_root,
             loop_result=loop_result,
+            deployment_environment=args.environment,
+            approve=bool(args.approve),
         )
         _write_json(out_dir / "watch-summary.json", summary)
         if args.json:

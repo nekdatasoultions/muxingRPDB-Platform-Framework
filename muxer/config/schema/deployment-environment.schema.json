@@ -146,10 +146,19 @@
         "allocation_table"
       ],
       "properties": {
+        "mode": {
+          "enum": [
+            "dynamodb",
+            "staged"
+          ]
+        },
         "customer_sot_table": {
           "$ref": "#/$defs/non_empty_string"
         },
         "allocation_table": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "staged_root": {
           "$ref": "#/$defs/non_empty_string"
         }
       }
@@ -162,10 +171,19 @@
         "prefix"
       ],
       "properties": {
+        "mode": {
+          "enum": [
+            "s3",
+            "staged"
+          ]
+        },
         "bucket": {
           "$ref": "#/$defs/non_empty_string"
         },
         "prefix": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "staged_root": {
           "$ref": "#/$defs/non_empty_string"
         }
       }

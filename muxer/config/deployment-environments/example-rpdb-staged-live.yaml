@@ -1,0 +1,106 @@
+schema_version: 1
+
+environment:
+  name: example-rpdb-staged-live
+  description: Repo-only staged environment used to verify the approved customer deploy path without touching AWS or live nodes.
+  aws:
+    region: us-east-1
+    account_hint: rpdb-staged-live
+  access:
+    method: staged
+  live_apply:
+    enabled: true
+    requires_approval: true
+
+targets:
+  muxer:
+    name: rpdb-staged-muxer-active
+    role: muxer
+    rpdb_managed: true
+    selector:
+      type: staged
+      value: build/staged-live/muxer-root
+      private_ip: 172.31.127.237
+    access:
+      method: staged
+  headends:
+    nat:
+      active:
+        name: rpdb-staged-nat-headend-active-a
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/nat-active-root
+          private_ip: 172.31.40.222
+        access:
+          method: staged
+      standby:
+        name: rpdb-staged-nat-headend-standby-b
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/nat-standby-root
+          private_ip: 172.31.141.222
+        access:
+          method: staged
+    non_nat:
+      active:
+        name: rpdb-staged-nonnat-headend-active-a
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/nonnat-active-root
+          private_ip: 172.31.40.223
+        access:
+          method: staged
+      standby:
+        name: rpdb-staged-nonnat-headend-standby-b
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/nonnat-standby-root
+          private_ip: 172.31.141.223
+        access:
+          method: staged
+
+datastores:
+  mode: staged
+  customer_sot_table: staged-customer-sot
+  allocation_table: staged-customer-sot-allocations
+  staged_root: build/staged-live/datastores
+
+artifacts:
+  mode: staged
+  bucket: staged-local
+  prefix: staged/customer-deploy
+  staged_root: build/staged-live/artifacts
+
+backups:
+  baseline_root: build/staged-live/backups/baseline
+  muxer: build/staged-live/backups/baseline/muxer
+  nat_headend: build/staged-live/backups/baseline/nat-headend
+  non_nat_headend: build/staged-live/backups/baseline/non-nat-headend
+
+nat_t_watcher:
+  log_source:
+    type: file
+    path: build/staged-live/logs/muxer-events.jsonl
+  state_root: build/staged-live/nat-t-watcher/state
+  output_root: build/staged-live/nat-t-watcher/out
+  package_root: build/staged-live/nat-t-watcher/packages
+
+customer_requests:
+  allowed_roots:
+    - muxer/config/customer-requests/migrated
+    - muxer/config/customer-requests/examples
+  blocked_customers:
+    - legacy-cust0003
+    - vpn-customer-stage1-15-cust-0003
+
+owners:
+  validation: rpdb-validation-owner
+  rollback: rpdb-rollback-owner
