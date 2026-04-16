@@ -143,6 +143,7 @@ def main() -> int:
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "apply_headend_customer.py"),
@@ -453,7 +454,143 @@ def main() -> int:
         },
     )
 
-    # Step 3e: verify automated NAT-T log watching can detect UDP/4500,
+    # Step 3e: verify the Phase 2 dry-run customer deploy orchestrator.
+    deploy_root = BUILD_ROOT / "deploy-customer"
+    if deploy_root.exists():
+        shutil.rmtree(deploy_root)
+    deploy_root.mkdir(parents=True, exist_ok=True)
+    customer2_deploy = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            "example-rpdb",
+            "--out-dir",
+            str(deploy_root / "legacy-cust0002"),
+            "--dry-run",
+            "--json",
+        ]
+    )
+    if customer2_deploy.get("status") != "dry_run_ready":
+        raise SystemExit("Customer 2 dry-run deploy orchestration failed")
+    if customer2_deploy.get("live_apply") is not False:
+        raise SystemExit("Customer 2 dry-run deploy attempted live apply")
+    if (customer2_deploy.get("selected_targets") or {}).get("headend_family") != "non_nat":
+        raise SystemExit("Customer 2 dry-run did not select non-NAT head end")
+
+    customer4_deploy = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004.yaml"
+            ),
+            "--environment",
+            "example-rpdb",
+            "--observation",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004-nat-t-observation.json"
+            ),
+            "--out-dir",
+            str(deploy_root / "vpn-customer-stage1-15-cust-0004"),
+            "--dry-run",
+            "--json",
+        ]
+    )
+    if customer4_deploy.get("status") != "dry_run_ready":
+        raise SystemExit("Customer 4 NAT-T dry-run deploy orchestration failed")
+    if customer4_deploy.get("live_apply") is not False:
+        raise SystemExit("Customer 4 dry-run deploy attempted live apply")
+    if (customer4_deploy.get("selected_targets") or {}).get("headend_family") != "nat":
+        raise SystemExit("Customer 4 NAT-T dry-run did not select NAT head end")
+
+    blocked_environment = yaml.safe_load(
+        (MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    blocked_environment["customer_requests"]["blocked_customers"].append("phase2-blocked-smoke")
+    blocked_environment_path = deploy_root / "phase2-blocked-environment.yaml"
+    _write_yaml(blocked_environment_path, blocked_environment)
+    blocked_request = yaml.safe_load(
+        (MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    blocked_request["customer"]["name"] = "phase2-blocked-smoke"
+    blocked_request_path = deploy_root / "phase2-blocked-request.yaml"
+    _write_yaml(blocked_request_path, blocked_request)
+    blocked_completed = subprocess.run(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(blocked_request_path),
+            "--environment",
+            str(blocked_environment_path),
+            "--out-dir",
+            str(deploy_root / "phase2-blocked-smoke"),
+            "--dry-run",
+            "--json",
+        ],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if blocked_completed.returncode == 0:
+        raise SystemExit("synthetic blocked customer dry-run did not fail")
+    blocked_report = json.loads(blocked_completed.stdout)
+    if blocked_report.get("status") != "blocked":
+        raise SystemExit("synthetic blocked customer dry-run did not report blocked")
+    invalid_env_completed = subprocess.run(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            "missing-rpdb-environment",
+            "--out-dir",
+            str(deploy_root / "invalid-environment"),
+            "--dry-run",
+            "--json",
+        ],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if invalid_env_completed.returncode == 0:
+        raise SystemExit("invalid deployment environment dry-run did not fail")
+    invalid_env_report = json.loads(invalid_env_completed.stdout)
+    if invalid_env_report.get("status") != "blocked":
+        raise SystemExit("invalid deployment environment dry-run did not report blocked")
+    record_step(
+        "dry_run_customer_deploy_orchestrator",
+        {
+            "customer2_status": customer2_deploy["status"],
+            "customer2_headend_family": customer2_deploy["selected_targets"]["headend_family"],
+            "customer4_status": customer4_deploy["status"],
+            "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
+            "synthetic_blocked_status": blocked_report["status"],
+            "invalid_environment_status": invalid_env_report["status"],
+            "live_apply": False,
+        },
+    )
+
+    # Step 3f: verify automated NAT-T log watching can detect UDP/4500,
     # correlate it to a customer request, and launch the one-file provisioning
     # workflow without touching live systems.
     watcher_root = BUILD_ROOT / "nat-t-log-watcher"
