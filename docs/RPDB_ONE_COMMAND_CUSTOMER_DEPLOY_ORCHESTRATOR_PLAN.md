@@ -497,3 +497,7 @@ Implement Stage 1 and Stage 2 first:
 
 Do not implement live apply until dry-run target resolution and backup gates are
 validated.
+
+Resume reference:
+
+- `docs/RPDB_NEXT_STEPS_REFERENCE_PLAN.md`
