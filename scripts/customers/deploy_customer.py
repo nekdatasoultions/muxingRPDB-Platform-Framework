@@ -18,6 +18,17 @@ if str(MUXER_SRC) not in sys.path:
 
 from muxerlib.customer_merge import load_yaml_file
 
+PLACEHOLDER_VALUES = {
+    "",
+    "missing",
+    "todo",
+    "tbd",
+    "placeholder",
+    "unset",
+    "none",
+    "n/a",
+}
+
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +124,92 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     }
 
 
+def _reference_is_concrete(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in PLACEHOLDER_VALUES
+
+
+def _resolve_repo_path(path_like: str) -> Path:
+    path = Path(path_like)
+    return path if path.is_absolute() else (REPO_ROOT / path).resolve()
+
+
+def _evaluate_dry_run_gate(
+    *,
+    environment_doc: dict[str, Any] | None,
+    target_selection: dict[str, Any] | None,
+    package_report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    readiness = (package_report or {}).get("readiness") or {}
+    package_paths = readiness.get("package_paths") or {}
+    bundle_rel = str(package_paths.get("bundle") or "").strip()
+    bundle_dir = _resolve_repo_path(bundle_rel) if bundle_rel else None
+    manifest_path = bundle_dir / "manifest.txt" if bundle_dir else None
+    checksum_path = bundle_dir / "sha256sums.txt" if bundle_dir else None
+
+    bundle_checks = {
+        "bundle_dir": _repo_relative(bundle_dir) if bundle_dir else None,
+        "manifest_path": _repo_relative(manifest_path) if manifest_path else None,
+        "checksum_path": _repo_relative(checksum_path) if checksum_path else None,
+        "manifest_present": bool(manifest_path and manifest_path.exists()),
+        "checksums_present": bool(checksum_path and checksum_path.exists()),
+    }
+    if not bundle_checks["manifest_present"]:
+        errors.append("bundle manifest is missing")
+    if not bundle_checks["checksums_present"]:
+        errors.append("bundle checksums are missing")
+
+    backups = ((environment_doc or {}).get("backups") or {})
+    selected_family = str((target_selection or {}).get("headend_family") or "").strip()
+    selected_headend_backup_key = "nat_headend" if selected_family == "nat" else "non_nat_headend"
+    backup_refs = {
+        "baseline_root": backups.get("baseline_root"),
+        "muxer": backups.get("muxer"),
+        "selected_headend": backups.get(selected_headend_backup_key),
+        "selected_headend_key": selected_headend_backup_key,
+    }
+    backup_status = {
+        key: _reference_is_concrete(value)
+        for key, value in backup_refs.items()
+        if key != "selected_headend_key"
+    }
+    for key, present in backup_status.items():
+        if not present:
+            errors.append(f"backup reference missing or placeholder for {key}")
+
+    owners = ((environment_doc or {}).get("owners") or {})
+    owner_status = {
+        "validation": _reference_is_concrete(owners.get("validation")),
+        "rollback": _reference_is_concrete(owners.get("rollback")),
+    }
+    for key, present in owner_status.items():
+        if not present:
+            errors.append(f"owner reference missing for {key}")
+
+    environment_live_apply = (((environment_doc or {}).get("environment") or {}).get("live_apply") or {})
+    allow_live_apply_now = bool(environment_live_apply.get("enabled")) and False
+    live_apply_reasons = ["Phase 3 remains dry-run only"]
+    if not bool(environment_live_apply.get("enabled")):
+        live_apply_reasons.append("environment live_apply.enabled is false")
+
+    status = "dry_run_ready" if not errors else "blocked"
+    return {
+        "status": status,
+        "errors": errors,
+        "bundle_checks": bundle_checks,
+        "backup_refs": backup_refs,
+        "backup_status": backup_status,
+        "owners": {
+            "validation": owners.get("validation"),
+            "rollback": owners.get("rollback"),
+        },
+        "owner_status": owner_status,
+        "allow_live_apply_now": allow_live_apply_now,
+        "live_apply_reasons": live_apply_reasons,
+    }
+
+
 def _build_execution_plan(
     *,
     status: str,
@@ -126,12 +223,13 @@ def _build_execution_plan(
     deploy_dir: Path,
     package_report: dict[str, Any] | None,
     target_selection: dict[str, Any] | None,
+    dry_run_gate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     readiness = (package_report or {}).get("readiness") or {}
     return {
         "schema_version": 1,
         "action": "deploy_customer",
-        "phase": "phase2_dry_run_orchestrator",
+        "phase": "phase3_target_resolution_and_backup_gate",
         "status": status,
         "dry_run": True,
         "approved": False,
@@ -160,17 +258,34 @@ def _build_execution_plan(
             "dynamic_nat_t": readiness.get("dynamic_nat_t"),
         },
         "selected_targets": target_selection,
+        "dry_run_gate": dry_run_gate,
+        "touch_plan": {
+            "muxer": ((target_selection or {}).get("muxer") or {}).get("name"),
+            "headend_family": (target_selection or {}).get("headend_family"),
+            "headend_active": ((target_selection or {}).get("headend_active") or {}).get("name"),
+            "headend_standby": ((target_selection or {}).get("headend_standby") or {}).get("name"),
+            "customer_sot_table": (((target_selection or {}).get("datastores") or {}).get("customer_sot_table")),
+            "allocation_table": (((target_selection or {}).get("datastores") or {}).get("allocation_table")),
+            "artifact_bucket": (((target_selection or {}).get("artifacts") or {}).get("bucket")),
+            "artifact_prefix": (((target_selection or {}).get("artifacts") or {}).get("prefix")),
+            "bundle_dir": (((dry_run_gate or {}).get("bundle_checks") or {}).get("bundle_dir")),
+        },
         "execution_order": [
             "validate_customer_request",
             "validate_deployment_environment",
             "enforce_blocked_customers",
             "provision_repo_only_package",
             "resolve_dry_run_targets",
+            "validate_bundle_manifest_and_checksums",
+            "validate_backup_references",
+            "validate_rollout_owners",
             "write_execution_plan",
         ],
         "live_gate": {
-            "status": "disabled_in_phase2",
+            "status": (dry_run_gate or {}).get("status") or "blocked",
             "approve_supported": False,
+            "allow_live_apply_now": False,
+            "reasons": (dry_run_gate or {}).get("live_apply_reasons") or ["Phase 3 remains dry-run only"],
             "no_live_nodes_touched": True,
             "no_aws_calls": True,
             "no_dynamodb_writes": True,
@@ -203,9 +318,10 @@ def main() -> int:
     )
     package_dir = deploy_dir / "package"
     errors: list[str] = []
+    dry_run_gate = None
 
     if args.approve:
-        errors.append("--approve is not enabled in Phase 2; live apply remains disabled")
+        errors.append("--approve is not enabled in Phase 3; live apply remains disabled")
 
     request_code, request_stdout, request_stderr = _validate_customer_request(customer_file)
     if request_code != 0:
@@ -242,6 +358,12 @@ def main() -> int:
                 environment_doc=environment_doc or {},
                 readiness=package_report.get("readiness") or {},
             )
+            dry_run_gate = _evaluate_dry_run_gate(
+                environment_doc=environment_doc,
+                target_selection=target_selection,
+                package_report=package_report,
+            )
+            errors.extend(dry_run_gate.get("errors") or [])
 
     status = "dry_run_ready" if not errors else "blocked"
     execution_plan = _build_execution_plan(
@@ -256,6 +378,7 @@ def main() -> int:
         deploy_dir=deploy_dir,
         package_report=package_report,
         target_selection=target_selection,
+        dry_run_gate=dry_run_gate,
     )
     _write_json(deploy_dir / "execution-plan.json", execution_plan)
 

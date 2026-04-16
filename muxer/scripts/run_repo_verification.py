@@ -454,7 +454,8 @@ def main() -> int:
         },
     )
 
-    # Step 3e: verify the Phase 2 dry-run customer deploy orchestrator.
+    # Step 3e: verify the Phase 3 dry-run customer deploy orchestrator,
+    # including target resolution and backup gating.
     deploy_root = BUILD_ROOT / "deploy-customer"
     if deploy_root.exists():
         shutil.rmtree(deploy_root)
@@ -479,6 +480,8 @@ def main() -> int:
         raise SystemExit("Customer 2 dry-run deploy attempted live apply")
     if (customer2_deploy.get("selected_targets") or {}).get("headend_family") != "non_nat":
         raise SystemExit("Customer 2 dry-run did not select non-NAT head end")
+    if ((customer2_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
+        raise SystemExit("Customer 2 dry-run gate did not report dry_run_ready")
 
     customer4_deploy = _run_json(
         [
@@ -514,6 +517,8 @@ def main() -> int:
         raise SystemExit("Customer 4 dry-run deploy attempted live apply")
     if (customer4_deploy.get("selected_targets") or {}).get("headend_family") != "nat":
         raise SystemExit("Customer 4 NAT-T dry-run did not select NAT head end")
+    if ((customer4_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
+        raise SystemExit("Customer 4 NAT-T dry-run gate did not report dry_run_ready")
 
     blocked_environment = yaml.safe_load(
         (MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml").read_text(
@@ -554,6 +559,53 @@ def main() -> int:
     blocked_report = json.loads(blocked_completed.stdout)
     if blocked_report.get("status") != "blocked":
         raise SystemExit("synthetic blocked customer dry-run did not report blocked")
+    missing_backup_environment = yaml.safe_load(
+        (MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    missing_backup_environment["backups"]["nat_headend"] = "missing"
+    missing_backup_environment_path = deploy_root / "phase3-missing-backup-environment.yaml"
+    _write_yaml(missing_backup_environment_path, missing_backup_environment)
+    missing_backup_completed = subprocess.run(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004.yaml"
+            ),
+            "--environment",
+            str(missing_backup_environment_path),
+            "--observation",
+            str(
+                MUXER_DIR
+                / "config"
+                / "customer-requests"
+                / "migrated"
+                / "vpn-customer-stage1-15-cust-0004-nat-t-observation.json"
+            ),
+            "--out-dir",
+            str(deploy_root / "phase3-missing-backup"),
+            "--dry-run",
+            "--json",
+        ],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if missing_backup_completed.returncode == 0:
+        raise SystemExit("missing backup dry-run did not fail")
+    missing_backup_report = json.loads(missing_backup_completed.stdout)
+    if missing_backup_report.get("status") != "blocked":
+        raise SystemExit("missing backup dry-run did not report blocked")
+    if ((missing_backup_report.get("dry_run_gate") or {}).get("status")) != "blocked":
+        raise SystemExit("missing backup dry-run gate did not report blocked")
     invalid_env_completed = subprocess.run(
         [
             "python",
@@ -578,13 +630,17 @@ def main() -> int:
     if invalid_env_report.get("status") != "blocked":
         raise SystemExit("invalid deployment environment dry-run did not report blocked")
     record_step(
-        "dry_run_customer_deploy_orchestrator",
+        "dry_run_target_resolution_and_backup_gate",
         {
             "customer2_status": customer2_deploy["status"],
             "customer2_headend_family": customer2_deploy["selected_targets"]["headend_family"],
+            "customer2_gate": customer2_deploy["dry_run_gate"]["status"],
             "customer4_status": customer4_deploy["status"],
             "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
+            "customer4_gate": customer4_deploy["dry_run_gate"]["status"],
             "synthetic_blocked_status": blocked_report["status"],
+            "missing_backup_status": missing_backup_report["status"],
+            "missing_backup_gate": missing_backup_report["dry_run_gate"]["status"],
             "invalid_environment_status": invalid_env_report["status"],
             "live_apply": False,
         },
