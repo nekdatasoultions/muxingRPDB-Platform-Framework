@@ -40,6 +40,39 @@ def _relative(path: Path) -> str:
         return str(path.resolve())
 
 
+def _append_database_errors(report: dict[str, Any], payload: dict[str, Any], require_aws: bool) -> None:
+    customer_sot = payload.get("customer_sot") or {}
+    resource_allocations = payload.get("resource_allocations") or {}
+    if require_aws:
+        customer_aws = customer_sot.get("aws") or {}
+        if not customer_aws.get("exists"):
+            report["errors"].append(
+                f"customer SoT table is missing: {customer_sot.get('table_name') or '<unknown>'}"
+            )
+        allocation_aws = resource_allocations.get("aws") or {}
+        if not allocation_aws.get("exists"):
+            report["errors"].append(
+                f"resource allocation table is missing: {resource_allocations.get('table_name') or '<unknown>'}"
+            )
+
+
+def _append_headend_errors(report: dict[str, Any], payload: dict[str, Any]) -> None:
+    if payload.get("overall_ok"):
+        return
+    unhealthy_nodes = []
+    for node in payload.get("nodes") or []:
+        if node.get("healthy"):
+            continue
+        checks = node.get("checks") or {}
+        failed_checks = sorted(key for key, value in checks.items() if not value)
+        unhealthy_nodes.append(
+            f"{node.get('cluster_kind')}:{node.get('node_name')}:{node.get('instance_id')} failed {', '.join(failed_checks) or 'unknown checks'}"
+        )
+    if not unhealthy_nodes:
+        unhealthy_nodes.append("head-end verification returned overall_ok=false")
+    report["errors"].append("head-end bootstrap not ready: " + "; ".join(unhealthy_nodes))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the empty-platform readiness report.")
     parser.add_argument(
@@ -147,6 +180,7 @@ def main() -> int:
             )
         else:
             report["checks"]["database"] = db_payload
+            _append_database_errors(report, db_payload, require_aws=(args.check_aws or args.verify_headends))
 
     backup_code, backup_payload, backup_stdout, backup_stderr = _run_json(
         [
@@ -189,6 +223,8 @@ def main() -> int:
             )
         else:
             report["checks"]["headend_bootstrap"] = headend_payload
+            if headend_payload is not None:
+                _append_headend_errors(report, headend_payload)
 
     ready = not report["errors"]
     report["ready"] = ready

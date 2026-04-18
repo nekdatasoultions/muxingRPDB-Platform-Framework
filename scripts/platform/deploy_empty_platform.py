@@ -193,14 +193,21 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
         ),
         _step(
             "database",
-            "Ensure the customer SoT table exists",
+            "Ensure the RPDB customer tables exist",
             repo_root,
             [
                 sys.executable,
                 "scripts/platform/ensure_dynamodb_tables.py",
+                "--muxer-params",
+                muxer_param_rel,
+                "--nat-headend-params",
+                nat_param_rel,
+                "--nonnat-headend-params",
+                nonnat_param_rel,
                 "--region",
                 region,
                 "--create-customer-sot",
+                "--create-resource-allocation-table",
                 "--check-aws",
             ],
             note="The imported head-end lease tables are currently stack-managed because LeaseTableName is blank.",
@@ -221,7 +228,7 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
         {
             "name": "Validate each VPN head-end node",
             "commands": [
-                f"{sys.executable} scripts/platform/verify_headend_bootstrap.py --region {region} --json",
+                f"{sys.executable} scripts/platform/verify_headend_bootstrap.py --region {region} --nat-params {nat_param_rel} --nonnat-params {nonnat_param_rel} --json",
                 "ip addr",
                 "findmnt /LOG",
                 "findmnt /Application",
@@ -234,7 +241,7 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
         {
             "name": "Validate the database state",
             "commands": [
-                f"{sys.executable} scripts/platform/ensure_dynamodb_tables.py --region {region} --check-aws",
+                f"{sys.executable} scripts/platform/ensure_dynamodb_tables.py --muxer-params {muxer_param_rel} --nat-headend-params {nat_param_rel} --nonnat-headend-params {nonnat_param_rel} --region {region} --check-aws",
             ],
         },
     ]

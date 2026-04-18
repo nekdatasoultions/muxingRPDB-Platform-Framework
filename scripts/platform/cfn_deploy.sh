@@ -74,6 +74,13 @@ if ip_addr not in cidr:
 PY
 }
 
+normalize_text_fields() {
+  local value
+  for value in "$@"; do
+    printf '%s\n' "${value//$'\r'/}"
+  done
+}
+
 validate_subnet_pair() {
   local subnet_a_id="$1"
   local subnet_b_id="$2"
@@ -88,11 +95,18 @@ validate_subnet_pair() {
     exit 1
   fi
 
-  read -r AZ_A CIDR_A AZ_B CIDR_B < <(aws ec2 describe-subnets \
+  readarray -t subnet_info < <(aws ec2 describe-subnets \
     --region "$REGION" \
     --subnet-ids "$subnet_a_id" "$subnet_b_id" \
     --query "join(' ', [Subnets[?SubnetId=='$subnet_a_id']|[0].AvailabilityZone, Subnets[?SubnetId=='$subnet_a_id']|[0].CidrBlock, Subnets[?SubnetId=='$subnet_b_id']|[0].AvailabilityZone, Subnets[?SubnetId=='$subnet_b_id']|[0].CidrBlock])" \
-    --output text)
+    --output text | tr -d '\r')
+
+  read -r AZ_A CIDR_A AZ_B CIDR_B <<<"${subnet_info[*]}"
+  readarray -t normalized_info < <(normalize_text_fields "$AZ_A" "$CIDR_A" "$AZ_B" "$CIDR_B")
+  AZ_A="${normalized_info[0]:-}"
+  CIDR_A="${normalized_info[1]:-}"
+  AZ_B="${normalized_info[2]:-}"
+  CIDR_B="${normalized_info[3]:-}"
 
   if [[ -z "${AZ_A:-}" || -z "${AZ_B:-}" ]]; then
     echo "[AZ-GUARD] ERROR: Unable to resolve AZs for ${label} subnets $subnet_a_id and $subnet_b_id"
