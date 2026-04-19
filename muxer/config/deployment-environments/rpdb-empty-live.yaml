@@ -2,7 +2,7 @@ schema_version: 1
 
 environment:
   name: rpdb-empty-live
-  description: Current live RPDB-empty platform contract for repo-only customer dry-run review.
+  description: Current live RPDB-empty platform contract for approved customer apply through the RPDB SSH path.
   aws:
     region: us-east-1
     account_hint: "594085074402"
@@ -12,7 +12,7 @@ environment:
       user: ec2-user
       key_ref: ec2-instance-connect-via-rpdb-muxer
   live_apply:
-    enabled: false
+    enabled: true
     requires_approval: true
 
 targets:

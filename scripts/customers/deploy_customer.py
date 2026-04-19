@@ -17,7 +17,7 @@ if str(MUXER_SRC) not in sys.path:
     sys.path.insert(0, str(MUXER_SRC))
 
 from muxerlib.customer_merge import load_yaml_file
-from live_apply_lib import execute_staged_live_apply
+from live_apply_lib import execute_live_apply
 
 PLACEHOLDER_VALUES = {
     "",
@@ -196,11 +196,12 @@ def _evaluate_dry_run_gate(
     environment_access_method = str(
         (((environment_doc or {}).get("environment") or {}).get("access") or {}).get("method") or ""
     ).strip()
-    allow_live_apply_now = bool(environment_live_apply.get("enabled")) and environment_access_method == "staged"
+    supported_access_methods = {"staged", "ssh"}
+    allow_live_apply_now = bool(environment_live_apply.get("enabled")) and environment_access_method in supported_access_methods
     live_apply_reasons: list[str] = []
     if not bool(environment_live_apply.get("enabled")):
         live_apply_reasons.append("environment live_apply.enabled is false")
-    elif environment_access_method != "staged":
+    elif environment_access_method not in supported_access_methods:
         live_apply_reasons.append(
             f"live apply adapter not yet implemented for access method {environment_access_method or 'unknown'}"
         )
@@ -406,13 +407,9 @@ def main() -> int:
         ).strip()
         if not bool(environment_live_apply.get("enabled")):
             errors.append("environment live_apply.enabled is false")
-        elif access_method != "staged":
-            errors.append(
-                f"approved live apply is not yet implemented for access method {access_method or 'unknown'}"
-            )
         else:
             _write_json(execution_plan_path, execution_plan)
-            apply_result = execute_staged_live_apply(
+            apply_result = execute_live_apply(
                 customer_name=customer_name,
                 package_dir=package_dir,
                 bundle_dir=package_dir / "bundle",
@@ -452,10 +449,10 @@ def main() -> int:
             "approve_supported": True,
             "allow_live_apply_now": True,
             "reasons": [] if apply_succeeded else [str(apply_result.get("error") or "approved apply failed")],
-            "no_live_nodes_touched": True,
-            "no_aws_calls": True,
-            "no_dynamodb_writes": True,
-            "staged_roots_only": True,
+            "no_live_nodes_touched": False,
+            "no_aws_calls": False,
+            "no_dynamodb_writes": False,
+            "staged_roots_only": False,
         }
         execution_plan["apply"] = apply_result
 

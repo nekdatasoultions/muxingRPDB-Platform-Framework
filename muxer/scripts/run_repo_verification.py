@@ -183,6 +183,8 @@ def main() -> int:
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "live_access_lib.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "live_backend_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py"),
         str(REPO_ROOT / "scripts" / "packaging" / "validate_customer_bundle.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "backend_customer_lib.py"),
@@ -242,6 +244,58 @@ def main() -> int:
             "targets": staged_environment_validation.get("targets"),
             "aws_calls": staged_environment_validation.get("aws_calls"),
             "live_node_access": staged_environment_validation.get("live_node_access"),
+        },
+    )
+
+    current_live_environment_validation = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
+            str(MUXER_DIR / "config" / "deployment-environments" / "rpdb-empty-live.yaml"),
+            "--allow-live-apply",
+            "--json",
+        ]
+    )
+    if not current_live_environment_validation.get("valid"):
+        raise SystemExit("current live deployment environment contract validation failed")
+    record_step(
+        "current_live_deployment_environment_contract_validation",
+        {
+            "environment_name": current_live_environment_validation.get("environment_name"),
+            "targets": current_live_environment_validation.get("targets"),
+            "aws_calls": current_live_environment_validation.get("aws_calls"),
+            "live_node_access": current_live_environment_validation.get("live_node_access"),
+        },
+    )
+
+    current_live_customer2_dry_run = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(MUXER_DIR / "config" / "customer-requests" / "migrated" / "legacy-cust0002.yaml"),
+            "--environment",
+            str(MUXER_DIR / "config" / "deployment-environments" / "rpdb-empty-live.yaml"),
+            "--out-dir",
+            str(BUILD_ROOT / "current-live-customer2"),
+            "--dry-run",
+            "--json",
+        ]
+    )
+    if current_live_customer2_dry_run.get("status") != "dry_run_ready":
+        raise SystemExit("current live Customer 2 dry-run did not report dry_run_ready")
+    if not ((current_live_customer2_dry_run.get("live_gate") or {}).get("allow_live_apply_now")):
+        raise SystemExit("current live Customer 2 dry-run did not become approval-ready")
+    if (current_live_customer2_dry_run.get("selected_targets") or {}).get("environment_access_method") != "ssh":
+        raise SystemExit("current live Customer 2 dry-run did not resolve the SSH live environment")
+    record_step(
+        "current_live_approval_boundary",
+        {
+            "environment_file": str(MUXER_DIR / "config" / "deployment-environments" / "rpdb-empty-live.yaml"),
+            "status": current_live_customer2_dry_run["status"],
+            "approve_supported": current_live_customer2_dry_run["live_gate"]["allow_live_apply_now"],
+            "headend_family": current_live_customer2_dry_run["selected_targets"]["headend_family"],
+            "execution_plan": current_live_customer2_dry_run["artifacts"]["execution_plan"],
         },
     )
 
@@ -1242,8 +1296,8 @@ def main() -> int:
     non_nat_headend_root = phase4_stage_dir / "hn"
     nat_headend_root = phase4_stage_dir / "ht"
 
-    customer2_package_dir = Path(str(customer2_deploy["package"]["package_dir"])).resolve()
-    customer4_package_dir = Path(str(customer4_deploy["package"]["package_dir"])).resolve()
+    customer2_package_dir = _resolve_repo_path(str(customer2_deploy["package"]["package_dir"]))
+    customer4_package_dir = _resolve_repo_path(str(customer4_deploy["package"]["package_dir"]))
     phase4_specs = {
         "legacy-cust0002": {
             "package_dir": customer2_package_dir,

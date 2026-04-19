@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from live_access_lib import (
+    build_ssh_access_context,
+    cleanup_ssh_access_context,
+    copy_paths_to_remote_root,
+    run_local,
+    run_remote_command,
+)
+from live_backend_lib import (
+    apply_backend_payloads,
+    load_customer_backend_payloads,
+    rollback_backend_payloads,
+    validate_backend_payloads,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -117,6 +132,48 @@ def _execute_json(
     return payload or {}
 
 
+def _execute_local(
+    journal: list[dict[str, Any]],
+    *,
+    action: str,
+    target: str,
+    command: list[str],
+) -> subprocess.CompletedProcess[str]:
+    completed = run_local(command, cwd=REPO_ROOT)
+    _record_action(
+        journal,
+        action=action,
+        target=target,
+        command=command,
+        payload=None,
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"{action} failed for {target}: {completed.stderr or completed.stdout}".strip())
+    return completed
+
+
+def _record_structured(
+    journal: list[dict[str, Any]],
+    *,
+    action: str,
+    target: str,
+    payload: dict[str, Any],
+) -> None:
+    _record_action(
+        journal,
+        action=action,
+        target=target,
+        command=[],
+        payload=payload,
+        returncode=0,
+        stdout="",
+        stderr="",
+    )
+
+
 def _rollback_staged(
     *,
     rollback_steps: list[dict[str, Any]],
@@ -147,6 +204,23 @@ def _rollback_staged(
         "errors": rollback_errors,
         "steps": results,
     }
+
+
+def _s3_uri(bucket: str, *parts: str) -> str:
+    cleaned = [part.strip("/").replace("\\", "/") for part in parts if str(part).strip("/")]
+    return "s3://" + "/".join([bucket, *cleaned])
+
+
+def _remote_path(prepared_root: Path, local_path: str | Path) -> str:
+    resolved_root = prepared_root.resolve()
+    resolved_path = Path(local_path).resolve()
+    relative_path = resolved_path.relative_to(resolved_root)
+    return "/" + relative_path.as_posix()
+
+
+def _sudo_shell(command_text: str, *, strict: bool = True) -> str:
+    prefix = "set -eu; " if strict else "set +e; "
+    return "sudo bash -lc " + shlex.quote(prefix + command_text)
 
 
 def execute_staged_live_apply(
@@ -444,3 +518,674 @@ def execute_staged_live_apply(
         write_json(apply_dir / "apply-journal.json", journal_payload)
         write_json(apply_dir / "apply-result.json", failure_result)
         return failure_result
+
+
+def _publish_artifacts_to_s3(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    run_id: str,
+    package_dir: Path,
+    execution_plan_path: Path,
+    environment_doc: dict[str, Any],
+) -> dict[str, Any]:
+    artifacts = environment_doc.get("artifacts") or {}
+    bucket = str(artifacts.get("bucket") or "").strip()
+    prefix = str(artifacts.get("prefix") or "").strip()
+    if not bucket or not prefix:
+        raise RuntimeError("artifact bucket/prefix missing from deployment environment")
+
+    run_root = _s3_uri(bucket, prefix, customer_name, run_id)
+    package_root = _s3_uri(bucket, prefix, customer_name, run_id, "package")
+    execution_plan_uri = _s3_uri(bucket, prefix, customer_name, run_id, "execution-plan.json")
+
+    _execute_local(
+        journal,
+        action="publish_execution_plan",
+        target=execution_plan_uri,
+        command=["aws", "s3", "cp", str(execution_plan_path), execution_plan_uri],
+    )
+    _execute_local(
+        journal,
+        action="publish_customer_package",
+        target=package_root,
+        command=["aws", "s3", "cp", str(package_dir), package_root, "--recursive"],
+    )
+    return {
+        "run_root": run_root,
+        "package_root": package_root,
+        "execution_plan": execution_plan_uri,
+    }
+
+
+def _prepare_backend_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    package_dir: Path,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    backend_root = apply_dir / "prepared-roots" / "backend"
+    if backend_root.exists():
+        shutil.rmtree(backend_root)
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_backend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_backend_customer.py",
+            "--package-dir",
+            str(package_dir),
+            "--backend-root",
+            str(backend_root),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_backend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_backend_customer.py",
+            "--package-dir",
+            str(package_dir),
+            "--backend-root",
+            str(backend_root),
+            "--json",
+        ],
+    )
+    return {"root": backend_root, "apply": apply_report, "validate": validate_report}
+
+
+def _prepare_muxer_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    bundle_dir: Path,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    muxer_root = apply_dir / "prepared-roots" / "muxer"
+    if muxer_root.exists():
+        shutil.rmtree(muxer_root)
+    muxer_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_muxer_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_muxer_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--muxer-root",
+            str(muxer_root),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_muxer_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_muxer_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--muxer-root",
+            str(muxer_root),
+            "--json",
+        ],
+    )
+    return {"root": muxer_root, "apply": apply_report, "validate": validate_report}
+
+
+def _prepare_headend_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    bundle_dir: Path,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    headend_root = apply_dir / "prepared-roots" / "headend"
+    if headend_root.exists():
+        shutil.rmtree(headend_root)
+    headend_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_headend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_headend_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--headend-root",
+            str(headend_root),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_headend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_headend_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--headend-root",
+            str(headend_root),
+            "--json",
+        ],
+    )
+    return {"root": headend_root, "apply": apply_report, "validate": validate_report}
+
+
+def _record_remote_result(
+    journal: list[dict[str, Any]],
+    *,
+    action: str,
+    target: str,
+    result: dict[str, Any],
+) -> None:
+    command = list(result.get("command") or result.get("copy_command") or [])
+    stdout = "\n".join(
+        [part for part in (result.get("stdout"), result.get("copy_stdout"), result.get("extract_stdout")) if part]
+    )
+    stderr = "\n".join(
+        [part for part in (result.get("stderr"), result.get("copy_stderr"), result.get("extract_stderr")) if part]
+    )
+    _record_action(
+        journal,
+        action=action,
+        target=target,
+        command=command,
+        payload=result,
+        returncode=0 if result.get("success") else 1,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def _apply_remote_component(
+    journal: list[dict[str, Any]],
+    *,
+    context: Any,
+    component_name: str,
+    target_name: str,
+    target_instance_id: str,
+    via_bastion: bool,
+    prepared_root: Path,
+    relative_paths: list[Path],
+    remote_apply_script: str,
+    remote_remove_script: str,
+    remote_checks: list[str],
+    remote_cleanup_paths: list[str],
+    remote_cleanup_files: list[str],
+    remote_name: str,
+) -> dict[str, Any]:
+    copy_result = copy_paths_to_remote_root(
+        context=context,
+        target_instance_id=target_instance_id,
+        source_root=prepared_root,
+        relative_paths=relative_paths,
+        remote_name=remote_name,
+        via_bastion=via_bastion,
+    )
+    _record_remote_result(
+        journal,
+        action=f"copy_{component_name}_payload",
+        target=target_name,
+        result=copy_result,
+    )
+    if not copy_result.get("success"):
+        raise RuntimeError(f"copy_{component_name}_payload failed for {target_name}")
+
+    apply_result = run_remote_command(
+        context=context,
+        target_instance_id=target_instance_id,
+        via_bastion=via_bastion,
+        remote_command=_sudo_shell(f"bash {shlex.quote(remote_apply_script)}"),
+    )
+    _record_remote_result(
+        journal,
+        action=f"apply_{component_name}_customer",
+        target=target_name,
+        result=apply_result,
+    )
+    if not apply_result.get("success"):
+        raise RuntimeError(f"apply_{component_name}_customer failed for {target_name}")
+
+    validate_result = run_remote_command(
+        context=context,
+        target_instance_id=target_instance_id,
+        via_bastion=via_bastion,
+        remote_command=_sudo_shell("; ".join(f"test -f {shlex.quote(path)}" for path in remote_checks)),
+    )
+    _record_remote_result(
+        journal,
+        action=f"validate_{component_name}_customer",
+        target=target_name,
+        result=validate_result,
+    )
+    if not validate_result.get("success"):
+        raise RuntimeError(f"validate_{component_name}_customer failed for {target_name}")
+
+    cleanup_parts: list[str] = [
+        f"if [ -f {shlex.quote(remote_remove_script)} ]; then bash {shlex.quote(remote_remove_script)}; fi"
+    ]
+    if remote_cleanup_paths:
+        cleanup_parts.append("rm -rf " + " ".join(shlex.quote(path) for path in remote_cleanup_paths))
+    if remote_cleanup_files:
+        cleanup_parts.append("rm -f " + " ".join(shlex.quote(path) for path in remote_cleanup_files))
+
+    return {
+        "copy": copy_result,
+        "apply": apply_result,
+        "validate": validate_result,
+        "rollback": {
+            "kind": "remote",
+            "action": f"remove_{component_name}_customer",
+            "target": target_name,
+            "target_instance_id": target_instance_id,
+            "via_bastion": via_bastion,
+            "command_text": "; ".join(cleanup_parts),
+        },
+    }
+
+
+def _rollback_ssh_live(
+    *,
+    context: Any | None,
+    rollback_steps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    rollback_errors: list[str] = []
+    for step in reversed(rollback_steps):
+        try:
+            if step["kind"] == "backend":
+                payload = rollback_backend_payloads(
+                    region=step["region"],
+                    customer_table=step["customer_table"],
+                    allocation_table=step["allocation_table"],
+                    customer_item_plain=step["customer_item_plain"],
+                    allocation_items_typed=step["allocation_items_typed"],
+                )
+                results.append(
+                    {
+                        "recorded_at": utc_now(),
+                        "action": step["action"],
+                        "target": step["target"],
+                        "payload": payload,
+                        "success": payload.get("status") == "rolled_back",
+                    }
+                )
+                if payload.get("status") != "rolled_back":
+                    rollback_errors.extend(payload.get("errors") or [])
+                continue
+
+            if context is None:
+                raise RuntimeError("SSH rollback context is not available")
+
+            result = run_remote_command(
+                context=context,
+                target_instance_id=step["target_instance_id"],
+                via_bastion=bool(step.get("via_bastion")),
+                remote_command=_sudo_shell(str(step["command_text"]), strict=False),
+            )
+            results.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": step["action"],
+                    "target": step["target"],
+                    "command": result.get("command"),
+                    "stdout": result.get("stdout"),
+                    "stderr": result.get("stderr"),
+                    "success": bool(result.get("success")),
+                }
+            )
+            if not result.get("success"):
+                rollback_errors.append(
+                    f"{step['action']} failed for {step['target']}: {result.get('stderr') or result.get('stdout')}"
+                )
+        except Exception as exc:  # pragma: no cover - rollback best effort
+            rollback_errors.append(f"{step['action']} failed for {step['target']}: {exc}")
+    return {
+        "status": "rolled_back" if not rollback_errors else "rollback_failed",
+        "errors": rollback_errors,
+        "steps": results,
+    }
+
+
+def execute_ssh_live_apply(
+    *,
+    customer_name: str,
+    package_dir: Path,
+    bundle_dir: Path,
+    deploy_dir: Path,
+    target_selection: dict[str, Any],
+    environment_doc: dict[str, Any],
+    execution_plan_path: Path,
+) -> dict[str, Any]:
+    apply_dir = deploy_dir / "approved-apply"
+    apply_dir.mkdir(parents=True, exist_ok=True)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    journal: list[dict[str, Any]] = []
+    rollback_steps: list[dict[str, Any]] = []
+    context: Any | None = None
+
+    try:
+        backend_prepared = _prepare_backend_root(
+            journal,
+            customer_name=customer_name,
+            package_dir=package_dir,
+            apply_dir=apply_dir,
+        )
+        muxer_prepared = _prepare_muxer_root(
+            journal,
+            customer_name=customer_name,
+            bundle_dir=bundle_dir,
+            apply_dir=apply_dir,
+        )
+        headend_prepared = _prepare_headend_root(
+            journal,
+            customer_name=customer_name,
+            bundle_dir=bundle_dir,
+            apply_dir=apply_dir,
+        )
+
+        published_artifacts = _publish_artifacts_to_s3(
+            journal,
+            customer_name=customer_name,
+            run_id=run_id,
+            package_dir=package_dir,
+            execution_plan_path=execution_plan_path,
+            environment_doc=environment_doc,
+        )
+
+        customer_item_plain, allocation_items_typed = load_customer_backend_payloads(package_dir)
+        region = str(((environment_doc.get("environment") or {}).get("aws") or {}).get("region") or "").strip()
+        if not region:
+            raise RuntimeError("environment.aws.region is required for live apply")
+
+        datastores = environment_doc.get("datastores") or {}
+        customer_table = str(datastores.get("customer_sot_table") or "").strip()
+        allocation_table = str(datastores.get("allocation_table") or "").strip()
+        if not customer_table or not allocation_table:
+            raise RuntimeError("deployment environment datastores are incomplete")
+
+        backend_apply = apply_backend_payloads(
+            region=region,
+            customer_table=customer_table,
+            allocation_table=allocation_table,
+            customer_item_plain=customer_item_plain,
+            allocation_items_typed=allocation_items_typed,
+        )
+        _record_structured(
+            journal,
+            action="apply_backend_customer",
+            target="dynamodb",
+            payload=backend_apply,
+        )
+        rollback_steps.append(
+            {
+                "kind": "backend",
+                "action": "remove_backend_customer",
+                "target": "dynamodb",
+                "region": region,
+                "customer_table": customer_table,
+                "allocation_table": allocation_table,
+                "customer_item_plain": customer_item_plain,
+                "allocation_items_typed": allocation_items_typed,
+            }
+        )
+
+        backend_validation = validate_backend_payloads(
+            region=region,
+            customer_table=customer_table,
+            allocation_table=allocation_table,
+            customer_item_plain=customer_item_plain,
+            allocation_items_typed=allocation_items_typed,
+        )
+        _record_structured(
+            journal,
+            action="validate_backend_customer",
+            target="dynamodb",
+            payload=backend_validation,
+        )
+        if not backend_validation.get("valid"):
+            raise RuntimeError("backend validation failed after DynamoDB apply")
+
+        environment_access = ((environment_doc.get("environment") or {}).get("access") or {})
+        ssh_user = str(((environment_access.get("ssh") or {}).get("user")) or "").strip()
+        if not ssh_user:
+            raise RuntimeError("environment.access.ssh.user is required for SSH live apply")
+
+        muxer_target = target_selection.get("muxer") or {}
+        muxer_selector = muxer_target.get("selector") or {}
+        muxer_instance_id = str(muxer_selector.get("value") or "").strip()
+        if not muxer_instance_id:
+            raise RuntimeError("selected muxer target is missing an instance_id selector")
+
+        headend_active = target_selection.get("headend_active") or {}
+        headend_standby = target_selection.get("headend_standby") or {}
+        active_instance_id = str(((headend_active.get("selector") or {}).get("value")) or "").strip()
+        standby_instance_id = str(((headend_standby.get("selector") or {}).get("value")) or "").strip()
+        if not active_instance_id or not standby_instance_id:
+            raise RuntimeError("selected head-end targets are missing instance_id selectors")
+
+        context = build_ssh_access_context(
+            region=region,
+            ssh_user=ssh_user,
+            bastion_instance_id=muxer_instance_id,
+            target_instance_ids=[muxer_instance_id, active_instance_id, standby_instance_id],
+        )
+
+        muxer_root = Path(muxer_prepared["root"]).resolve()
+        headend_root = Path(headend_prepared["root"]).resolve()
+
+        muxer_customer_root = Path(muxer_prepared["apply"]["state_json"]).resolve().parent
+        muxer_module_root = Path(muxer_prepared["apply"]["customer_module"]).resolve().parent
+        muxer_remote = _apply_remote_component(
+            journal,
+            context=context,
+            component_name="muxer",
+            target_name=str(muxer_target.get("name") or "muxer"),
+            target_instance_id=muxer_instance_id,
+            via_bastion=False,
+            prepared_root=muxer_root,
+            relative_paths=[
+                muxer_customer_root.relative_to(muxer_root),
+                muxer_module_root.relative_to(muxer_root),
+            ],
+            remote_apply_script=_remote_path(muxer_root, muxer_prepared["apply"]["master_apply_script"]),
+            remote_remove_script=_remote_path(muxer_root, muxer_prepared["apply"]["master_remove_script"]),
+            remote_checks=[
+                _remote_path(muxer_root, muxer_prepared["apply"]["state_json"]),
+                _remote_path(muxer_root, muxer_prepared["apply"]["customer_module"]),
+                _remote_path(muxer_root, muxer_prepared["apply"]["master_apply_script"]),
+            ],
+            remote_cleanup_paths=[
+                _remote_path(muxer_root, muxer_customer_root),
+                _remote_path(muxer_root, muxer_module_root),
+            ],
+            remote_cleanup_files=[],
+            remote_name=f"{customer_name}-muxer",
+        )
+        rollback_steps.append(muxer_remote["rollback"])
+
+        headend_customer_root = Path(headend_prepared["apply"]["state_json"]).resolve().parent
+        headend_swanctl_conf = Path(headend_prepared["apply"]["swanctl_conf"]).resolve()
+        headend_relative_paths = [
+            headend_customer_root.relative_to(headend_root),
+            headend_swanctl_conf.relative_to(headend_root),
+        ]
+        headend_remote_apply = _remote_path(headend_root, headend_prepared["apply"]["master_apply_script"])
+        headend_remote_remove = _remote_path(headend_root, headend_prepared["apply"]["master_remove_script"])
+        headend_remote_checks = [
+            _remote_path(headend_root, headend_prepared["apply"]["state_json"]),
+            _remote_path(headend_root, headend_prepared["apply"]["swanctl_conf"]),
+            _remote_path(headend_root, headend_prepared["apply"]["master_apply_script"]),
+        ]
+        headend_cleanup_paths = [_remote_path(headend_root, headend_customer_root)]
+        headend_cleanup_files = [_remote_path(headend_root, headend_swanctl_conf)]
+
+        active_remote = _apply_remote_component(
+            journal,
+            context=context,
+            component_name="headend",
+            target_name=str(headend_active.get("name") or "headend-active"),
+            target_instance_id=active_instance_id,
+            via_bastion=True,
+            prepared_root=headend_root,
+            relative_paths=headend_relative_paths,
+            remote_apply_script=headend_remote_apply,
+            remote_remove_script=headend_remote_remove,
+            remote_checks=headend_remote_checks,
+            remote_cleanup_paths=headend_cleanup_paths,
+            remote_cleanup_files=headend_cleanup_files,
+            remote_name=f"{customer_name}-headend-active",
+        )
+        rollback_steps.append(active_remote["rollback"])
+
+        standby_remote = _apply_remote_component(
+            journal,
+            context=context,
+            component_name="headend",
+            target_name=str(headend_standby.get("name") or "headend-standby"),
+            target_instance_id=standby_instance_id,
+            via_bastion=True,
+            prepared_root=headend_root,
+            relative_paths=headend_relative_paths,
+            remote_apply_script=headend_remote_apply,
+            remote_remove_script=headend_remote_remove,
+            remote_checks=headend_remote_checks,
+            remote_cleanup_paths=headend_cleanup_paths,
+            remote_cleanup_files=headend_cleanup_files,
+            remote_name=f"{customer_name}-headend-standby",
+        )
+        rollback_steps.append(standby_remote["rollback"])
+
+        rollback_plan = {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "generated_at": utc_now(),
+            "steps": rollback_steps,
+        }
+        journal_payload = {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "generated_at": utc_now(),
+            "steps": journal,
+        }
+        result = {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "status": "applied",
+            "generated_at": utc_now(),
+            "mode": "ssh_live_apply",
+            "roots": {
+                "prepared_backend": repo_relative(Path(backend_prepared["root"])),
+                "prepared_muxer": repo_relative(Path(muxer_prepared["root"])),
+                "prepared_headend": repo_relative(Path(headend_prepared["root"])),
+            },
+            "published_artifacts": published_artifacts,
+            "validation": {
+                "backend": backend_validation,
+                "prepared_backend": backend_prepared["validate"],
+                "prepared_muxer": muxer_prepared["validate"],
+                "prepared_headend": headend_prepared["validate"],
+                "muxer": muxer_remote["validate"],
+                "headend_active": active_remote["validate"],
+                "headend_standby": standby_remote["validate"],
+            },
+            "applies": {
+                "backend": backend_apply,
+                "muxer": muxer_remote["apply"],
+                "headend_active": active_remote["apply"],
+                "headend_standby": standby_remote["apply"],
+            },
+            "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
+            "apply_journal": repo_relative(apply_dir / "apply-journal.json"),
+        }
+        write_json(apply_dir / "rollback-plan.json", rollback_plan)
+        write_json(apply_dir / "apply-journal.json", journal_payload)
+        write_json(apply_dir / "apply-result.json", result)
+        return result
+    except Exception as exc:
+        rollback_result = _rollback_ssh_live(context=context, rollback_steps=rollback_steps)
+        journal_payload = {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "generated_at": utc_now(),
+            "steps": journal,
+        }
+        failure_result = {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "status": rollback_result["status"],
+            "generated_at": utc_now(),
+            "mode": "ssh_live_apply",
+            "error": str(exc),
+            "rollback": rollback_result,
+            "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
+            "apply_journal": repo_relative(apply_dir / "apply-journal.json"),
+        }
+        write_json(
+            apply_dir / "rollback-plan.json",
+            {
+                "schema_version": 1,
+                "customer_name": customer_name,
+                "generated_at": utc_now(),
+                "steps": rollback_steps,
+            },
+        )
+        write_json(apply_dir / "apply-journal.json", journal_payload)
+        write_json(apply_dir / "apply-result.json", failure_result)
+        return failure_result
+    finally:
+        if context is not None:
+            cleanup_ssh_access_context(context)
+
+
+def execute_live_apply(
+    *,
+    customer_name: str,
+    package_dir: Path,
+    bundle_dir: Path,
+    deploy_dir: Path,
+    target_selection: dict[str, Any],
+    environment_doc: dict[str, Any],
+    execution_plan_path: Path,
+) -> dict[str, Any]:
+    access_method = str(
+        (((environment_doc.get("environment") or {}).get("access") or {}).get("method") or "")
+    ).strip()
+    if access_method == "staged":
+        return execute_staged_live_apply(
+            customer_name=customer_name,
+            package_dir=package_dir,
+            bundle_dir=bundle_dir,
+            deploy_dir=deploy_dir,
+            target_selection=target_selection,
+            environment_doc=environment_doc,
+            execution_plan_path=execution_plan_path,
+        )
+    if access_method == "ssh":
+        return execute_ssh_live_apply(
+            customer_name=customer_name,
+            package_dir=package_dir,
+            bundle_dir=bundle_dir,
+            deploy_dir=deploy_dir,
+            target_selection=target_selection,
+            environment_doc=environment_doc,
+            execution_plan_path=execution_plan_path,
+        )
+    raise ValueError(f"approved live apply is not implemented for access method {access_method or 'unknown'}")
