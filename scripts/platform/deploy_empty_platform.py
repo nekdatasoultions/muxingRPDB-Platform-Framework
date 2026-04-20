@@ -222,7 +222,7 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
                 "sudo ip addr",
                 "sudo ip rule",
                 "sudo ip route show table all",
-                "sudo iptables-save",
+                "sudo nft list ruleset",
             ],
         },
         {
