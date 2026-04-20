@@ -2572,6 +2572,74 @@ print(
         raise SystemExit("runtime nftables apply must replace the shared classifier table before loading")
     if 'sh(["nft", "delete", "table", "ip"' not in runtime_nftables_text:
         raise SystemExit("runtime nftables apply must replace the shared NAT table before loading")
+    nft_nat_render_contract = _run_python_json(
+        textwrap.dedent(
+            """
+            import json
+            import sys
+            from muxerlib.nftables import build_passthrough_nft_model, render_passthrough_nft_script
+
+            module = {
+                "name": "contract-nat-t-customer",
+                "id": 4,
+                "peer_ip": "203.0.113.4/32",
+                "backend_underlay_ip": "172.31.40.222",
+                "protocols": {
+                    "udp500": True,
+                    "udp4500": True,
+                    "esp50": True,
+                    "force_rewrite_4500_to_500": False,
+                },
+                "headend_egress_sources": ["172.31.40.222"],
+            }
+            global_cfg = {
+                "public_ip": "23.20.31.151",
+                "interfaces": {
+                    "public_if": "ens34",
+                    "public_private_ip": "172.31.33.150",
+                },
+                "firewall_policy": {
+                    "default_drop_ipsec_to_public_ip": True,
+                    "use_nat_rewrite": True,
+                },
+                "allocation": {
+                    "base_mark": "0x2000",
+                },
+                "nftables": {
+                    "pass_through": {
+                        "classification_backend": "nftables",
+                        "translation_backend": "nftables",
+                        "bridge_backend": "nftables",
+                        "state_root": "/tmp/rpdb-verify-nft",
+                        "table_name": "muxer_passthrough",
+                        "nat_table_name": "muxer_passthrough_nat",
+                    },
+                },
+            }
+            model = build_passthrough_nft_model(
+                [module],
+                global_cfg,
+                render_mode="nftables-live-pass-through",
+            )
+            script = render_passthrough_nft_script(model)
+            checks = {
+                "dnat_uses_address_map": "dnat to ip saddr map @udp500_dnat" in script,
+                "snat_uses_concat_address_map": "snat to ip saddr . ip daddr map @udp500_snat" in script,
+                "dnat_map_type_is_address": "type ipv4_addr : ipv4_addr" in script,
+                "snat_map_type_is_concat_address": "type ipv4_addr . ipv4_addr : ipv4_addr" in script,
+                "no_verdict_nat_maps": "type ipv4_addr : verdict" not in script,
+                "no_dnat_statements_inside_map": ": dnat to" not in script,
+                "no_snat_statements_inside_map": ": snat to" not in script,
+                "script_lines": len(script.splitlines()),
+            }
+            sys.stdout.write(json.dumps(checks))
+            """
+        ),
+        pythonpath=RUNTIME_SRC,
+    )
+    for check_name, passed in nft_nat_render_contract.items():
+        if check_name != "script_lines" and not passed:
+            raise SystemExit(f"runtime nftables NAT render contract failed: {check_name}")
     record_step(
         "muxer_runtime_customer_apply_gate",
         {
@@ -2579,6 +2647,7 @@ print(
             "muxer_remove_invokes_runtime": True,
             "module_root_matches_runtime_inventory": True,
             "shared_nftables_tables_replaced": True,
+            "nft_nat_render_contract": nft_nat_render_contract,
         },
     )
 

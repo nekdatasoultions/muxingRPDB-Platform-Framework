@@ -424,6 +424,36 @@ def _render_map_block(name: str, type_name: str, elements: Dict[str, str]) -> Li
     ]
 
 
+def _nat_statement_target(statement: str, prefix: str) -> str:
+    raw = str(statement or "").strip()
+    if raw.startswith(prefix):
+        raw = raw[len(prefix) :].strip()
+    return raw
+
+
+def _address_nat_map(elements: Dict[str, str], prefix: str) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+    for key, value in elements.items():
+        target = _nat_statement_target(value, prefix)
+        if ":" in target:
+            continue
+        result[key] = target
+    return result
+
+
+def _complex_nat_items(elements: Dict[str, str], prefix: str) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+    for key, value in elements.items():
+        target = _nat_statement_target(value, prefix)
+        if ":" in target:
+            result[key] = target
+    return result
+
+
+def _concat_key_parts(key: str) -> List[str]:
+    return [part.strip() for part in str(key).split(".")]
+
+
 def _queue_statement(queue_num: Any, queue_bypass: Any) -> str:
     statement = f"queue num {int(queue_num)}"
     if bool(queue_bypass):
@@ -571,54 +601,30 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
         translation_table = (translation.get("nat_table") or {})
         translation_maps = (translation.get("maps") or {})
         if translation_table:
+            udp500_dnat_map = _address_nat_map(translation_maps.get("udp500_dnat") or {}, "dnat to ")
+            udp4500_dnat_map = _address_nat_map(translation_maps.get("udp4500_dnat") or {}, "dnat to ")
+            udp4500_force500_dnat_direct = _complex_nat_items(
+                translation_maps.get("udp4500_force500_dnat") or {}, "dnat to "
+            )
+            esp_dnat_map = _address_nat_map(translation_maps.get("esp_dnat") or {}, "dnat to ")
+            udp500_snat_map = _address_nat_map(translation_maps.get("udp500_snat") or {}, "snat to ")
+            udp500_force4500_snat_direct = _complex_nat_items(
+                translation_maps.get("udp500_force4500_snat") or {}, "snat to "
+            )
+            udp4500_snat_map = _address_nat_map(translation_maps.get("udp4500_snat") or {}, "snat to ")
+            udp4500_force4500_snat_direct = _complex_nat_items(
+                translation_maps.get("udp4500_force4500_snat") or {}, "snat to "
+            )
+            esp_snat_map = _address_nat_map(translation_maps.get("esp_snat") or {}, "snat to ")
             lines.append("")
             lines.extend([f"table {translation_table['family']} {translation_table['name']} {{"])
             lines.extend(_render_set_block("public_destinations", "ipv4_addr", translation.get("public_destinations") or []))
-            lines.extend(_render_map_block("udp500_dnat", "ipv4_addr : verdict", translation_maps.get("udp500_dnat") or {}))
-            lines.extend(_render_map_block("udp4500_dnat", "ipv4_addr : verdict", translation_maps.get("udp4500_dnat") or {}))
-            lines.extend(
-                _render_map_block(
-                    "udp4500_force500_dnat",
-                    "ipv4_addr : verdict",
-                    translation_maps.get("udp4500_force500_dnat") or {},
-                )
-            )
-            lines.extend(_render_map_block("esp_dnat", "ipv4_addr : verdict", translation_maps.get("esp_dnat") or {}))
-            lines.extend(
-                _render_map_block(
-                    "udp500_snat",
-                    "ipv4_addr . ipv4_addr : verdict",
-                    translation_maps.get("udp500_snat") or {},
-                )
-            )
-            lines.extend(
-                _render_map_block(
-                    "udp500_force4500_snat",
-                    "ipv4_addr . ipv4_addr : verdict",
-                    translation_maps.get("udp500_force4500_snat") or {},
-                )
-            )
-            lines.extend(
-                _render_map_block(
-                    "udp4500_snat",
-                    "ipv4_addr . ipv4_addr : verdict",
-                    translation_maps.get("udp4500_snat") or {},
-                )
-            )
-            lines.extend(
-                _render_map_block(
-                    "udp4500_force4500_snat",
-                    "ipv4_addr . ipv4_addr : verdict",
-                    translation_maps.get("udp4500_force4500_snat") or {},
-                )
-            )
-            lines.extend(
-                _render_map_block(
-                    "esp_snat",
-                    "ipv4_addr . ipv4_addr : verdict",
-                    translation_maps.get("esp_snat") or {},
-                )
-            )
+            lines.extend(_render_map_block("udp500_dnat", "ipv4_addr : ipv4_addr", udp500_dnat_map))
+            lines.extend(_render_map_block("udp4500_dnat", "ipv4_addr : ipv4_addr", udp4500_dnat_map))
+            lines.extend(_render_map_block("esp_dnat", "ipv4_addr : ipv4_addr", esp_dnat_map))
+            lines.extend(_render_map_block("udp500_snat", "ipv4_addr . ipv4_addr : ipv4_addr", udp500_snat_map))
+            lines.extend(_render_map_block("udp4500_snat", "ipv4_addr . ipv4_addr : ipv4_addr", udp4500_snat_map))
+            lines.extend(_render_map_block("esp_snat", "ipv4_addr . ipv4_addr : ipv4_addr", esp_snat_map))
 
             lines.extend(
                 [
@@ -626,21 +632,22 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
                     "    type nat hook prerouting priority dstnat; policy accept;",
                 ]
             )
-            if translation_maps.get("udp500_dnat"):
+            if udp500_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 ip saddr vmap @udp500_dnat'
+                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 '
+                    "dnat to ip saddr map @udp500_dnat"
                 )
-            if translation_maps.get("udp4500_dnat"):
+            if udp4500_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 ip saddr vmap @udp4500_dnat'
+                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 '
+                    "dnat to ip saddr map @udp4500_dnat"
                 )
-            if translation_maps.get("udp4500_force500_dnat"):
+            for peer, target in udp4500_force500_dnat_direct.items():
+                lines.append(f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 ip saddr {peer} dnat to {target}')
+            if esp_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 ip saddr vmap @udp4500_force500_dnat'
-                )
-            if translation_maps.get("esp_dnat"):
-                lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp ip saddr vmap @esp_dnat'
+                    f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp '
+                    "dnat to ip saddr map @esp_dnat"
                 )
             lines.append("  }")
 
@@ -650,20 +657,20 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
                     "    type nat hook postrouting priority srcnat; policy accept;",
                 ]
             )
-            if translation_maps.get("udp500_snat"):
-                lines.append(f'    oifname "{public_if}" udp sport 500 ip saddr . ip daddr vmap @udp500_snat')
-            if translation_maps.get("udp500_force4500_snat"):
-                lines.append(
-                    f'    oifname "{public_if}" udp sport 500 ip saddr . ip daddr vmap @udp500_force4500_snat'
-                )
-            if translation_maps.get("udp4500_snat"):
-                lines.append(f'    oifname "{public_if}" udp sport 4500 ip saddr . ip daddr vmap @udp4500_snat')
-            if translation_maps.get("udp4500_force4500_snat"):
-                lines.append(
-                    f'    oifname "{public_if}" udp sport 4500 ip saddr . ip daddr vmap @udp4500_force4500_snat'
-                )
-            if translation_maps.get("esp_snat"):
-                lines.append(f'    oifname "{public_if}" ip protocol esp ip saddr . ip daddr vmap @esp_snat')
+            if udp500_snat_map:
+                lines.append(f'    oifname "{public_if}" udp sport 500 snat to ip saddr . ip daddr map @udp500_snat')
+            for key, target in udp500_force4500_snat_direct.items():
+                parts = _concat_key_parts(key)
+                if len(parts) == 2:
+                    lines.append(f'    oifname "{public_if}" udp sport 500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}')
+            if udp4500_snat_map:
+                lines.append(f'    oifname "{public_if}" udp sport 4500 snat to ip saddr . ip daddr map @udp4500_snat')
+            for key, target in udp4500_force4500_snat_direct.items():
+                parts = _concat_key_parts(key)
+                if len(parts) == 2:
+                    lines.append(f'    oifname "{public_if}" udp sport 4500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}')
+            if esp_snat_map:
+                lines.append(f'    oifname "{public_if}" ip protocol esp snat to ip saddr . ip daddr map @esp_snat')
             lines.append("  }")
             lines.append("}")
 
