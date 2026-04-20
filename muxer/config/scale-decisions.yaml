@@ -70,10 +70,15 @@ headend_post_ipsec_nat:
     - netmap_one_to_one_translation
     - explicit_host_map_translation
     - route_and_mark_carry_through
+  prohibited_paths:
+    - iptables_restore
+    - muxer3_runtime_or_deploy_fallback
+    - legacy_headend_iptables_activation
   fallback_policy:
-    iptables_allowed: false_by_default
-    requires_repo_proof: true
-    requires_problem_statement: true
+    iptables_allowed: false
+    iptables_restore_allowed: false
+    muxer3_allowed: false
+    requires_stop_and_redesign: true
   exclusions:
     - customers_without_post_ipsec_nat
   baseline_mapping:

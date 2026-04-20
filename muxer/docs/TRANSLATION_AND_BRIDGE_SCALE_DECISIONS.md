@@ -50,19 +50,20 @@ The corrected chosen strategies are:
 
 This is an `nftables`-first strategy.
 
-Earlier planning allowed `iptables-restore` as the head-end default because it
-would have reduced command fan-out while preserving current `NETMAP` and
-explicit host-map semantics. That was only a transitional compatibility idea,
-not the final RPDB scale direction.
+Earlier planning allowed `iptables-restore` as a possible head-end shortcut
+because it would have reduced command fan-out while preserving current `NETMAP`
+and explicit host-map semantics. That idea is now rejected as non-viable for
+the RPDB scale design.
 
 The corrected rule is:
 
 - `nftables` where the muxer benefits from shared maps and batch apply
 - a worker-manifest model where userspace bridging is the real stateful object
-- `nftables` for head-end post-IPsec NAT unless repo tests prove a required
-  behavior cannot be represented safely
-- `iptables` only as a documented fallback exception, never as the default
-  scale path
+- `nftables` for head-end post-IPsec NAT
+- if repo tests prove a required behavior cannot be represented safely in
+  `nftables`, stop and write a new problem statement and design decision
+- `iptables-restore` is not a viable fallback
+- `MUXER3` is not a viable implementation fallback
 
 ## 1. Muxer Translation Decision
 
@@ -266,7 +267,8 @@ Implementation must preserve:
 - route and mark carry-through already modeled in the bundle
 
 If any of those semantics cannot be represented in `nftables`, the work must
-stop and write a problem statement before accepting an `iptables` fallback.
+stop and write a problem statement before changing the design. Do not accept an
+`iptables-restore` fallback.
 
 ### Repo-Only Boundary
 

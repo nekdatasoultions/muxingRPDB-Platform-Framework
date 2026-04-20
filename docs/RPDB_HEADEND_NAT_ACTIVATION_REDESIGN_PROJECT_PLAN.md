@@ -7,11 +7,16 @@ defaulted back to `iptables-restore`.
 
 The corrected direction is:
 
-- `nftables` is the primary backend for head-end post-IPsec NAT
-- `iptables` is not the default scale path
-- `iptables` can only remain as a documented fallback if a required behavior
-  cannot be represented safely in `nftables` and that limitation is proven in
-  repo tests
+- `nftables` is the primary and only accepted backend for head-end post-IPsec
+  NAT in the RPDB scale design
+- `iptables-restore` is not a viable fallback
+- `MUXER3` is not a viable implementation fallback
+- if a required behavior cannot be represented safely in `nftables`, the work
+  must stop for a written problem statement and new design decision instead of
+  falling back to `iptables-restore`
+
+Plain guardrail: iptables-restore is not a viable fallback.
+Plain guardrail: MUXER3 is not a viable implementation fallback.
 
 The current explicit scale gate is honest and repeatable:
 
@@ -32,13 +37,16 @@ semantics.
 
 - Stay inside this repository.
 - Do not modify `MUXER3`.
+- Do not use `MUXER3` as a runtime, implementation, or deployment fallback.
 - Do not touch AWS.
 - Do not touch live or staging nodes.
 - Do not deploy code.
 - Do not apply a customer.
 - Do not claim scale readiness until the explicit scale report turns green for
   the accepted target state.
-- Do not reintroduce `iptables` as the default implementation path.
+- Do not reintroduce `iptables-restore` as an implementation or fallback path.
+- Treat `docs/RPDB_CORE_ENGINEERING_GUARDRAILS.md` as the standing guardrail
+  contract for this workstream.
 
 ## Problem Statement
 
@@ -72,16 +80,18 @@ The primary technologies for this fix are:
 - repo-only staged apply/remove validation
 - the existing scale harness and explicit scale report
 
-The allowed fallback technology is:
+The disallowed implementation and fallback paths are:
 
-- `iptables` only as a documented exception path
+- `iptables-restore`
+- `MUXER3`
+- the legacy head-end `iptables` activation model
 
-Fallback is allowed only if:
+If `nftables` cannot satisfy a required behavior:
 
-- the required NAT behavior cannot be represented in `nftables`
-- the limitation is proven with a repo test
-- the customer behavior impact is documented
-- the explicit scale report still has an accepted target state
+- stop the implementation
+- write a problem statement
+- create a new design decision for review
+- do not add an `iptables-restore` fallback
 
 ## Target End State
 
@@ -116,7 +126,8 @@ Work:
 Gate:
 
 - docs state `nftables` is the primary backend
-- docs state `iptables` is fallback only
+- docs state `iptables-restore` is prohibited, not a fallback
+- docs state `MUXER3` is prohibited as an implementation or deployment fallback
 - explicit scale report still records the current blocker honestly
 - no AWS, nodes, customers, or `MUXER3` are touched
 
@@ -176,7 +187,8 @@ Gate:
 - the `nftables` contract is specific enough to implement without guessing
 - netmap and explicit host-map behavior are both represented
 - unrelated customers remain out of scope for one-customer remove
-- no default `iptables` activation path is accepted
+- no `iptables-restore` activation path is accepted
+- no `MUXER3` dependency is accepted
 
 ## Phase 3. Prove nftables Semantic Compatibility Repo-Only
 
@@ -195,12 +207,12 @@ Work:
 - render expected `nftables` state for each fixture
 - validate that the rendered state preserves customer intent
 - if a semantic cannot be represented, write a problem statement before any
-  fallback is allowed
+  implementation direction changes
 
 Gate:
 
 - all required NAT semantics have passing repo fixtures
-- or a documented exception exists with evidence and a new approval gate
+- or the work stops with a documented problem statement and new design gate
 
 ## Phase 4. Implement nftables Artifact Rendering
 
@@ -213,8 +225,7 @@ Work:
 
 - add `nftables` rendering for `netmap`
 - add `nftables` rendering for `explicit_host_map`
-- keep the old `iptables` snippet only as a compatibility/reference artifact
-  if needed
+- do not keep or rely on `iptables-restore` as a compatibility fallback
 - add a structured activation manifest with:
   - backend type
   - table name
@@ -254,7 +265,8 @@ Gate:
 - staged remove removes the selected customer artifacts only
 - rollback artifacts remain reviewable
 - unrelated staged customers remain untouched
-- repo-modeled apply/remove does not default back to `iptables`
+- repo-modeled apply/remove does not default back to `iptables-restore`
+- repo-modeled apply/remove has no `MUXER3` dependency
 
 ## Phase 6. Update The Scale Harness
 
@@ -328,7 +340,8 @@ This project is complete when:
 - current baseline is committed
 - head-end post-IPsec NAT activation is implemented repo-only through
   `nftables`
-- `iptables` is not the default implementation path
+- `iptables-restore` is not present as an implementation or fallback path
+- `MUXER3` is not present as an implementation or deployment fallback path
 - `nat_t_netmap` no longer fails the explicit scale gate for the accepted target
   state
 - full repo verification passes twice

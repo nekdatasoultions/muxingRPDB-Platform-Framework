@@ -1809,9 +1809,29 @@ def main() -> int:
     if headend_decision != "nftables_nat_artifacts":
         raise SystemExit("Scale decision manifest head-end NAT strategy is missing or incorrect")
 
+    headend_manifest = scale_decision_manifest.get("headend_post_ipsec_nat") or {}
+    prohibited_headend_paths = set(headend_manifest.get("prohibited_paths") or [])
+    required_prohibited_headend_paths = {
+        "iptables_restore",
+        "muxer3_runtime_or_deploy_fallback",
+        "legacy_headend_iptables_activation",
+    }
+    if not required_prohibited_headend_paths.issubset(prohibited_headend_paths):
+        missing_paths = sorted(required_prohibited_headend_paths - prohibited_headend_paths)
+        raise SystemExit(f"Scale decision manifest is missing prohibited head-end paths: {missing_paths}")
+    fallback_policy = headend_manifest.get("fallback_policy") or {}
+    if fallback_policy.get("iptables_allowed") is not False:
+        raise SystemExit("Scale decision manifest must prohibit iptables as a head-end fallback")
+    if fallback_policy.get("iptables_restore_allowed") is not False:
+        raise SystemExit("Scale decision manifest must prohibit iptables-restore as a head-end fallback")
+    if fallback_policy.get("muxer3_allowed") is not False:
+        raise SystemExit("Scale decision manifest must prohibit MUXER3 as a head-end fallback")
+    if fallback_policy.get("requires_stop_and_redesign") is not True:
+        raise SystemExit("Scale decision manifest must require stop-and-redesign instead of fallback")
+
     translation_baseline = (scale_decision_manifest.get("translation") or {}).get("baseline_mapping") or {}
     bridge_baseline = (scale_decision_manifest.get("nfqueue_bridge") or {}).get("baseline_mapping") or {}
-    headend_baseline = (scale_decision_manifest.get("headend_post_ipsec_nat") or {}).get("baseline_mapping") or {}
+    headend_baseline = headend_manifest.get("baseline_mapping") or {}
     if int(translation_baseline.get("strict_non_nat_20000_legacy_rules") or 0) != int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"]):
         raise SystemExit("Scale decision manifest strict non-NAT translation baseline is out of sync with the Phase 2 compatibility baseline")
     if int(translation_baseline.get("nat_t_20000_legacy_rules") or 0) != int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"]):
@@ -1842,6 +1862,7 @@ def main() -> int:
             "translation_strategy": translation_decision,
             "nfqueue_bridge_strategy": bridge_decision,
             "headend_nat_strategy": headend_decision,
+            "headend_nat_prohibited_paths": sorted(prohibited_headend_paths),
             "translation_baseline_source": "phase2_compatibility_baseline",
             "bridge_baseline_source": "phase2_compatibility_baseline",
         },
