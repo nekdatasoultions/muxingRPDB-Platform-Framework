@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument("--observation", help="Optional NAT-T observation JSON/YAML")
     parser.add_argument("--out-dir", help="Output directory for execution plan and package")
     parser.add_argument("--dry-run", action="store_true", help="Dry-run only; this is the Phase 2 default")
-    parser.add_argument("--approve", action="store_true", help="Reserved for a later live-apply phase")
+    parser.add_argument("--approve", action="store_true", help="Execute the approved live apply after all gates pass")
     parser.add_argument("--json", action="store_true", help="Print the execution plan as JSON")
     args = parser.parse_args()
 
