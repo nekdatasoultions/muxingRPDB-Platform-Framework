@@ -172,6 +172,16 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
 
     if "connections {" not in swanctl_text or "secrets {" not in swanctl_text:
         report["errors"].append("swanctl-connection.conf is missing required connections/secrets blocks")
+    expected_secret_section = f"  ike-{bundle.customer_name}-psk {{"
+    unsupported_secret_section = f"  {bundle.customer_name}-psk {{"
+    if expected_secret_section not in swanctl_text:
+        report["errors"].append(
+            "swanctl-connection.conf must render IKE PSK secrets under secrets.ike<suffix>"
+        )
+    if unsupported_secret_section in swanctl_text:
+        report["errors"].append(
+            "swanctl-connection.conf renders an unsupported non-ike PSK secret section"
+        )
 
     route_lines = _executable_lines(route_text)
     nft_apply_lines = _executable_lines(nft_apply_text)

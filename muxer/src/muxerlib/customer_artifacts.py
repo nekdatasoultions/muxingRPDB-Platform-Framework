@@ -294,6 +294,7 @@ def _render_swanctl_connection(
     ipsec: Dict[str, Any],
 ) -> str:
     customer_name = str(customer.get("name") or "")
+    secret_name = f"ike-{customer_name}-psk"
     remote_id = str(ipsec.get("remote_id") or peer.get("remote_id") or peer.get("public_ip") or "")
     local_id = str(ipsec.get("local_id") or "")
     ike_proposals = _render_ike_proposals(ipsec)
@@ -352,7 +353,7 @@ def _render_swanctl_connection(
             "}",
             "",
             "secrets {",
-            f"  {customer_name}-psk {{",
+            f"  {secret_name} {{",
             f"    id-1 = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
             f"    id-2 = {remote_id}",
             f"    secret = {_placeholder('PSK_FROM_SECRET_REF')}",
