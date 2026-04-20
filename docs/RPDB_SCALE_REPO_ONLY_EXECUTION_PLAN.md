@@ -496,9 +496,9 @@ Current status:
 
 - complete
 - the repo now contains a truthful pre-deploy review package and explicit scale
-  report package
-- the current pre-deploy recommendation is `no-go` until the `nat_t_netmap`
-  head-end NAT activation gap is reduced or the accepted architecture changes
+  report package for the corrected head-end NAT activation path
+- the current repo-only scale recommendation is `passed, still gated before
+  live deployment`
 
 ## Stop Point
 
@@ -510,8 +510,7 @@ The current stop result is:
 - no node rollout
 - no customer apply
 - no `MUXER3` changes
-- no-go for deployment while the explicit scale report still fails the
-  `nat_t_netmap` head-end NAT gate
+- no live deployment until a separate live-node validation plan is approved
 
 Do not:
 
@@ -524,12 +523,11 @@ At that point the repo should be review-ready, but still not deployed.
 
 ## Immediate Next Step
 
-There is no further repo-only execution step in this plan without changing the
-accepted scale target.
+There is no further repo-only execution step in this plan before live-node
+validation planning.
 
 If work resumes after this stop point, the next engineering task is:
 
-- redesign or batch the head-end post-IPsec NAT activation path for
-  `nat_t_netmap`
-- rerun the explicit scale gate
-- only reopen deployment review if that gate turns green
+- prepare a live-node validation plan for the new RPDB muxer and VPN head ends
+- validate nftables syntax and rollback behavior on non-customer test artifacts
+- only then reopen customer deployment review

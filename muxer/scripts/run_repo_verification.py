@@ -1608,8 +1608,15 @@ def main() -> int:
         natd_bridge_100["nftables_preview"]["bridge_manifest_entry_count"]
     ):
         raise SystemExit("Scale baseline natd bridge manifest growth did not scale with customer count")
-    if int(netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"]) <= 0:
+    netmap_headend_runtime = netmap_20000["headend_post_ipsec_nat_runtime"]
+    if netmap_headend_runtime.get("activation_backend") != "nftables":
+        raise SystemExit("Scale baseline post-IPsec NAT activation backend must be nftables")
+    if int(netmap_headend_runtime["apply_command_count"]) <= 0:
         raise SystemExit("Scale baseline did not produce post-IPsec NAT command growth for the netmap profile")
+    if int(netmap_headend_runtime.get("legacy_apply_command_count") or 0) <= int(
+        netmap_headend_runtime["apply_command_count"]
+    ):
+        raise SystemExit("Scale baseline did not preserve the legacy head-end NAT command comparison")
     mixed_mix = mixed_20000.get("customer_mix") or {}
     if int(mixed_mix.get("strict_non_nat") or 0) != 10000 or int(mixed_mix.get("nat_t") or 0) != 10000:
         raise SystemExit("Scale baseline mixed profile did not produce the expected 50/50 customer mix")
@@ -1633,7 +1640,9 @@ def main() -> int:
             "natd_bridge_20000_manifest_entries": natd_bridge_20000["nftables_preview"]["bridge_manifest_entry_count"],
             "nat_t_20000_nft_set_entries": nat_20000["nftables_preview"]["set_entry_count"],
             "nat_t_20000_nft_map_entries": nat_20000["nftables_preview"]["map_entry_count"],
-            "nat_t_netmap_20000_headend_apply_commands": netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"],
+            "nat_t_netmap_20000_headend_activation_backend": netmap_headend_runtime["activation_backend"],
+            "nat_t_netmap_20000_headend_apply_commands": netmap_headend_runtime["apply_command_count"],
+            "nat_t_netmap_20000_legacy_headend_apply_commands": netmap_headend_runtime["legacy_apply_command_count"],
         },
     )
 
@@ -1844,8 +1853,18 @@ def main() -> int:
         phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
     ):
         raise SystemExit("Scale decision manifest natd bridge baseline is out of sync with the Phase 2 compatibility baseline")
-    if int(headend_baseline.get("nat_t_netmap_20000_headend_apply_commands") or 0) != int(netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"]):
+    if int(headend_baseline.get("nat_t_netmap_20000_headend_apply_commands") or 0) != int(
+        netmap_headend_runtime["apply_command_count"]
+    ):
         raise SystemExit("Scale decision manifest head-end NAT baseline is out of sync with the measured scale harness")
+    if int(headend_baseline.get("legacy_nat_t_netmap_20000_headend_apply_commands") or 0) != int(
+        netmap_headend_runtime.get("legacy_apply_command_count") or 0
+    ):
+        raise SystemExit("Scale decision manifest legacy head-end NAT apply baseline is out of sync")
+    if int(headend_baseline.get("legacy_nat_t_netmap_20000_headend_rollback_commands") or 0) != int(
+        netmap_headend_runtime.get("legacy_rollback_command_count") or 0
+    ):
+        raise SystemExit("Scale decision manifest legacy head-end NAT rollback baseline is out of sync")
 
     for required_heading in (
         "## 1. Muxer Translation Decision",

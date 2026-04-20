@@ -174,22 +174,26 @@ eliminating fleet-scan behavior from the runtime.
 This matters because one of the original goals was to stop treating normal
 operations as full-table operations.
 
-### Gap 5. Head-end post-IPsec NAT still relies on `iptables` snippets
+### Gap 5. Head-end post-IPsec NAT relied on `iptables` snippets
 
-This is another place where the repo still depends on `iptables`.
+This gap has been corrected in repo-only code.
 
-The head-end orchestration model still renders:
+The head-end orchestration model now renders:
 
-- `post-ipsec-nat/iptables-snippet.txt`
+- `post-ipsec-nat/nftables.apply.nft`
+- `post-ipsec-nat/nftables.remove.nft`
+- `post-ipsec-nat/nftables-state.json`
+- `post-ipsec-nat/activation-manifest.json`
 
-for:
+for customer-scoped:
 
-- `NETMAP`
-- `DNAT`
-- `SNAT`
+- one-to-one translated subnet maps
+- explicit host maps
+- route and mark carry-through metadata
 
-So even outside the muxer dataplane, the current live model still includes
-customer-scoped `iptables` command generation.
+The repo still stops before live deployment, but the active bundle and staged
+head-end path no longer uses a head-end `iptables` snippet as the post-IPsec NAT
+activation model.
 
 ### Gap 6. The repo now has real scale gates, and they still show one open large-scale blocker
 
@@ -207,17 +211,20 @@ Those artifacts now prove something more useful than a generic claim:
 
 - muxer-side classification, translation, and bridge behavior currently pass the
   explicit repo thresholds
-- translated NAT-T customers using `nat_t_netmap` still fail the explicit scale
-  gate because head-end post-IPsec NAT activation command growth remains linear
+- translated NAT-T customers using `nat_t_netmap` now pass the affected
+  explicit head-end post-IPsec NAT activation gate in the targeted repo-only
+  scale run
 
-So the honest statement is still not "RPDB is proven for 20k."
+So the honest statement is still not "RPDB is ready to deploy."
 
 The honest statement is:
 
 - RPDB has a much better control plane
 - RPDB now has explicit scale evidence
-- RPDB still does not yet have a fully proven large-scale end-to-end dataplane
-  backend because the head-end NAT activation path remains the open blocker
+- the head-end NAT activation path is no longer the measured repo-only blocker
+  for `nat_t_netmap`
+- RPDB still requires full repo verification and then separate live-node
+  validation before any customer deployment
 
 ## Why Earlier Validation Could Still Pass
 

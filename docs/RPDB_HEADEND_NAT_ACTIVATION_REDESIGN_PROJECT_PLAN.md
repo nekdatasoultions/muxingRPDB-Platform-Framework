@@ -18,7 +18,7 @@ The corrected direction is:
 Plain guardrail: iptables-restore is not a viable fallback.
 Plain guardrail: MUXER3 is not a viable implementation fallback.
 
-The current explicit scale gate is honest and repeatable:
+The pre-fix explicit scale gate was honest and repeatable:
 
 - muxer-side classification, translation, and bridge checks pass the current
   repo-only thresholds
@@ -32,6 +32,33 @@ The current explicit scale gate is honest and repeatable:
 The goal of this project is to make the translated NAT-T head-end activation
 path scale through batched `nftables` artifacts, while preserving customer NAT
 semantics.
+
+## Repo-Only Execution Result
+
+The first repo-only implementation pass now renders head-end post-IPsec NAT
+through customer-scoped `nftables` artifacts:
+
+- `post-ipsec-nat/nftables.apply.nft`
+- `post-ipsec-nat/nftables.remove.nft`
+- `post-ipsec-nat/nftables-state.json`
+- `post-ipsec-nat/activation-manifest.json`
+
+The affected `nat_t_netmap` scale gate now measures:
+
+- `1000` customers: `2000` apply commands, `1000` rollback commands, max apply
+  per customer `2`
+- `5000` customers: `10000` apply commands, `5000` rollback commands, max
+  apply per customer `2`
+- `10000` customers: `20000` apply commands, `10000` rollback commands, max
+  apply per customer `2`
+- `20000` customers: `40000` apply commands, `20000` rollback commands, max
+  apply per customer `2`
+
+The old linear command shape is preserved only as comparison evidence:
+
+- legacy `20000` customer apply commands: `80000`
+- legacy `20000` customer rollback commands: `60000`
+- legacy max apply commands per customer: `4`
 
 ## Guardrails
 
@@ -140,7 +167,7 @@ Goal:
 Work:
 
 - inspect customer artifact rendering for:
-  - `post-ipsec-nat/iptables-snippet.txt`
+  - historical `post-ipsec-nat/iptables-snippet.txt`
   - structured NAT intent files
   - apply and remove command manifests
 - inspect head-end staged apply and remove scripts
@@ -161,6 +188,18 @@ Gate:
 
 - repo doc or code comments identify the current command source precisely
 - no implementation starts until the current shape is understood
+
+Inventory result:
+
+- artifact rendering previously produced the head-end activation from
+  `muxer/src/muxerlib/customer_artifacts.py`
+- staged install previously consumed that text through
+  `scripts/deployment/headend_customer_lib.py`
+- scale measurement counted
+  `muxer/runtime-package/src/muxerlib/dataplane.py::derive_post_ipsec_nat`
+  `apply_commands` and `rollback_commands`
+- the pre-fix `nat_t_netmap` model produced `4` apply commands and `3`
+  rollback commands per customer
 
 ## Phase 2. Define The nftables NAT Contract
 

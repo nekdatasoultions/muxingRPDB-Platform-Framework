@@ -18,7 +18,10 @@ HEADEND_REQUIRED_FILES = (
     "routing/routing-intent.json",
     "routing/ip-route.commands.txt",
     "post-ipsec-nat/post-ipsec-nat-intent.json",
-    "post-ipsec-nat/iptables-snippet.txt",
+    "post-ipsec-nat/nftables.apply.nft",
+    "post-ipsec-nat/nftables.remove.nft",
+    "post-ipsec-nat/nftables-state.json",
+    "post-ipsec-nat/activation-manifest.json",
 )
 
 HEADEND_STATE_ROOT = Path("var") / "lib" / "rpdb-headend" / "customers"
@@ -139,14 +142,18 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
 
     swanctl_text = bundle.text_payloads["ipsec/swanctl-connection.conf"]
     route_text = bundle.text_payloads["routing/ip-route.commands.txt"]
-    nat_text = bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"]
+    nft_apply_text = bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]
+    nft_remove_text = bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]
     ipsec_intent = bundle.json_payloads["ipsec/ipsec-intent.json"]
     nat_intent = bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"]
+    activation_manifest = bundle.json_payloads["post-ipsec-nat/activation-manifest.json"]
+    nft_state = bundle.json_payloads["post-ipsec-nat/nftables-state.json"]
 
     text_checks = {
         "ipsec/swanctl-connection.conf": swanctl_text,
         "routing/ip-route.commands.txt": route_text,
-        "post-ipsec-nat/iptables-snippet.txt": nat_text,
+        "post-ipsec-nat/nftables.apply.nft": nft_apply_text,
+        "post-ipsec-nat/nftables.remove.nft": nft_remove_text,
     }
 
     for relative_name, payload in text_checks.items():
@@ -167,12 +174,16 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         report["errors"].append("swanctl-connection.conf is missing required connections/secrets blocks")
 
     route_lines = _executable_lines(route_text)
-    nat_lines = _executable_lines(nat_text)
+    nft_apply_lines = _executable_lines(nft_apply_text)
+    nft_remove_lines = _executable_lines(nft_remove_text)
     report["details"]["route_command_count"] = len(route_lines)
-    report["details"]["post_ipsec_nat_command_count"] = len(nat_lines)
+    report["details"]["post_ipsec_nat_command_count"] = int(activation_manifest.get("apply_command_count") or 0)
+    report["details"]["post_ipsec_nat_rollback_command_count"] = int(activation_manifest.get("rollback_command_count") or 0)
     report["details"]["ipsec_ike_version"] = ipsec_intent.get("ike_version")
     report["details"]["post_ipsec_nat_mapping_strategy"] = nat_intent.get("mapping_strategy")
     report["details"]["post_ipsec_nat_command_model"] = nat_intent.get("rendered_command_model")
+    report["details"]["post_ipsec_nat_activation_backend"] = activation_manifest.get("backend")
+    report["details"]["post_ipsec_nat_table_name"] = activation_manifest.get("table_name")
 
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")
@@ -218,19 +229,23 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
                 )
 
     if bool(nat_intent.get("enabled")):
-        if not nat_lines:
+        if activation_manifest.get("backend") != "nftables" or nft_state.get("backend") != "nftables":
             report["errors"].append(
-                "post-IPsec NAT is enabled in the intent, but iptables-snippet.txt contains no executable commands"
+                "post-IPsec NAT must use nftables activation artifacts"
             )
-        command_text = "\n".join(nat_lines)
-        strategy = str(nat_intent.get("mapping_strategy") or "")
-        mode = str(nat_intent.get("mode") or "")
-        if strategy == "one_to_one" and "NETMAP" not in command_text:
-            report["errors"].append("one_to_one post-IPsec NAT requires NETMAP commands")
-        if strategy == "explicit_host_map" and ("DNAT" not in command_text or "SNAT" not in command_text):
-            report["errors"].append("explicit_host_map post-IPsec NAT requires DNAT and SNAT commands")
-        if mode == "netmap" and not strategy and "NETMAP" not in command_text:
-            report["errors"].append("legacy netmap post-IPsec NAT requires NETMAP commands")
+        if not nft_apply_lines:
+            report["errors"].append(
+                "post-IPsec NAT is enabled in the intent, but nftables.apply.nft contains no executable nftables state"
+            )
+        if not nft_remove_lines:
+            report["errors"].append(
+                "post-IPsec NAT is enabled in the intent, but nftables.remove.nft contains no executable nftables state"
+            )
+        nft_payload = "\n".join([*nft_apply_lines, *nft_remove_lines]).lower()
+        if "iptables" in nft_payload or "iptables-restore" in nft_payload:
+            report["errors"].append("post-IPsec NAT nftables artifacts must not contain iptables fallback commands")
+        if "dnat to" not in nft_payload or "snat to" not in nft_payload:
+            report["errors"].append("post-IPsec NAT nftables artifacts must include DNAT and SNAT statements")
 
     report["valid"] = not report["errors"]
     return report
@@ -247,7 +262,10 @@ def build_install_layout(headend_root: Path, customer_name: str) -> dict[str, Pa
         "route_commands": customer_root / "routing" / "ip-route.commands.txt",
         "route_apply_script": customer_root / "routing" / "apply-routes.sh",
         "route_remove_script": customer_root / "routing" / "remove-routes.sh",
-        "nat_snippet": customer_root / "post-ipsec-nat" / "iptables-snippet.txt",
+        "nft_apply": customer_root / "post-ipsec-nat" / "nftables.apply.nft",
+        "nft_remove": customer_root / "post-ipsec-nat" / "nftables.remove.nft",
+        "nft_state": customer_root / "post-ipsec-nat" / "nftables-state.json",
+        "activation_manifest": customer_root / "post-ipsec-nat" / "activation-manifest.json",
         "nat_apply_script": customer_root / "post-ipsec-nat" / "apply-post-ipsec-nat.sh",
         "nat_remove_script": customer_root / "post-ipsec-nat" / "remove-post-ipsec-nat.sh",
         "master_apply_script": customer_root / "apply-headend-customer.sh",
@@ -268,26 +286,33 @@ def _derive_route_remove_lines(route_text: str) -> list[str]:
     return removals
 
 
-def _derive_iptables_remove_lines(nat_text: str) -> list[str]:
-    removals: list[str] = []
-    for line in _executable_lines(nat_text):
-        if " -A " in line:
-            removals.append(line.replace(" -A ", " -D ", 1) + " || true")
-        elif " -I " in line:
-            removals.append(line.replace(" -I ", " -D ", 1) + " || true")
-        elif line.startswith("ip rule add "):
-            removals.append("ip rule del " + line.removeprefix("ip rule add ") + " || true")
-        elif line.startswith("ip route replace "):
-            removals.append("ip route del " + line.removeprefix("ip route replace ") + " || true")
-        elif line.startswith("ip route add "):
-            removals.append("ip route del " + line.removeprefix("ip route add ") + " || true")
-        else:
-            removals.append(f"# manual firewall cleanup required: {line}")
-    return removals
-
-
 def _render_shell_script(lines: list[str]) -> str:
     return "\n".join(["#!/usr/bin/env bash", "set -eu", *lines]) + "\n"
+
+
+def _render_nft_apply_script(enabled: bool) -> str:
+    if not enabled:
+        return _render_shell_script(["true"])
+    return _render_shell_script(
+        [
+            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'NFT_APPLY="${SCRIPT_DIR}/nftables.apply.nft"',
+            'nft -c -f "${NFT_APPLY}"',
+            'nft -f "${NFT_APPLY}"',
+        ]
+    )
+
+
+def _render_nft_remove_script(enabled: bool) -> str:
+    if not enabled:
+        return _render_shell_script(["true"])
+    return _render_shell_script(
+        [
+            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'NFT_REMOVE="${SCRIPT_DIR}/nftables.remove.nft"',
+            'nft -f "${NFT_REMOVE}" || true',
+        ]
+    )
 
 
 def _render_master_apply_script(layout: dict[str, Path], customer_name: str) -> str:
@@ -355,15 +380,18 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
 
     _write_text(layout["swanctl_conf"], bundle.text_payloads["ipsec/swanctl-connection.conf"])
     _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route.commands.txt"])
-    _write_text(layout["nat_snippet"], bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"])
+    _write_text(layout["nft_apply"], bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"])
+    _write_text(layout["nft_remove"], bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"])
+    _write_json(layout["nft_state"], bundle.json_payloads["post-ipsec-nat/nftables-state.json"])
+    _write_json(layout["activation_manifest"], bundle.json_payloads["post-ipsec-nat/activation-manifest.json"])
 
     route_remove_lines = _derive_route_remove_lines(bundle.text_payloads["routing/ip-route.commands.txt"])
-    nat_remove_lines = _derive_iptables_remove_lines(bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"])
+    nat_enabled = bool(bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"].get("enabled"))
 
     route_apply_script = _render_shell_script(_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"]) or ["true"])
     route_remove_script = _render_shell_script(route_remove_lines or ["true"])
-    nat_apply_script = _render_shell_script(_executable_lines(bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"]) or ["true"])
-    nat_remove_script = _render_shell_script(nat_remove_lines or ["true"])
+    nat_apply_script = _render_nft_apply_script(nat_enabled)
+    nat_remove_script = _render_nft_remove_script(nat_enabled)
 
     _write_text(layout["route_apply_script"], route_apply_script)
     _write_text(layout["route_remove_script"], route_remove_script)
@@ -383,7 +411,9 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         "swanctl_conf": str(layout["swanctl_conf"]),
         "artifacts_root": str(layout["artifacts_root"]),
         "route_command_count": len(_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"])),
-        "post_ipsec_nat_command_count": len(_executable_lines(bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"])),
+        "post_ipsec_nat_command_count": int(
+            bundle.json_payloads["post-ipsec-nat/activation-manifest.json"].get("apply_command_count") or 0
+        ),
         "paths": {name: str(path) for name, path in layout.items()},
     }
     _write_json(layout["state_json"], state)
@@ -414,7 +444,10 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
     for key in (
         "swanctl_conf",
         "route_commands",
-        "nat_snippet",
+        "nft_apply",
+        "nft_remove",
+        "nft_state",
+        "activation_manifest",
         "route_apply_script",
         "route_remove_script",
         "nat_apply_script",
@@ -436,10 +469,15 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
         if installed_route_text != bundle.text_payloads["routing/ip-route.commands.txt"]:
             report["errors"].append(f"installed route commands do not match bundle: {layout['route_commands']}")
 
-    if layout["nat_snippet"].exists():
-        installed_nat_text = layout["nat_snippet"].read_text(encoding="utf-8")
-        if installed_nat_text != bundle.text_payloads["post-ipsec-nat/iptables-snippet.txt"]:
-            report["errors"].append(f"installed NAT snippet does not match bundle: {layout['nat_snippet']}")
+    if layout["nft_apply"].exists():
+        installed_nft_apply = layout["nft_apply"].read_text(encoding="utf-8")
+        if installed_nft_apply != bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]:
+            report["errors"].append(f"installed nftables apply file does not match bundle: {layout['nft_apply']}")
+
+    if layout["nft_remove"].exists():
+        installed_nft_remove = layout["nft_remove"].read_text(encoding="utf-8")
+        if installed_nft_remove != bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]:
+            report["errors"].append(f"installed nftables remove file does not match bundle: {layout['nft_remove']}")
 
     if layout["state_json"].exists():
         state = _load_json(layout["state_json"])

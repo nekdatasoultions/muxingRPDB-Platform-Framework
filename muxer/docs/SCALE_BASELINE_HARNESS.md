@@ -154,14 +154,13 @@ The repo verification suite runs this harness and checks:
 
 - all default scenarios render successfully
 - the 20k scenarios exist
-- legacy rule growth is visible in the current backend
+- legacy rule growth remains visible only as comparison evidence
 - the current `nftables` classification backend reports lower 20k
   classification-layer rule growth than the forced legacy-iptables config
-- explicit translated NAT scenarios still grow head-end command counts
+- explicit translated NAT scenarios use nftables head-end activation units
 - the mixed profile stays 50/50
 - the explicit scale report covers every target count
-- the explicit scale report is generated twice and agrees on the failed
-  evaluation set
+- the explicit scale report is generated twice and agrees
 
 ## Current Honest Result
 
@@ -169,13 +168,14 @@ The current repo-only result is:
 
 - muxer-side classification, translation, and bridge metrics pass the current
   explicit thresholds
-- translated NAT-T customers using `nat_t_netmap` still fail the explicit
-  thresholds at `1000`, `5000`, `10000`, and `20000`
-- the failing layer is head-end post-IPsec NAT activation command growth, not
-  the muxer pass-through classification backend
+- translated NAT-T customers using `nat_t_netmap` pass the explicit thresholds
+  at `1000`, `5000`, `10000`, and `20000`
+- the head-end post-IPsec NAT activation path is now represented as nftables
+  batch activation units
 
-That means the harness is now doing its job correctly: it shows where the repo
-improved and where the remaining scale blocker still lives.
+That means the harness is now doing its job correctly: it shows the fixed
+head-end NAT activation shape while keeping legacy command growth visible for
+comparison.
 
 See:
 

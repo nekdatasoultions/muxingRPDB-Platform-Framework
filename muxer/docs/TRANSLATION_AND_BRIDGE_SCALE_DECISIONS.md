@@ -30,15 +30,22 @@ Those decision-time numbers were:
 - NAT-T at `20k`: `300000` remaining legacy muxer rules
 - NAT-T netmap at `20k`: `80000` head-end post-IPsec NAT apply commands
 
-The current repo-only Phase 3 implementation result is now:
+The repo-only Phase 3 implementation result before the head-end NAT activation
+fix was:
 
 - strict non-NAT at `20k`: `0` remaining legacy muxer rules
 - NAT-T at `20k`: `0` remaining legacy muxer rules
 - NAT-T netmap at `20k`: `80000` head-end post-IPsec NAT apply commands
 
+The current repo-only head-end NAT activation result is now:
+
+- NAT-T netmap at `20k`: `40000` head-end post-IPsec NAT apply commands
+- NAT-T netmap at `20k`: `20000` head-end post-IPsec NAT rollback commands
+- NAT-T netmap at `20k`: `2` max apply commands per customer
+
 That means muxer translation is no longer the remaining linear rule-growth
-source in repo-only verification. The open scale gaps now sit in the bridge
-path, head-end activation shape, shell fan-out, and explicit threshold gates.
+source in repo-only verification, and the measured `nat_t_netmap` head-end NAT
+activation gate is now within the explicit threshold model.
 
 ## Decision Summary
 
@@ -225,11 +232,19 @@ This decision covers head-end post-IPsec NAT for:
 The repo baseline shows the head-end NAT layer still expands linearly in apply
 commands.
 
-At `20k` NAT-T netmap customers, the repo-only baseline records:
+Before the nftables activation fix, at `20k` NAT-T netmap customers, the
+repo-only baseline recorded:
 
 - `80000` head-end post-IPsec NAT apply commands
 
-That is not acceptable as the long-term activation shape.
+After the nftables activation fix, the measured repo-only result is:
+
+- `40000` head-end post-IPsec NAT apply commands
+- `20000` head-end post-IPsec NAT rollback commands
+- `2` max apply commands per customer
+
+That satisfies the current explicit threshold model while keeping the previous
+legacy command count visible as comparison evidence.
 
 ### Chosen Strategy
 

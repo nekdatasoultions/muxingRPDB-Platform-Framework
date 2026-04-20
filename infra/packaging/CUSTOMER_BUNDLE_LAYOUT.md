@@ -43,7 +43,10 @@ carry these files:
 - `headend/routing/routing-intent.json`
 - `headend/routing/ip-route.commands.txt`
 - `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
-- `headend/post-ipsec-nat/iptables-snippet.txt`
+- `headend/post-ipsec-nat/nftables.apply.nft`
+- `headend/post-ipsec-nat/nftables.remove.nft`
+- `headend/post-ipsec-nat/nftables-state.json`
+- `headend/post-ipsec-nat/activation-manifest.json`
 
 ## Recommended Contents
 

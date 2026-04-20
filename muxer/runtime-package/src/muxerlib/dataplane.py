@@ -145,8 +145,11 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
                 "netmap_postrouting_rules": [],
                 "route_rules": [],
             },
+            "activation_backend": "nftables",
             "apply_commands": [],
             "rollback_commands": [],
+            "legacy_apply_commands": [],
+            "legacy_rollback_commands": [],
         }
 
     mode = str(merged_cfg.get("mode") or "snat_pool").strip().lower()
@@ -181,8 +184,8 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
     netmap_prerouting_rules: List[Dict[str, str]] = []
     netmap_postrouting_rules: List[Dict[str, str]] = []
     route_rules: List[Dict[str, str]] = []
-    apply_commands: List[str] = []
-    rollback_commands: List[str] = []
+    legacy_apply_commands: List[str] = []
+    legacy_rollback_commands: List[str] = []
 
     if translated_source_ip:
         local_identity_rules.append(
@@ -286,7 +289,7 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     if mode == "netmap" and (netmap_prerouting_rules or netmap_postrouting_rules):
-        apply_commands.append("modprobe xt_NETMAP >/dev/null 2>&1 || true")
+        legacy_apply_commands.append("modprobe xt_NETMAP >/dev/null 2>&1 || true")
 
     for rule_group in (
         local_identity_rules,
@@ -301,7 +304,7 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
         route_rules,
     ):
         for rule in rule_group:
-            apply_commands.append(rule["add_cli"])
+            legacy_apply_commands.append(rule["add_cli"])
 
     for rule_group in (
         route_rules,
@@ -316,10 +319,19 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
         core_reply_mark_rules,
     ):
         for rule in rule_group:
-            rollback_commands.append(rule["del_cli"])
+            legacy_rollback_commands.append(rule["del_cli"])
+
+    apply_commands = [
+        "nft -c -f post-ipsec-nat/nftables.apply.nft",
+        "nft -f post-ipsec-nat/nftables.apply.nft",
+    ]
+    rollback_commands = [
+        "nft -f post-ipsec-nat/nftables.remove.nft",
+    ]
 
     return {
         "enabled": True,
+        "activation_backend": "nftables",
         "mode": mode,
         "source": str((explicit_cfg.get("source") if explicit_cfg else merged_cfg.get("source")) or ("explicit" if explicit_cfg else compat_cfg.get("source", "derived"))),
         "compatibility_mode": bool(compat_cfg) and not bool(explicit_cfg),
@@ -348,6 +360,8 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
         },
         "apply_commands": apply_commands,
         "rollback_commands": rollback_commands,
+        "legacy_apply_commands": legacy_apply_commands,
+        "legacy_rollback_commands": legacy_rollback_commands,
     }
 
 

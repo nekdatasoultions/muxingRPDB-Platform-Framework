@@ -6,7 +6,8 @@ from __future__ import annotations
 # documents. They are the concrete handoff outputs the deployment path can
 # package, stage, and validate before any live apply.
 import ipaddress
-from typing import Any, Dict, Iterable, List
+import re
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 def _yes_no(value: Any) -> str | None:
@@ -280,108 +281,242 @@ def _effective_nat_interface(post_ipsec_nat: Dict[str, Any]) -> str:
     return str(post_ipsec_nat.get("interface") or _placeholder("HEADEND_CLEAR_IFACE"))
 
 
-def _render_one_to_one_nat_commands(post_ipsec_nat: Dict[str, Any]) -> List[str]:
-    interface = _effective_nat_interface(post_ipsec_nat)
-    commands: List[str] = []
-    real_subnets = [str(value) for value in (post_ipsec_nat.get("real_subnets") or [])]
-    translated_subnets = [str(value) for value in (post_ipsec_nat.get("translated_subnets") or [])]
-    for real_subnet, translated_subnet in zip(real_subnets, translated_subnets):
-        for core_subnet in _iter_core_subnets(post_ipsec_nat):
-            core_src = f" -s {core_subnet}" if core_subnet else ""
-            core_dst = f" -d {core_subnet}" if core_subnet else ""
-            commands.append(
-                f"iptables -t nat -A PREROUTING -i {interface}{core_src} -d {translated_subnet} -j NETMAP --to {real_subnet}"
-            )
-            commands.append(
-                f"iptables -t nat -A POSTROUTING -o {interface} -s {real_subnet}{core_dst} -j NETMAP --to {translated_subnet}"
-            )
-    return commands
+def _nft_name(value: str, *, prefix: str = "rpdb") -> str:
+    normalized = re.sub(r"[^a-z0-9_]+", "_", str(value).lower()).strip("_")
+    normalized = normalized[:48] or "customer"
+    return f"{prefix}_{normalized}"
 
 
-def _render_explicit_map_commands(post_ipsec_nat: Dict[str, Any]) -> List[str]:
-    interface = _effective_nat_interface(post_ipsec_nat)
-    commands: List[str] = []
-    for host_mapping in post_ipsec_nat.get("host_mappings") or []:
-        real_ip = _cidr_to_host(host_mapping["real_ip"])
-        translated_ip = _cidr_to_host(host_mapping["translated_ip"])
-        for core_subnet in _iter_core_subnets(post_ipsec_nat):
-            core_src = f" -s {core_subnet}" if core_subnet else ""
-            core_dst = f" -d {core_subnet}" if core_subnet else ""
-            commands.append(
-                f"iptables -t nat -A PREROUTING -i {interface}{core_src} -d {translated_ip} -j DNAT --to-destination {real_ip}"
-            )
-            commands.append(
-                f"iptables -t nat -A POSTROUTING -o {interface} -s {real_ip}{core_dst} -j SNAT --to-source {translated_ip}"
-            )
-    return commands
+def _ip_networks(values: Iterable[Any]) -> List[ipaddress.IPv4Network]:
+    return [ipaddress.ip_network(str(value), strict=False) for value in values or []]
 
 
-def _render_generic_nat_commands(post_ipsec_nat: Dict[str, Any]) -> List[str]:
-    interface = _effective_nat_interface(post_ipsec_nat)
-    translated_source_ip = str(post_ipsec_nat.get("translated_source_ip") or "")
-    commands: List[str] = []
-    if translated_source_ip:
-        for real_subnet in post_ipsec_nat.get("real_subnets") or []:
-            for core_subnet in _iter_core_subnets(post_ipsec_nat):
-                core_dst = f" -d {core_subnet}" if core_subnet else ""
-                commands.append(
-                    f"iptables -t nat -A POSTROUTING -o {interface} -s {real_subnet}{core_dst} -j SNAT --to-source {translated_source_ip}"
-                )
-    return commands
+def _ip_hosts(network: ipaddress.IPv4Network) -> List[ipaddress.IPv4Address]:
+    return [ipaddress.ip_address(value) for value in network]
 
 
-def _render_post_ipsec_nat_commands(post_ipsec_nat: Dict[str, Any]) -> List[str]:
-    if not bool(post_ipsec_nat.get("enabled")):
-        return []
+def _nft_set_values(values: Iterable[Any]) -> List[str]:
+    return [str(ipaddress.ip_network(str(value), strict=False)) for value in values or [] if str(value).strip()]
 
+
+def _nft_host(value: Any) -> str:
+    return str(ipaddress.ip_interface(str(value)).ip)
+
+
+def _nft_map_entries(entries: List[Tuple[str, str]]) -> List[str]:
+    return [f"{source} : {target}" for source, target in entries]
+
+
+def _nft_inline_elements(values: Iterable[str]) -> str:
+    value_list = [str(value) for value in values if str(value).strip()]
+    if not value_list:
+        return "{ }"
+    return "{ " + ", ".join(value_list) + " }"
+
+
+def _build_nft_host_mappings(post_ipsec_nat: Dict[str, Any]) -> tuple[List[Tuple[str, str]], List[str]]:
     strategy = str(post_ipsec_nat.get("mapping_strategy") or "").strip()
     mode = str(post_ipsec_nat.get("mode") or "").strip()
+    warnings: List[str] = []
+    mappings: List[Tuple[str, str]] = []
+
+    if strategy == "explicit_host_map" or mode == "explicit_map":
+        for host_mapping in post_ipsec_nat.get("host_mappings") or []:
+            translated_ip = _nft_host(host_mapping["translated_ip"])
+            real_ip = _nft_host(host_mapping["real_ip"])
+            mappings.append((translated_ip, real_ip))
+        return mappings, warnings
+
     if strategy == "one_to_one" or mode == "netmap":
-        commands = _render_one_to_one_nat_commands(post_ipsec_nat)
-    elif strategy == "explicit_host_map" or mode == "explicit_map":
-        commands = _render_explicit_map_commands(post_ipsec_nat)
-    else:
-        commands = _render_generic_nat_commands(post_ipsec_nat)
+        real_networks = _ip_networks(post_ipsec_nat.get("real_subnets") or [])
+        translated_networks = _ip_networks(post_ipsec_nat.get("translated_subnets") or [])
+        for real_network, translated_network in zip(real_networks, translated_networks):
+            real_hosts = _ip_hosts(real_network)
+            translated_hosts = _ip_hosts(translated_network)
+            pair_count = min(len(real_hosts), len(translated_hosts))
+            if len(real_hosts) != len(translated_hosts):
+                warnings.append(
+                    "netmap subnet sizes differ; generated nftables maps use the first "
+                    f"{pair_count} address pair(s) from {translated_network} to {real_network}"
+                )
+            mappings.extend((str(translated_hosts[index]), str(real_hosts[index])) for index in range(pair_count))
+        return mappings, warnings
 
-    if post_ipsec_nat.get("tcp_mss_clamp") is not None:
-        interface = _effective_nat_interface(post_ipsec_nat)
-        commands.append(
-            "iptables -t mangle -A FORWARD "
-            f"-o {interface} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {int(post_ipsec_nat['tcp_mss_clamp'])}"
+    translated_source_ip = str(post_ipsec_nat.get("translated_source_ip") or "").strip()
+    if translated_source_ip:
+        translated_ip = _nft_host(translated_source_ip)
+        for real_network in _ip_networks(post_ipsec_nat.get("real_subnets") or []):
+            for real_ip in _ip_hosts(real_network):
+                mappings.append((translated_ip, str(real_ip)))
+    return mappings, warnings
+
+
+def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str, Any]) -> Dict[str, Any]:
+    enabled = bool(post_ipsec_nat.get("enabled"))
+    safe_customer = _nft_name(customer_name, prefix="cust")
+    table_name = _nft_name(customer_name, prefix="rpdb_hn")
+    dnat_map = f"{safe_customer}_dnat_v4"
+    snat_map = f"{safe_customer}_snat_v4"
+    translated_set = f"{safe_customer}_translated_v4"
+    real_set = f"{safe_customer}_real_v4"
+    core_set = f"{safe_customer}_core_v4"
+    output_mark = str(post_ipsec_nat.get("output_mark") or "").strip()
+    tcp_mss_clamp = post_ipsec_nat.get("tcp_mss_clamp")
+
+    host_mappings, warnings = _build_nft_host_mappings(post_ipsec_nat)
+    dnat_entries = _nft_map_entries(host_mappings)
+    snat_entries = _nft_map_entries([(real_ip, translated_ip) for translated_ip, real_ip in host_mappings])
+    translated_values = sorted({translated_ip for translated_ip, _real_ip in host_mappings})
+    real_values = sorted({real_ip for _translated_ip, real_ip in host_mappings})
+    core_values = _nft_set_values(post_ipsec_nat.get("core_subnets") or [])
+    if not core_values:
+        core_values = ["0.0.0.0/0"]
+
+    state = {
+        "schema_version": 1,
+        "backend": "nftables",
+        "table_family": "ip",
+        "table_name": table_name,
+        "enabled": enabled,
+        "mode": post_ipsec_nat.get("mode"),
+        "mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
+        "customer_name": customer_name,
+        "chains": {
+            "prerouting": "prerouting",
+            "postrouting": "postrouting",
+            "mangle_prerouting": "mangle_prerouting",
+            "mangle_forward": "mangle_forward",
+        },
+        "sets": {
+            "core": core_set,
+            "real": real_set,
+            "translated": translated_set,
+        },
+        "maps": {
+            "dnat": dnat_map,
+            "snat": snat_map,
+        },
+        "host_mapping_count": len(host_mappings),
+        "warnings": warnings,
+        "activation_units": {
+            "apply": 2 if enabled else 0,
+            "rollback": 1 if enabled else 0,
+        },
+        "prohibited_fallbacks": [
+            "iptables-restore",
+            "MUXER3",
+            "legacy_headend_iptables_activation",
+        ],
+    }
+
+    if not enabled:
+        disabled_text = "# post-IPsec NAT disabled; no nftables state required\n"
+        return {
+            "state": state,
+            "manifest": {
+                **state,
+                "artifact_files": [],
+                "apply_command_count": 0,
+                "rollback_command_count": 0,
+            },
+            "apply": disabled_text,
+            "remove": disabled_text,
+        }
+
+    lines = [
+        f"# RPDB customer-scoped post-IPsec NAT for {customer_name}",
+        "# Backend: nftables only.",
+        f"table ip {table_name} {{",
+        f"  set {core_set} {{",
+        "    type ipv4_addr",
+        "    flags interval",
+        f"    elements = { _nft_inline_elements(core_values) }",
+        "  }",
+        f"  set {translated_set} {{",
+        "    type ipv4_addr",
+        f"    elements = { _nft_inline_elements(translated_values) }",
+        "  }",
+        f"  set {real_set} {{",
+        "    type ipv4_addr",
+        f"    elements = { _nft_inline_elements(real_values) }",
+        "  }",
+        f"  map {dnat_map} {{",
+        "    type ipv4_addr : ipv4_addr",
+        f"    elements = { _nft_inline_elements(dnat_entries) }",
+        "  }",
+        f"  map {snat_map} {{",
+        "    type ipv4_addr : ipv4_addr",
+        f"    elements = { _nft_inline_elements(snat_entries) }",
+        "  }",
+        "  chain prerouting {",
+        "    type nat hook prerouting priority dstnat; policy accept;",
+        f"    ip saddr @{core_set} ip daddr @{translated_set} dnat to ip daddr map @{dnat_map}",
+        "  }",
+        "  chain postrouting {",
+        "    type nat hook postrouting priority srcnat; policy accept;",
+        f"    ip saddr @{real_set} ip daddr @{core_set} snat to ip saddr map @{snat_map}",
+        "  }",
+    ]
+    if output_mark:
+        lines.extend(
+            [
+                "  chain mangle_prerouting {",
+                "    type filter hook prerouting priority mangle; policy accept;",
+                f"    ip saddr @{core_set} ip daddr @{translated_set} meta mark set {output_mark}",
+                "  }",
+            ]
         )
+    if tcp_mss_clamp not in {None, ""}:
+        lines.extend(
+            [
+                "  chain mangle_forward {",
+                "    type filter hook forward priority mangle; policy accept;",
+                f"    ip saddr @{core_set} ip daddr @{real_set} tcp flags syn / syn,rst tcp option maxseg size set {int(tcp_mss_clamp)}",
+                "  }",
+            ]
+        )
+    lines.extend(["}", ""])
 
-    translated_targets = [str(value) for value in (post_ipsec_nat.get("translated_subnets") or [])]
-    route_via = str(post_ipsec_nat.get("route_via") or "")
-    route_dev = str(post_ipsec_nat.get("route_dev") or "")
-    if translated_targets and (route_via or route_dev):
-        for translated_subnet in translated_targets:
-            if route_via and route_dev:
-                commands.append(f"ip route replace {translated_subnet} via {route_via} dev {route_dev}")
-            elif route_via:
-                commands.append(f"ip route replace {translated_subnet} via {route_via}")
-            else:
-                commands.append(f"ip route replace {translated_subnet} dev {route_dev}")
+    remove_lines = [
+        f"# Remove RPDB customer-scoped post-IPsec NAT for {customer_name}",
+        f"delete table ip {table_name}",
+        "",
+    ]
+    manifest = {
+        **state,
+        "artifact_files": [
+            "post-ipsec-nat/nftables.apply.nft",
+            "post-ipsec-nat/nftables.remove.nft",
+            "post-ipsec-nat/nftables-state.json",
+        ],
+        "apply_command_count": state["activation_units"]["apply"],
+        "rollback_command_count": state["activation_units"]["rollback"],
+    }
+    return {
+        "state": state,
+        "manifest": manifest,
+        "apply": "\n".join(lines),
+        "remove": "\n".join(remove_lines),
+    }
 
-    if post_ipsec_nat.get("output_mark"):
-        commands.append(f"# output_mark = {post_ipsec_nat.get('output_mark')}")
-    return commands
 
-
-def _render_post_ipsec_nat_intent(post_ipsec_nat: Dict[str, Any]) -> Dict[str, Any]:
-    commands = _render_post_ipsec_nat_commands(post_ipsec_nat)
+def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, Any]) -> Dict[str, Any]:
+    nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
+    manifest = nftables["manifest"]
     command_model = "disabled"
     if bool(post_ipsec_nat.get("enabled")):
         if str(post_ipsec_nat.get("mapping_strategy") or "") == "one_to_one":
-            command_model = "netmap_one_to_one"
+            command_model = "nftables_netmap_one_to_one"
         elif str(post_ipsec_nat.get("mode") or "") == "netmap":
-            command_model = "legacy_netmap"
+            command_model = "nftables_legacy_netmap"
         elif str(post_ipsec_nat.get("mapping_strategy") or "") == "explicit_host_map" or str(post_ipsec_nat.get("mode") or "") == "explicit_map":
-            command_model = "explicit_host_map"
+            command_model = "nftables_explicit_host_map"
         else:
-            command_model = "generic_post_ipsec_nat"
+            command_model = "nftables_generic_post_ipsec_nat"
 
     return {
         "enabled": bool(post_ipsec_nat.get("enabled")),
+        "activation_backend": "nftables",
         "mode": post_ipsec_nat.get("mode"),
         "mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
         "translated_subnets": post_ipsec_nat.get("translated_subnets") or [],
@@ -395,28 +530,16 @@ def _render_post_ipsec_nat_intent(post_ipsec_nat: Dict[str, Any]) -> Dict[str, A
         "route_via": post_ipsec_nat.get("route_via"),
         "route_dev": post_ipsec_nat.get("route_dev"),
         "rendered_command_model": command_model,
-        "rendered_command_count": len([line for line in commands if line.strip() and not line.startswith("#")]),
+        "rendered_command_count": int(manifest.get("apply_command_count") or 0),
+        "activation_manifest": {
+            "backend": manifest.get("backend"),
+            "table_name": manifest.get("table_name"),
+            "apply_command_count": manifest.get("apply_command_count"),
+            "rollback_command_count": manifest.get("rollback_command_count"),
+            "host_mapping_count": manifest.get("host_mapping_count"),
+            "prohibited_fallbacks": manifest.get("prohibited_fallbacks"),
+        },
     }
-
-
-def _render_post_ipsec_nat_snippet(post_ipsec_nat: Dict[str, Any]) -> str:
-    commands = _render_post_ipsec_nat_commands(post_ipsec_nat)
-    lines = [
-        "# Customer-scoped post-IPsec NAT snippet",
-        f"# enabled={bool(post_ipsec_nat.get('enabled'))} mode={post_ipsec_nat.get('mode')}",
-        f"# mapping_strategy={post_ipsec_nat.get('mapping_strategy') or ''}",
-        f"# translated_subnets={','.join(post_ipsec_nat.get('translated_subnets') or [])}",
-        f"# real_subnets={','.join(post_ipsec_nat.get('real_subnets') or [])}",
-    ]
-    if post_ipsec_nat.get("host_mappings"):
-        rendered_mappings = [
-            f"{item['real_ip']}->{item['translated_ip']}"
-            for item in (post_ipsec_nat.get("host_mappings") or [])
-        ]
-        lines.append(f"# host_mappings={','.join(rendered_mappings)}")
-    if commands:
-        lines.extend(commands)
-    return "\n".join(lines) + "\n"
 
 
 def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -542,6 +665,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     protocols = module.get("protocols") or {}
     ipsec = module.get("ipsec") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
+    customer_name = str(customer.get("name") or "")
+    post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
 
     return {
         "ipsec/ipsec-intent.json": _render_ipsec_intent(customer, peer, selectors, protocols, ipsec),
@@ -577,8 +702,11 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             ]
         )
         + "\n",
-        "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(post_ipsec_nat),
-        "post-ipsec-nat/iptables-snippet.txt": _render_post_ipsec_nat_snippet(post_ipsec_nat),
+        "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(customer_name, post_ipsec_nat),
+        "post-ipsec-nat/nftables.apply.nft": post_ipsec_nftables["apply"],
+        "post-ipsec-nat/nftables.remove.nft": post_ipsec_nftables["remove"],
+        "post-ipsec-nat/nftables-state.json": post_ipsec_nftables["state"],
+        "post-ipsec-nat/activation-manifest.json": post_ipsec_nftables["manifest"],
     }
 
 

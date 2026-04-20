@@ -21,7 +21,10 @@ The bundle must contain these installable head-end files:
 - `headend/routing/routing-intent.json`
 - `headend/routing/ip-route.commands.txt`
 - `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
-- `headend/post-ipsec-nat/iptables-snippet.txt`
+- `headend/post-ipsec-nat/nftables.apply.nft`
+- `headend/post-ipsec-nat/nftables.remove.nft`
+- `headend/post-ipsec-nat/nftables-state.json`
+- `headend/post-ipsec-nat/activation-manifest.json`
 
 Unresolved placeholders are not allowed in the text or JSON payloads at apply
 time.
@@ -51,7 +54,10 @@ When one customer is installed into a head-end root, the orchestration writes:
               apply-routes.sh
               remove-routes.sh
             post-ipsec-nat/
-              iptables-snippet.txt
+              nftables.apply.nft
+              nftables.remove.nft
+              nftables-state.json
+              activation-manifest.json
               apply-post-ipsec-nat.sh
               remove-post-ipsec-nat.sh
             apply-headend-customer.sh
@@ -89,12 +95,12 @@ python scripts\deployment\remove_headend_customer.py `
 
 - `swanctl` customer material is installable and customer-scoped.
 - route programming is installable and customer-scoped.
-- post-IPsec NAT is installable and customer-scoped for the modeled command
-  styles.
-- one-to-one translated subnet intent renders `NETMAP` commands.
-- explicit host mappings render `DNAT` and `SNAT` commands.
-- validation checks that the rendered `swanctl` and NAT snippets match the
-  richer intent payloads before install.
+- post-IPsec NAT is installable and customer-scoped through generated
+  `nftables` batch artifacts.
+- one-to-one translated subnet intent renders nftables DNAT/SNAT maps.
+- explicit host mappings render nftables DNAT/SNAT maps.
+- validation checks that the rendered `swanctl` and nftables artifacts match
+  the richer intent payloads before install.
 
 That keeps the deployment path honest while integrating the head-end
 install/apply/remove flow around the artifacts we can verify repo-only today.

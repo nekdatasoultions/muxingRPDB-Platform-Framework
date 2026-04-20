@@ -245,7 +245,10 @@ build/example-nat-0001/
       ip-route.commands.txt
     post-ipsec-nat/
       post-ipsec-nat-intent.json
-      iptables-snippet.txt
+      nftables.apply.nft
+      nftables.remove.nft
+      nftables-state.json
+      activation-manifest.json
 ```
 
 The deployment branch should consume this handoff directory instead of trying

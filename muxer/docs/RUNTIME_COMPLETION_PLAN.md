@@ -103,8 +103,10 @@ through the `nftables` backend for:
 - muxer-side DNAT/SNAT translation
 - default-drop behavior
 
-The remaining bridge and head-end activation layers are still on the legacy or
-compatibility path.
+The bridge layer and head-end post-IPsec NAT activation layer now have
+repo-modeled `nftables` paths. Live-node validation is still required before
+deployment, but the repo-only scale gate no longer depends on the legacy
+head-end activation shape.
 
 ## Target Runtime Behavior
 
@@ -298,10 +300,12 @@ Do not treat the RPDB runtime as scale-ready until all of these are true:
 
 Current status:
 
-- not met
-- the repo now records the current baseline, but the scalable backend work is
-  still open around NFQUEUE bridge, head-end activation shape, shell fan-out,
-  and explicit pass/fail thresholds
+- met repo-only for the measured profiles and thresholds
+- not yet a live deployment approval
+- full repo verification passed twice after the head-end post-IPsec NAT
+  activation change
+- live-node behavior, operational latency, observability, and rollback timing
+  still require separate validation before customer deployment
 
 ## Exit Criteria
 
@@ -338,3 +342,8 @@ That verifier proves:
 - the synthetic scale baseline harness runs through 20k customers repo-only
 - richer VPN service intent renders into head-end artifacts
 - one-to-one netmap and explicit host-map NAT examples stage and remove cleanly
+- head-end post-IPsec NAT renders nftables apply/remove artifacts and activation
+  manifests instead of a head-end iptables snippet
+- the full explicit scale report is green for strict non-NAT, NAT-T,
+  `nat_t_netmap`, mixed, force4500 bridge, and NAT-D bridge profiles at 1k,
+  5k, 10k, and 20k customers

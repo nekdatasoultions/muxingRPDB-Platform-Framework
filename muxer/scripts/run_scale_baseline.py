@@ -222,6 +222,9 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
     headend_apply_command_count = 0
     headend_rollback_command_count = 0
     max_headend_apply_commands_per_customer = 0
+    legacy_headend_apply_command_count = 0
+    legacy_headend_rollback_command_count = 0
+    max_legacy_headend_apply_commands_per_customer = 0
 
     derive_started = _start_measurement()
     for module in modules:
@@ -245,9 +248,17 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
 
         apply_commands = list(post_ipsec_nat.get("apply_commands") or [])
         rollback_commands = list(post_ipsec_nat.get("rollback_commands") or [])
+        legacy_apply_commands = list(post_ipsec_nat.get("legacy_apply_commands") or [])
+        legacy_rollback_commands = list(post_ipsec_nat.get("legacy_rollback_commands") or [])
         headend_apply_command_count += len(apply_commands)
         headend_rollback_command_count += len(rollback_commands)
         max_headend_apply_commands_per_customer = max(max_headend_apply_commands_per_customer, len(apply_commands))
+        legacy_headend_apply_command_count += len(legacy_apply_commands)
+        legacy_headend_rollback_command_count += len(legacy_rollback_commands)
+        max_legacy_headend_apply_commands_per_customer = max(
+            max_legacy_headend_apply_commands_per_customer,
+            len(legacy_apply_commands),
+        )
 
         _ = transport["table_id"]
     derive_metrics = _finish_measurement(derive_started)
@@ -289,9 +300,13 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
             else 0.0,
         },
         "headend_post_ipsec_nat_runtime": {
+            "activation_backend": "nftables",
             "apply_command_count": headend_apply_command_count,
             "rollback_command_count": headend_rollback_command_count,
             "max_apply_commands_per_customer": max_headend_apply_commands_per_customer,
+            "legacy_apply_command_count": legacy_headend_apply_command_count,
+            "legacy_rollback_command_count": legacy_headend_rollback_command_count,
+            "legacy_max_apply_commands_per_customer": max_legacy_headend_apply_commands_per_customer,
         },
         "nftables_preview": {
             "render_mode": nft_model.get("render_mode"),
