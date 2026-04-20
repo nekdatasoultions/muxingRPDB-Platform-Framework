@@ -6,11 +6,11 @@ This plan covers RPDB backend/platform work only.
 
 Allowed repository:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- this GitHub repository
 
 Not allowed in this plan without a separate approval gate:
 
-- modifying `E:\Code1\MUXER3`
+- modifying the external legacy muxer repository
 - onboarding or cutting over customers
 - moving EIPs
 - applying customer-specific VPN/muxer changes

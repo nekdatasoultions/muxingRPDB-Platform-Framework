@@ -6,12 +6,11 @@ This plan is RPDB-only.
 
 Allowed workspace:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- this GitHub repository
 
 Not allowed in this plan:
 
-- changes to `E:\Code1\MUXER3`
-- changes to legacy MUXER3 GitHub repositories
+- changes to external legacy muxer repositories
 - live node changes
 - production DynamoDB writes
 - live muxer or VPN head-end apply
