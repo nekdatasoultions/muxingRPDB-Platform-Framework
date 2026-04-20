@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "example-dynamic-default-nonnat-udp4500-demo",
+  "customer_name": "example-dynamic-default-nonnat",
+  "observed_peer": "203.0.113.55",
+  "observed_protocol": "udp",
+  "observed_dport": 4500,
+  "initial_udp500_observed": true,
+  "packet_count": 1,
+  "observed_at": "2026-04-15T20:45:00Z",
+  "source": "repo-only-example"
+}

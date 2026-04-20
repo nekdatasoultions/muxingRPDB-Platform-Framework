@@ -1,0 +1,37 @@
+schema_version: 1
+
+customer:
+  id: 101
+  name: example-nat-0001
+  customer_class: nat
+
+  peer:
+    public_ip: 198.51.100.10
+    remote_id: 198.51.100.10
+    psk_secret_ref: /muxingrpdb/example/example-nat-0001/psk
+
+  transport:
+    mark: 0x41001
+    table: 41001
+    tunnel_key: 41001
+    interface: gre-example-0001
+    overlay:
+      mux_ip: 169.254.101.1/30
+      router_ip: 169.254.101.2/30
+
+  selectors:
+    local_subnets:
+      - 172.30.10.0/27
+    remote_subnets:
+      - 10.200.1.0/24
+
+  backend:
+    cluster: nat
+    assignment: active-a
+    role: nat-active
+
+  post_ipsec_nat:
+    enabled: true
+    mode: netmap
+    translated_subnets:
+      - 172.30.10.0/27

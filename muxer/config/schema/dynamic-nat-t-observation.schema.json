@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://muxingrpdb.local/schema/dynamic-nat-t-observation.schema.json",
+  "title": "RPDB Dynamic NAT-T Observation Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "customer_name",
+    "observed_peer",
+    "observed_protocol",
+    "observed_dport",
+    "initial_udp500_observed"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "customer_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_peer": {
+      "type": "string",
+      "format": "ipv4"
+    },
+    "observed_protocol": {
+      "type": "string",
+      "enum": [
+        "udp"
+      ]
+    },
+    "observed_dport": {
+      "type": "integer",
+      "const": 4500
+    },
+    "initial_udp500_observed": {
+      "type": "boolean"
+    },
+    "packet_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

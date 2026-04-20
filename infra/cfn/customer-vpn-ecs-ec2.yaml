@@ -1,0 +1,437 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Dev customer VPN ECS-on-EC2 fleet. Each ECS task runs on its own EC2 host
+  so every running customer VPN task inherits a unique host public IPv4.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: customer-vpn-ecs-dev
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetIds:
+    Type: CommaDelimitedList
+    Description: Public subnets used by the ECS container hosts.
+  AllowedPeerIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  SshIngressCidr:
+    Type: String
+    Default: ''
+    Description: Optional CIDR allowed to SSH to the container hosts.
+  EcsOptimizedAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id
+  InstanceType:
+    Type: String
+    Default: c8g.large
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: muxer
+  AsgMinSize:
+    Type: Number
+    Default: 1
+    MinValue: 0
+  AsgMaxSize:
+    Type: Number
+    Default: 2
+    MinValue: 1
+  AsgDesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 0
+  DesiredTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+  ContainerImage:
+    Type: String
+    Default: public.ecr.aws/docker/library/alpine:3.20
+    Description: Replace with the real customer VPN image.
+  ContainerName:
+    Type: String
+    Default: customer-vpn
+  ContainerCpuUnits:
+    Type: Number
+    Default: 512
+  ContainerMemoryMiB:
+    Type: Number
+    Default: 1024
+  CustomerFleetName:
+    Type: String
+    Default: customer-vpn-dev
+  CustomerConfigMode:
+    Type: String
+    Default: dynamodb
+    AllowedValues:
+      - dynamodb
+      - s3
+      - efs
+      - static
+  CustomerSotTableName:
+    Type: String
+    Default: ''
+  SharedConfigS3Uri:
+    Type: String
+    Default: ''
+  EnableSharedEfs:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  SharedEfsFileSystemId:
+    Type: String
+    Default: ''
+  SharedEfsAccessPointId:
+    Type: String
+    Default: ''
+  SharedEfsMountPath:
+    Type: String
+    Default: /Shared
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+  EnableEspIngress:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  UseKeyPair: !Not [!Equals [!Ref KeyName, '']]
+  UseSshIngress: !Not [!Equals [!Ref SshIngressCidr, '']]
+  UseSharedEfs: !Equals [!Ref EnableSharedEfs, 'true']
+  EnableEspIngressCondition: !Equals [!Ref EnableEspIngress, 'true']
+  HasCustomerSotTable: !Not [!Equals [!Ref CustomerSotTableName, '']]
+  HasSharedConfigS3Uri: !Not [!Equals [!Ref SharedConfigS3Uri, '']]
+
+Resources:
+  CustomerVpnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${ClusterName}/customer-vpn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${ClusterName} ECS customer VPN hosts
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: !Ref AllowedPeerIngressCidr
+          Description: IKE
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: !Ref AllowedPeerIngressCidr
+          Description: NAT-T
+        - !If
+          - UseSshIngress
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref SshIngressCidr
+            Description: Optional SSH management
+          - !Ref AWS::NoValue
+        - !If
+          - EnableEspIngressCondition
+          - IpProtocol: '50'
+            CidrIp: !Ref AllowedPeerIngressCidr
+            Description: ESP
+          - !Ref AWS::NoValue
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ClusterName}-sg
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ClusterName}-ecs-instance-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: !Sub ${ClusterName}-bootstrap
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                Resource: '*'
+
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EcsInstanceRole
+
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ClusterName}-task-exec-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ClusterName}-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${ClusterName}-task-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - !If
+                - HasCustomerSotTable
+                - Effect: Allow
+                  Action:
+                    - dynamodb:GetItem
+                    - dynamodb:Query
+                    - dynamodb:Scan
+                  Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomerSotTableName}
+                - !Ref AWS::NoValue
+
+  EcsLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${ClusterName}-lt
+      LaunchTemplateData:
+        ImageId: !Ref EcsOptimizedAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt EcsInstanceProfile.Arn
+        KeyName: !If [UseKeyPair, !Ref KeyName, !Ref AWS::NoValue]
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref ClusterSecurityGroup
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              set -euxo pipefail
+
+              retry_dnf() {
+                local attempts=0
+                until dnf -y "$@"; do
+                  attempts=$((attempts + 1))
+                  if [[ "$attempts" -ge 10 ]]; then
+                    echo "dnf failed after ${!attempts} attempts: $*" >&2
+                    return 1
+                  fi
+                  sleep 15
+                done
+              }
+
+              mkdir -p /etc/ecs
+              cat >/etc/ecs/ecs.config <<EOF
+              ECS_CLUSTER=${ClusterName}
+              ECS_ENABLE_CONTAINER_METADATA=true
+              ECS_LOGLEVEL=info
+              EOF
+
+              mkdir -p /Application/customer-vpn /LOG/customer-vpn ${SharedEfsMountPath}
+
+              if [[ "${EnableSharedEfs}" == "true" ]]; then
+                retry_dnf install amazon-efs-utils
+                mount -t efs -o tls,accesspoint=${SharedEfsAccessPointId} ${SharedEfsFileSystemId}:/ ${SharedEfsMountPath}
+                grep -q "${SharedEfsFileSystemId}:/" /etc/fstab || echo "${SharedEfsFileSystemId}:/ ${SharedEfsMountPath} efs _netdev,tls,accesspoint=${SharedEfsAccessPointId} 0 0" >> /etc/fstab
+              fi
+
+              chown -R ec2-user:ec2-user /Application /LOG ${SharedEfsMountPath} || true
+            - EnableSharedEfs: !Ref EnableSharedEfs
+
+  CustomerVpnAsg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub ${ClusterName}-asg
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EcsLaunchTemplate
+        Version: !GetAtt EcsLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier: !Ref PublicSubnetIds
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      NewInstancesProtectedFromScaleIn: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ClusterName}-host
+          PropagateAtLaunch: true
+        - Key: StackRole
+          Value: customer-vpn-ecs-host
+          PropagateAtLaunch: true
+
+  CustomerVpnCapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      Name: !Sub ${ClusterName}-cp
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !GetAtt CustomerVpnAsg.AutoScalingGroupARN
+        ManagedScaling:
+          Status: ENABLED
+          TargetCapacity: 100
+          MinimumScalingStepSize: 1
+          MaximumScalingStepSize: 10
+        ManagedTerminationProtection: DISABLED
+
+  ClusterCapacityProviderAssociation:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref EcsCluster
+      CapacityProviders:
+        - !Ref CustomerVpnCapacityProvider
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref CustomerVpnCapacityProvider
+          Weight: 1
+
+  CustomerVpnTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ClusterName}-customer-vpn
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: host
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      Volumes:
+        - Name: shared-data
+          Host:
+            SourcePath: !Ref SharedEfsMountPath
+        - Name: application-data
+          Host:
+            SourcePath: /Application/customer-vpn
+        - Name: host-modules
+          Host:
+            SourcePath: /lib/modules
+      ContainerDefinitions:
+        - Name: !Ref ContainerName
+          Image: !Ref ContainerImage
+          Essential: true
+          Privileged: true
+          Cpu: !Ref ContainerCpuUnits
+          Memory: !Ref ContainerMemoryMiB
+          LinuxParameters:
+            Capabilities:
+              Add:
+                - NET_ADMIN
+                - NET_RAW
+          Environment:
+            - Name: CUSTOMER_FLEET_NAME
+              Value: !Ref CustomerFleetName
+            - Name: CUSTOMER_CONFIG_MODE
+              Value: !Ref CustomerConfigMode
+            - Name: CUSTOMER_SOT_TABLE_NAME
+              Value: !Ref CustomerSotTableName
+            - Name: SHARED_CONFIG_S3_URI
+              Value: !Ref SharedConfigS3Uri
+            - Name: HOST_PUBLIC_IP_MODE
+              Value: host-public-ip
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          MountPoints:
+            - ContainerPath: /Shared
+              SourceVolume: shared-data
+              ReadOnly: false
+            - ContainerPath: /Application/customer-vpn
+              SourceVolume: application-data
+              ReadOnly: false
+            - ContainerPath: /lib/modules
+              SourceVolume: host-modules
+              ReadOnly: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CustomerVpnLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: customer-vpn
+
+  CustomerVpnService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ClusterCapacityProviderAssociation
+    Properties:
+      ServiceName: !Sub ${ClusterName}-svc
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref CustomerVpnTaskDefinition
+      DesiredCount: !Ref DesiredTaskCount
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CustomerVpnCapacityProvider
+          Weight: 1
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      PlacementConstraints:
+        - Type: distinctInstance
+      EnableExecuteCommand: true
+
+Outputs:
+  ClusterName:
+    Value: !Ref EcsCluster
+  ServiceName:
+    Value: !Sub ${ClusterName}-svc
+  CapacityProviderName:
+    Value: !Ref CustomerVpnCapacityProvider
+  AutoScalingGroupName:
+    Value: !Ref CustomerVpnAsg
+  TaskDefinitionArn:
+    Value: !Ref CustomerVpnTaskDefinition
+  HostSecurityGroupId:
+    Value: !Ref ClusterSecurityGroup
+  LogGroupName:
+    Value: !Ref CustomerVpnLogGroup

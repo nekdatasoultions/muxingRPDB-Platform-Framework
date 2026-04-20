@@ -1,0 +1,20 @@
+C4Context
+title MUXER3 System Context
+
+Person(peer, "Customer Peer", "Known NAT-T or strict non-NAT VPN peer")
+Person(ops, "Operator", "Onboards customers, applies changes, troubleshoots tunnels")
+
+System(platform, "MuxingPlus VPN Edge Platform", "Single-public-IP muxer plus VPN head ends")
+System_Ext(core, "Core Services", "Protected backend services behind the VPN head ends")
+System_Ext(ddb, "Amazon DynamoDB", "Customer source of truth")
+System_Ext(efs, "Amazon EFS", "Shared bundle staging for VPN head ends")
+System_Ext(cw, "Amazon CloudWatch", "Metrics, dashboards, and logs")
+
+Rel(peer, platform, "Establishes IKE and IPsec", "UDP 500, UDP 4500, ESP 50")
+Rel(ops, platform, "Operates and troubleshoots")
+Rel(platform, core, "Delivers decrypted traffic")
+Rel(platform, ddb, "Reads and updates customer source of truth")
+Rel(platform, efs, "Stages head-end bundles")
+Rel(platform, cw, "Publishes metrics and traces")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

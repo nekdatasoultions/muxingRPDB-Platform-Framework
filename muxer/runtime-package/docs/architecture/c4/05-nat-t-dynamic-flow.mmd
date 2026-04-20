@@ -1,0 +1,36 @@
+C4Dynamic
+title NAT-T End-to-End Dynamic Flow
+
+Person(peer, "Customer Peer", "Known NAT-T customer")
+System(core, "Core Services", "Protected backend systems")
+System(headend, "NAT VPN Head End", "Libreswan termination point")
+
+Container_Boundary(muxer, "MUXER3 Muxer") {
+    Component(ingress, "Phase 1 Ingress", "ens5", "Packet enters the muxer public edge")
+    Component(filter, "Phase 2 Filter", "MUXER_FILTER", "Allow known NAT-T customer traffic")
+    Component(mark, "Phase 3 Mark", "MUXER_MANGLE", "Set customer fwmark for policy routing")
+    Component(dnat, "Phase 4 DNAT", "MUXER_NAT_PRE", "Rewrite to the NAT head-end underlay IP")
+    Component(policy, "Phase 5 Policy Routing", "ip rule", "Select the customer route table")
+    Component(route, "Phase 6 GRE Route", "ip route", "Send packet to the customer GRE interface")
+    Component(gre, "Phase 7 GRE Forward", "GRE", "Forward encrypted packet to the NAT head end")
+    Component(ret, "Phase 8 Return", "GRE", "Receive encrypted reply from the NAT head end")
+    Component(snat, "Phase 9 SNAT", "MUXER_NAT_POST", "Rewrite reply to the muxer edge identity")
+    Component(egress, "Phase 10 Egress", "ens5", "Send encrypted reply back to the customer peer")
+}
+
+RelIndex(1, peer, ingress, "Send udp 4500 to the shared public VPN IP")
+RelIndex(2, ingress, filter, "Match known peer")
+RelIndex(3, filter, mark, "Allow and classify")
+RelIndex(4, mark, dnat, "Apply DNAT to NAT head-end underlay")
+RelIndex(5, dnat, policy, "Hand packet to policy routing")
+RelIndex(6, policy, route, "Choose customer table")
+RelIndex(7, route, gre, "Send to customer GRE")
+RelIndex(8, gre, headend, "Forward encrypted packet")
+RelIndex(9, headend, core, "Terminate IPsec and deliver decrypted traffic")
+RelIndex(10, core, headend, "Generate return traffic")
+RelIndex(11, headend, ret, "Send encrypted reply over GRE")
+RelIndex(12, ret, snat, "Apply SNAT to muxer edge identity")
+RelIndex(13, snat, egress, "Prepare packet for internet egress")
+RelIndex(14, egress, peer, "Return encrypted reply")
+
+UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")

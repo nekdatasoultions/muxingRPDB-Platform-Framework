@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+"""Validate a rendered customer artifact tree."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+REQUIRED_ROOTS = ["muxer", "headend"]
+PROTOCOL_FIELD_MAP = {
+    "udp500": ("udp500",),
+    "udp4500": ("udp4500",),
+    "esp50": ("esp50",),
+}
+BANNED_GENERATED_RUNTIME_TOKENS = [
+    "iptables",
+    "iptables-restore",
+]
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_snat_coverage(report: dict, firewall_intent_path: Path) -> None:
+    if not firewall_intent_path.exists():
+        report["errors"].append("missing required file: muxer/firewall/firewall-intent.json")
+        return
+
+    intent = _load_json(firewall_intent_path)
+    protocols = intent.get("protocols") or {}
+    coverage = intent.get("snat_coverage") or {}
+    sources = [str(value).strip() for value in coverage.get("egress_sources") or [] if str(value).strip()]
+    rules = coverage.get("rules") or []
+    if not sources:
+        report["errors"].append("SNAT coverage missing head-end egress sources")
+        return
+
+    rule_pairs = {
+        (str(rule.get("source_ip") or "").strip(), str(rule.get("protocol") or "").strip())
+        for rule in rules
+    }
+    for protocol_name, field_names in PROTOCOL_FIELD_MAP.items():
+        enabled = any(bool(protocols.get(field_name)) for field_name in field_names)
+        if not enabled:
+            continue
+        for source in sources:
+            if (source, protocol_name) not in rule_pairs:
+                report["errors"].append(
+                    f"SNAT coverage missing {protocol_name} for head-end egress source {source}"
+                )
+
+
+def _validate_no_legacy_firewall_tokens(report: dict, artifact_dir: Path) -> None:
+    for path in sorted(artifact_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        rel = path.relative_to(artifact_dir).as_posix()
+        for token in BANNED_GENERATED_RUNTIME_TOKENS:
+            if token in text:
+                report["errors"].append(
+                    f"rendered artifact contains banned runtime token: {rel} -> {token}"
+                )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate a rendered customer artifact tree.")
+    parser.add_argument("render_dir", help="Path to the rendered customer artifact directory")
+    parser.add_argument("--json", action="store_true", help="Print the validation report as JSON")
+    args = parser.parse_args()
+
+    render_dir = Path(args.render_dir).resolve()
+    report = {
+        "render_dir": str(render_dir),
+        "errors": [],
+        "warnings": [],
+    }
+
+    if not render_dir.exists():
+        report["errors"].append(f"render directory not found: {render_dir}")
+    else:
+        manifest_path = render_dir / "render-manifest.json"
+        if not manifest_path.exists():
+            report["errors"].append("missing required file: render-manifest.json")
+        else:
+            manifest = _load_json(manifest_path)
+            roots = manifest.get("roots") or {}
+            for root_name in REQUIRED_ROOTS:
+                root_dir = render_dir / root_name
+                if not root_dir.is_dir():
+                    report["errors"].append(f"missing required directory: {root_name}/")
+                    continue
+
+                expected_files = roots.get(root_name)
+                if not expected_files:
+                    report["errors"].append(f"render-manifest.json missing root listing for {root_name}")
+                    continue
+
+                for relative_name in expected_files:
+                    if not (root_dir / relative_name).exists():
+                        report["errors"].append(
+                            f"missing rendered file: {root_name}/{relative_name}"
+                        )
+
+            _validate_snat_coverage(report, render_dir / "muxer" / "firewall" / "firewall-intent.json")
+            _validate_no_legacy_firewall_tokens(report, render_dir)
+
+            customer_name = manifest.get("customer_name")
+            customer_class = manifest.get("customer_class")
+            if not customer_name:
+                report["warnings"].append("render-manifest.json missing customer_name")
+            if not customer_class:
+                report["warnings"].append("render-manifest.json missing customer_class")
+
+        file_count = sum(1 for path in render_dir.rglob("*") if path.is_file())
+        if file_count == 0:
+            report["errors"].append("render directory contains no files")
+
+    report["valid"] = not report["errors"]
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"Rendered artifact tree: {'VALID' if report['valid'] else 'INVALID'}")
+        print(f"- render dir: {render_dir}")
+        for error in report["errors"]:
+            print(f"  error: {error}")
+        for warning in report["warnings"]:
+            print(f"  warning: {warning}")
+
+    return 0 if report["valid"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

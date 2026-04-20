@@ -1,0 +1,19 @@
+schema_version: 1
+
+customer:
+  name: example-minimal-nat
+  customer_class: nat
+  peer:
+    public_ip: 198.51.100.25
+    psk_secret_ref: /muxingrpdb/customers/example-minimal-nat/psk
+  selectors:
+    local_subnets:
+      - 10.20.30.0/24
+    remote_subnets:
+      - 10.99.0.0/24
+  backend:
+    cluster: nat
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: false

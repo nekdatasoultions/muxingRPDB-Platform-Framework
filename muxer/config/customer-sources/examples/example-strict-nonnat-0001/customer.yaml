@@ -1,0 +1,31 @@
+schema_version: 1
+
+customer:
+  id: 201
+  name: example-strict-nonnat-0001
+  customer_class: strict-non-nat
+
+  peer:
+    public_ip: 198.51.100.20
+    remote_id: 198.51.100.20
+    psk_secret_ref: /muxingrpdb/example/example-strict-nonnat-0001/psk
+
+  transport:
+    mark: 0x42001
+    table: 42001
+    tunnel_key: 42001
+    interface: gre-example-0201
+    overlay:
+      mux_ip: 169.254.201.1/30
+      router_ip: 169.254.201.2/30
+
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+    remote_subnets:
+      - 10.129.4.12/32
+
+  backend:
+    cluster: non-nat
+    assignment: active-a
+    role: nonnat-active

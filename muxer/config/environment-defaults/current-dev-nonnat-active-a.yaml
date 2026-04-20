@@ -1,0 +1,40 @@
+schema_version: 1
+
+environment:
+  name: current-dev-nonnat-active-a
+  bindings:
+    MUXER_PUBLIC_IFACE: ens34
+    MUXER_TRANSPORT_IP: 172.31.69.213
+    MUXER_UNDERLAY_IFACE: ens34
+    MUXER_PUBLIC_EDGE_IP: 54.204.221.89
+    MUXER_PUBLIC_PRIVATE_IP: 172.31.34.89
+    BACKEND_UNDERLAY_IP: 172.31.40.220
+    HEADEND_PRIMARY_IP: 172.31.40.220
+    HEADEND_CORE_IP: 172.31.59.220
+    HEADEND_PUBLIC_IP: 54.204.221.89
+    HEADEND_PUBLIC_IFACE: ens34
+    HEADEND_ID: 54.204.221.89
+    HEADEND_CLEAR_IFACE: ens36
+    PSK_FROM_SECRET_REF: resolved-via-secret-store
+  backend_resolver:
+    roles:
+      nonnat-active:
+        BACKEND_CLUSTER: non-nat
+        BACKEND_ASSIGNMENT: active-a
+        BACKEND_UNDERLAY_IP: 172.31.40.220
+        HEADEND_PRIMARY_IP: 172.31.40.220
+        HEADEND_CORE_IP: 172.31.59.220
+        HEADEND_PUBLIC_IP: 54.204.221.89
+        HEADEND_PUBLIC_IFACE: ens34
+        HEADEND_ID: 54.204.221.89
+        HEADEND_CLEAR_IFACE: ens36
+    clusters:
+      non-nat:
+        active-a:
+          BACKEND_UNDERLAY_IP: 172.31.40.220
+          HEADEND_PRIMARY_IP: 172.31.40.220
+          HEADEND_CORE_IP: 172.31.59.220
+          HEADEND_PUBLIC_IP: 54.204.221.89
+          HEADEND_PUBLIC_IFACE: ens34
+          HEADEND_ID: 54.204.221.89
+          HEADEND_CLEAR_IFACE: ens36

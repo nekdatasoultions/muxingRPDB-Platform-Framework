@@ -1,0 +1,40 @@
+schema_version: 1
+
+environment:
+  name: rpdb-empty-nonnat-active-a
+  bindings:
+    MUXER_PUBLIC_IFACE: ens34
+    MUXER_TRANSPORT_IP: 172.31.69.214
+    MUXER_UNDERLAY_IFACE: ens35
+    MUXER_PUBLIC_EDGE_IP: 23.20.31.151
+    MUXER_PUBLIC_PRIVATE_IP: 172.31.33.150
+    BACKEND_UNDERLAY_IP: 172.31.40.223
+    HEADEND_PRIMARY_IP: 172.31.40.223
+    HEADEND_CORE_IP: 172.31.59.221
+    HEADEND_PUBLIC_IP: 23.20.31.151
+    HEADEND_PUBLIC_IFACE: ens34
+    HEADEND_ID: 23.20.31.151
+    HEADEND_CLEAR_IFACE: ens36
+    PSK_FROM_SECRET_REF: resolved-via-secret-store
+  backend_resolver:
+    roles:
+      nonnat-active:
+        BACKEND_CLUSTER: non-nat
+        BACKEND_ASSIGNMENT: active-a
+        BACKEND_UNDERLAY_IP: 172.31.40.223
+        HEADEND_PRIMARY_IP: 172.31.40.223
+        HEADEND_CORE_IP: 172.31.59.221
+        HEADEND_PUBLIC_IP: 23.20.31.151
+        HEADEND_PUBLIC_IFACE: ens34
+        HEADEND_ID: 23.20.31.151
+        HEADEND_CLEAR_IFACE: ens36
+    clusters:
+      non-nat:
+        active-a:
+          BACKEND_UNDERLAY_IP: 172.31.40.223
+          HEADEND_PRIMARY_IP: 172.31.40.223
+          HEADEND_CORE_IP: 172.31.59.221
+          HEADEND_PUBLIC_IP: 23.20.31.151
+          HEADEND_PUBLIC_IFACE: ens34
+          HEADEND_ID: 23.20.31.151
+          HEADEND_CLEAR_IFACE: ens36

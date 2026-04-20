@@ -1,0 +1,18 @@
+class: strict-non-nat
+
+overrides:
+  backend:
+    cluster: non-nat
+    role: nonnat-active
+
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+    force_rewrite_4500_to_500: false
+
+  natd_rewrite:
+    enabled: true
+
+  post_ipsec_nat:
+    enabled: false

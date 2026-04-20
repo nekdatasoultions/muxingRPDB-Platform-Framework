@@ -1,0 +1,66 @@
+schema_version: 1
+
+customer:
+  id: 103
+  name: vpn-customer-stage1-15-cust-0003
+  customer_class: nat
+
+  peer:
+    public_ip: 3.215.115.178
+    remote_id: 3.215.115.178
+    psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0003/psk
+
+  transport:
+    mark: 0x41003
+    table: 41003
+    tunnel_key: 41003
+    interface: gre-s15-0003
+    overlay:
+      mux_ip: 169.254.103.1/30
+      router_ip: 169.254.103.2/30
+
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.3.154/32
+
+  backend:
+    cluster: nat
+    assignment: active-a
+    role: nat-active
+    underlay_ip: 172.31.40.221
+
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: true
+    force_rewrite_4500_to_500: false
+
+  natd_rewrite:
+    enabled: false
+
+  ipsec:
+    auto: start
+    local_id: 54.204.221.89
+    remote_id: 3.215.115.178
+    ike: aes256-sha2_256;modp4096,aes256-sha2_256;modp2048
+    esp: aes256-sha2_256
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    mark: 0x41003/0xffffffff
+
+  post_ipsec_nat:
+    enabled: true
+    mode: netmap
+    translated_subnets:
+      - 172.30.0.64/27
+    real_subnets:
+      - 10.129.3.154/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    output_mark: 0x41003/0xffffffff
+    tcp_mss_clamp: 1360

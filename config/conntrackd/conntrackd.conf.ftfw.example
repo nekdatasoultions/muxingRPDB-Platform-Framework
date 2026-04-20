@@ -1,0 +1,33 @@
+# conntrackd template for ACTIVE/STANDBY muxer flow-state sync
+# Copy to /etc/conntrackd/conntrackd.conf and replace placeholders.
+
+General {
+  HashSize 32768
+  HashLimit 131072
+  LockFile /run/conntrackd.lock
+
+  UNIX {
+    Path /run/conntrackd.ctl
+    Backlog 20
+  }
+
+  SocketBufferSize 1249280
+  SocketBufferSizeMaxGrown 2498560
+}
+
+Sync {
+  Mode FTFW {
+    PurgeTimeout 60
+    CommitTimeout 180
+  }
+
+  Multicast {
+    IPv4_address 225.0.0.50
+    Group 3780
+    IPv4_interface <SYNC_LOCAL_IP>
+    Interface <SYNC_INTERFACE>
+    SndSocketBuffer 1249280
+    RcvSocketBuffer 1249280
+    Checksum on
+  }
+}

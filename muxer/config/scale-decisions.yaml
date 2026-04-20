@@ -1,0 +1,84 @@
+schema_version: 1
+phase: 2
+generated_for: rpdb-scale-repo-only-plan
+classification:
+  status: completed
+  backend: nftables
+  activation: batched_nft_apply
+  inventory_source: local_customer_modules_for_repo_mode
+translation:
+  scope: muxer_pass_through_translation
+  decision: nftables_nat_maps
+  activation: full_table_batch_apply
+  inventory_source: local_customer_modules_for_repo_mode
+  customer_scoped_remove: rebuild_remaining_translation_table_from_inventory
+  target_objects:
+    - udp500_dnat_map
+    - udp4500_dnat_map
+    - udp4500_force500_dnat_map
+    - esp_dnat_map
+    - udp500_snat_map
+    - udp4500_snat_map
+    - esp_snat_map
+  preserved_behaviors:
+    - strict_non_nat_public_identity_preservation
+    - nat_t_backend_delivery
+    - force_4500_to_500_port_rewrite
+    - reply_path_snat_via_headend_egress_sources
+  exclusions:
+    - termination_mode
+  baseline_mapping:
+    source_summary_step: synthetic_scale_baseline
+    strict_non_nat_20000_blocked_rules: 0
+    nat_t_20000_blocked_rules: 0
+nfqueue_bridge:
+  scope: muxer_force4500_and_natd_bridge
+  decision: nftables_selector_sets_plus_manifested_bridge_worker
+  activation: shared_queue_hooks_plus_manifest_state
+  inventory_source: local_customer_modules_for_repo_mode
+  customer_scoped_remove: rebuild_remaining_bridge_sets_from_inventory
+  queue_groups:
+    - force4500_in
+    - force4500_out
+    - natd_dpi_in
+    - natd_dpi_out
+  preserved_behaviors:
+    - force_4500_to_500_bridge
+    - natd_dpi_rewrite
+    - skb_mark_reassertion_after_userspace_mutation
+  exclusions:
+    - bridge_disabled_customers
+  baseline_mapping:
+    source_summary_step: synthetic_scale_baseline
+    force4500_bridge_20000_blocked_bridge_rules: 0
+    natd_bridge_20000_blocked_bridge_rules: 0
+headend_post_ipsec_nat:
+  scope: headend_post_ipsec_nat
+  decision: nftables_nat_artifacts
+  activation: nft_batch_apply_remove
+  inventory_source: bundled_customer_artifacts
+  customer_scoped_remove: nft_remove_selected_customer_state
+  preserved_behaviors:
+    - netmap_one_to_one_translation
+    - explicit_host_map_translation
+    - route_and_mark_carry_through
+  prohibited_paths:
+    - muxer3_runtime_or_deploy_fallback
+    - non_nft_firewall_activation
+    - non_nft_restore_activation
+  fallback_policy:
+    non_nft_firewall_allowed: false
+    non_nft_restore_allowed: false
+    muxer3_allowed: false
+    requires_stop_and_redesign: true
+  exclusions:
+    - customers_without_post_ipsec_nat
+  baseline_mapping:
+    source_summary_step: synthetic_scale_baseline
+    nat_t_netmap_20000_headend_apply_commands: 40000
+    nat_t_netmap_20000_blocked_headend_apply_commands: 0
+    nat_t_netmap_20000_blocked_headend_rollback_commands: 0
+success_criteria:
+  - translation_and_bridge_decisions_are_specific_enough_to_implement_without_guessing
+  - decisions_reference_current_scale_baseline_numbers
+  - decisions_preserve_existing_customer_behavior_contracts

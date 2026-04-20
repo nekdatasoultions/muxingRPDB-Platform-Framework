@@ -1,0 +1,29 @@
+schema_version: 1
+
+defaults:
+  transport:
+    tunnel_type: gre
+    tunnel_ttl: 64
+
+  rpdb:
+    priority_base: 1000
+
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: true
+    force_rewrite_4500_to_500: false
+
+  natd_rewrite:
+    enabled: false
+    initiator_inner_ip: ""
+
+  ipsec:
+    auto: start
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+
+  post_ipsec_nat:
+    enabled: false
+    mode: disabled

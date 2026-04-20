@@ -1,0 +1,293 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Muxingplus HA - NetBox-driven Active/Standby VPN headend deployment.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: vpn-headend-prod
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  SubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  NodeAPrivateIp:
+    Type: String
+  NodeBPrivateIp:
+    Type: String
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  AmiId:
+    Type: AWS::EC2::Image::Id
+  InstanceType:
+    Type: String
+    Default: t3.small
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  ProjectPackageS3Uri:
+    Type: String
+    Description: s3://bucket/path/muxingplus-ha.zip
+  EipAllocationId:
+    Type: String
+    Default: ""
+    Description: Optional existing EIP allocation ID for single public identity.
+  LeaseTableName:
+    Type: String
+    Default: muxingplus_ha_leases
+  FlowSyncMode:
+    Type: String
+    Default: conntrackd
+    AllowedValues:
+      - none
+      - conntrackd
+  SaSyncMode:
+    Type: String
+    Default: libreswan-no-sa-sync
+    AllowedValues:
+      - none
+      - libreswan-no-sa-sync
+      - strongswan-ha
+  IpsecService:
+    Type: String
+    Default: ipsec
+
+Conditions:
+  HasEip: !Not [!Equals [!Ref EipAllocationId, ""]]
+
+Resources:
+  HaLeaseTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref LeaseTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cluster_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cluster_id
+          KeyType: HASH
+
+  HeadendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Muxingplus HA VPN headend security group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: !Ref AllowedIngressCidr
+        - IpProtocol: "50"
+          CidrIp: !Ref AllowedIngressCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-sg"
+
+  HeadendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: !Sub "${ClusterName}-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt HaLeaseTable.Arn
+              - Effect: Allow
+                Action:
+                  - ec2:AssociateAddress
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: "*"
+
+  HeadendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref HeadendRole
+
+  HeadendA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref HeadendInstanceProfile
+      SubnetId: !Ref SubnetAId
+      PrivateIpAddress: !Ref NodeAPrivateIp
+      SecurityGroupIds:
+        - !Ref HeadendSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-a"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:ha-node
+          Value: a
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y awscli unzip jq conntrack-tools libreswan
+
+          mkdir -p /opt/muxingplus-ha
+          aws s3 cp '${ProjectPackageS3Uri}' /tmp/muxingplus-ha.zip
+          unzip -oq /tmp/muxingplus-ha.zip -d /opt/muxingplus-ha
+
+          if [[ ! -f /opt/muxingplus-ha/README.md ]]; then
+            inner_dir="$(find /opt/muxingplus-ha -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+            if [[ -n "$inner_dir" && -f "$inner_dir/README.md" ]]; then
+              cp -a "$inner_dir"/. /opt/muxingplus-ha/
+            fi
+          fi
+
+          bash /opt/muxingplus-ha/ops/headend-ha-active-standby/scripts/install-local.sh /opt/muxingplus-ha
+
+          TOKEN="$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+          MAC="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/mac)"
+          ENI_ID="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/network/interfaces/macs/${!MAC}/interface-id)"
+          LOCAL_IP="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)"
+
+          cat >/etc/muxingplus-ha/ha.env <<EOF
+          HA_CLUSTER_ID=${ClusterName}
+          HA_NODE_ID=headend-a
+          HA_REGION=${AWS::Region}
+          HA_DDB_TABLE=${LeaseTableName}
+          HA_LEASE_TTL_SEC=15
+          HA_LOOP_INTERVAL_SEC=3
+          HA_EIP_ALLOC_ID=${EipAllocationId}
+          HA_ENI_ID=${!ENI_ID}
+          HA_IPSEC_SERVICE=${IpsecService}
+          FLOW_SYNC_MODE=${FlowSyncMode}
+          SA_SYNC_MODE=${SaSyncMode}
+          HA_CONNTRACKD_SERVICE=conntrackd
+          HA_CONNTRACKD_COMMIT_ON_PROMOTE=true
+          HA_CONNTRACKD_RESYNC_ON_DEMOTE=true
+          HA_DEMOTE_STOP_IPSEC=true
+          HA_STATE_DIR=/run/muxingplus-ha
+          HA_LOG_FILE=/var/log/muxingplus-ha.log
+          EOF
+
+          if [[ '${FlowSyncMode}' == 'conntrackd' ]]; then
+            cp /etc/muxingplus-ha/examples/conntrackd.conf.ftfw.example /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_LOCAL_IP>#${!LOCAL_IP}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_PEER_IP>#${NodeBPrivateIp}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_INTERFACE>#eth0#g" /etc/conntrackd/conntrackd.conf
+            systemctl enable --now conntrackd || true
+          fi
+
+          systemctl enable --now muxingplus-ha.service
+
+  HeadendB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref HeadendInstanceProfile
+      SubnetId: !Ref SubnetBId
+      PrivateIpAddress: !Ref NodeBPrivateIp
+      SecurityGroupIds:
+        - !Ref HeadendSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-headend-b"
+        - Key: muxingplus:cluster
+          Value: !Ref ClusterName
+        - Key: muxingplus:ha-node
+          Value: b
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y awscli unzip jq conntrack-tools libreswan
+
+          mkdir -p /opt/muxingplus-ha
+          aws s3 cp '${ProjectPackageS3Uri}' /tmp/muxingplus-ha.zip
+          unzip -oq /tmp/muxingplus-ha.zip -d /opt/muxingplus-ha
+
+          if [[ ! -f /opt/muxingplus-ha/README.md ]]; then
+            inner_dir="$(find /opt/muxingplus-ha -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+            if [[ -n "$inner_dir" && -f "$inner_dir/README.md" ]]; then
+              cp -a "$inner_dir"/. /opt/muxingplus-ha/
+            fi
+          fi
+
+          bash /opt/muxingplus-ha/ops/headend-ha-active-standby/scripts/install-local.sh /opt/muxingplus-ha
+
+          TOKEN="$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+          MAC="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/mac)"
+          ENI_ID="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/network/interfaces/macs/${!MAC}/interface-id)"
+          LOCAL_IP="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)"
+
+          cat >/etc/muxingplus-ha/ha.env <<EOF
+          HA_CLUSTER_ID=${ClusterName}
+          HA_NODE_ID=headend-b
+          HA_REGION=${AWS::Region}
+          HA_DDB_TABLE=${LeaseTableName}
+          HA_LEASE_TTL_SEC=15
+          HA_LOOP_INTERVAL_SEC=3
+          HA_EIP_ALLOC_ID=${EipAllocationId}
+          HA_ENI_ID=${!ENI_ID}
+          HA_IPSEC_SERVICE=${IpsecService}
+          FLOW_SYNC_MODE=${FlowSyncMode}
+          SA_SYNC_MODE=${SaSyncMode}
+          HA_CONNTRACKD_SERVICE=conntrackd
+          HA_CONNTRACKD_COMMIT_ON_PROMOTE=true
+          HA_CONNTRACKD_RESYNC_ON_DEMOTE=true
+          HA_DEMOTE_STOP_IPSEC=true
+          HA_STATE_DIR=/run/muxingplus-ha
+          HA_LOG_FILE=/var/log/muxingplus-ha.log
+          EOF
+
+          if [[ '${FlowSyncMode}' == 'conntrackd' ]]; then
+            cp /etc/muxingplus-ha/examples/conntrackd.conf.ftfw.example /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_LOCAL_IP>#${!LOCAL_IP}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_PEER_IP>#${NodeAPrivateIp}#g" /etc/conntrackd/conntrackd.conf
+            sed -i "s#<SYNC_INTERFACE>#eth0#g" /etc/conntrackd/conntrackd.conf
+            systemctl enable --now conntrackd || true
+          fi
+
+          systemctl enable --now muxingplus-ha.service
+
+Outputs:
+  ClusterName:
+    Value: !Ref ClusterName
+  HeadendAInstanceId:
+    Value: !Ref HeadendA
+  HeadendBInstanceId:
+    Value: !Ref HeadendB
+  HeadendASubnet:
+    Value: !Ref SubnetAId
+  HeadendBSubnet:
+    Value: !Ref SubnetBId
+  LeaseTable:
+    Value: !Ref HaLeaseTable
+  SecurityGroupId:
+    Value: !Ref HeadendSecurityGroup

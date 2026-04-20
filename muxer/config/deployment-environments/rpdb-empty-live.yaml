@@ -1,0 +1,110 @@
+schema_version: 1
+
+environment:
+  name: rpdb-empty-live
+  description: Current live RPDB-empty platform contract for approved customer apply through the RPDB SSH path.
+  aws:
+    region: us-east-1
+    account_hint: "594085074402"
+  access:
+    method: ssh
+    ssh:
+      user: ec2-user
+      key_ref: ec2-instance-connect-via-rpdb-muxer
+  live_apply:
+    enabled: true
+    requires_approval: true
+
+targets:
+  muxer:
+    name: muxer-single-prod-rpdb-empty-node
+    role: muxer
+    rpdb_managed: true
+    selector:
+      type: instance_id
+      value: i-0c8c34de42777c769
+      private_ip: 172.31.33.150
+      public_ip: 23.20.31.151
+      eip_allocation_id: eipalloc-0c1769dbbdd3526c1
+      eip_association_id: eipassoc-08b33d79cc8ad0d71
+    access:
+      method: ssh
+  headends:
+    nat:
+      active:
+        name: vpn-headend-nat-graviton-dev-rpdb-empty-headend-a
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: instance_id
+          value: i-0a5f8a1e1b0fed116
+          private_ip: 172.31.40.222
+        access:
+          method: ssh
+      standby:
+        name: vpn-headend-nat-graviton-dev-rpdb-empty-headend-b
+        role: nat-headend
+        rpdb_managed: true
+        selector:
+          type: instance_id
+          value: i-026dcd8f4b658772b
+          private_ip: 172.31.141.222
+        access:
+          method: ssh
+    non_nat:
+      active:
+        name: vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-a
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: instance_id
+          value: i-05c6a9f56cd531322
+          private_ip: 172.31.40.223
+        access:
+          method: ssh
+      standby:
+        name: vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-b
+        role: non-nat-headend
+        rpdb_managed: true
+        selector:
+          type: instance_id
+          value: i-0eb58b43b6886ea0c
+          private_ip: 172.31.141.223
+        access:
+          method: ssh
+
+datastores:
+  mode: dynamodb
+  customer_sot_table: muxingplus-customer-sot-rpdb-empty
+  allocation_table: muxingplus-customer-sot-rpdb-empty-allocations
+
+artifacts:
+  mode: s3
+  bucket: baines-networking
+  prefix: Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/customer-deploy
+
+backups:
+  baseline_root: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline
+  muxer: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/muxer
+  nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend
+  non_nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend
+
+nat_t_watcher:
+  log_source:
+    type: file
+    path: /var/log/rpdb/muxer-events.jsonl
+  state_root: build/nat-t-watcher/state
+  output_root: build/nat-t-watcher/out
+  package_root: build/nat-t-watcher/packages
+
+customer_requests:
+  allowed_roots:
+    - muxer/config/customer-requests/migrated
+    - muxer/config/customer-requests/examples
+  blocked_customers:
+    - legacy-cust0003
+    - vpn-customer-stage1-15-cust-0003
+
+owners:
+  validation: rpdb-platform-validation
+  rollback: rpdb-platform-rollback

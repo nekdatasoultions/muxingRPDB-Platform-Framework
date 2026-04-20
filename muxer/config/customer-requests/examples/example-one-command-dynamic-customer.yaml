@@ -1,0 +1,37 @@
+schema_version: 1
+
+# Operator-facing request example.
+# Do not set customer_class, backend.cluster, or protocols here.
+# RPDB starts this as strict non-NAT and promotes to NAT-T only if the muxer
+# observes UDP/4500 from this same peer.
+customer:
+  name: example-one-command-dynamic-customer
+  peer:
+    public_ip: 203.0.113.60
+    remote_id: 203.0.113.60
+    psk_secret_ref: /muxingrpdb/customers/example-one-command-dynamic-customer/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.60.12/32
+  ipsec:
+    ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+    esp_policies:
+      - aes256-sha256-modp2048
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    replay_protection: true
+    pfs_required: false
+    pfs_groups:
+      - modp2048
+    mobike: false
+    fragmentation: true
+    clear_df_bit: true
+  post_ipsec_nat:
+    enabled: false
+    mode: disabled

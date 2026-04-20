@@ -1,0 +1,38 @@
+C4Deployment
+title MUXER3 AWS Deployment View
+
+Person(peer, "Customer Peer", "Internet VPN peer")
+System_Ext(core, "Core Services", "Protected backend systems")
+
+Deployment_Node(region, "AWS us-east-1", "Region") {
+    Deployment_Node(vpc, "MuxingPlus VPC", "Amazon VPC") {
+        Deployment_Node(publicsubnet, "Public Edge Subnet", "Subnet") {
+            Container(muxer, "MUXER3 EC2 Node", "Amazon EC2", "Single-public-IP muxer running pass-through dataplane")
+        }
+        Deployment_Node(natcluster, "NAT Head-End Subnets", "Subnets") {
+            Container(nathe, "NAT VPN Head Ends", "Amazon EC2 plus Libreswan", "Terminate NAT-T customer tunnels")
+        }
+        Deployment_Node(nonnatcluster, "Non-NAT Head-End Subnets", "Subnets") {
+            Container(nonnathe, "Non-NAT VPN Head Ends", "Amazon EC2 plus Libreswan", "Terminate strict UDP 500 and ESP tunnels")
+        }
+        Deployment_Node(sharedsvc, "Shared Services", "Managed Services") {
+            ContainerDb(sot, "Customer SoT", "Amazon DynamoDB", "Customer records and backend role state")
+            Container(efs, "Shared Bundle Store", "Amazon EFS", "Bundle staging and shared artifacts")
+            Container(cw, "Observability", "Amazon CloudWatch", "Metrics, logs, dashboards, and alarms")
+        }
+    }
+}
+
+Rel(peer, muxer, "Establishes IKE and IPsec")
+Rel(muxer, nathe, "Forwards NAT-T customers over GRE")
+Rel(muxer, nonnathe, "Forwards strict non-NAT customers over GRE")
+Rel(nathe, core, "Delivers decrypted traffic")
+Rel(nonnathe, core, "Delivers decrypted traffic")
+Rel(muxer, sot, "Reads customer source of truth")
+Rel(muxer, cw, "Publishes traces and metrics")
+Rel(nathe, efs, "Reads staged bundles")
+Rel(nonnathe, efs, "Reads staged bundles")
+Rel(nathe, cw, "Publishes host and tunnel metrics")
+Rel(nonnathe, cw, "Publishes host and tunnel metrics")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

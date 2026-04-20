@@ -1,0 +1,34 @@
+C4Component
+title MUXER3 Muxer Component View
+
+Person(ops, "Operator", "Runs apply, show, render, and doctor flows")
+System_Ext(peer, "Customer Peer", "Encrypted packet source")
+System_Ext(headends, "VPN Head Ends", "GRE destinations for encrypted traffic")
+ContainerDb(sot, "Customer Source of Truth", "Amazon DynamoDB", "Customer records and backend role state")
+
+Container_Boundary(muxer, "MUXER3 Muxer") {
+    Component(cfg, "Global Config Loader", "muxer.yaml and core.py", "Loads public identity, interfaces, chain names, and global allocation settings")
+    Component(resolver, "Customer Module Resolver", "variables.py and dynamodb_sot.py", "Loads customer modules, resolves backend roles, validates customer shape")
+    Component(model, "Derived Dataplane Model", "dataplane.py", "Explains expected NAT, iptables, routing, and tunnel state")
+    Component(cli, "CLI Orchestrator", "cli.py", "Coordinates apply, flush, show, and render-ipsec commands")
+    Component(iptables, "iptables Builder", "modes.py", "Builds MUXER_FILTER, MUXER_MANGLE, MUXER_NAT_PRE, and MUXER_NAT_POST")
+    Component(route, "Tunnel and Policy Builder", "core.py and customers.py", "Creates GRE or IPIP, overlay IPs, route tables, and fwmark policy routing")
+    Component(doctor, "Doctor and Drift Detection", "muxer_customer_doctor.py", "Checks runtime versus expected state and classifies drift")
+}
+
+Rel(ops, cli, "Runs apply, flush, show")
+Rel(ops, doctor, "Runs explain, list, show, check, repair")
+Rel(cfg, resolver, "Provides global settings")
+Rel(sot, resolver, "Provides customer records")
+Rel(resolver, model, "Builds expected customer dataplane")
+Rel(resolver, cli, "Provides normalized customer modules")
+Rel(cli, iptables, "Applies classification and NAT chains")
+Rel(cli, route, "Applies tunnels and policy routing")
+Rel(peer, iptables, "Sends UDP 500, UDP 4500, and ESP 50")
+Rel(iptables, route, "Marks packets for customer routing")
+Rel(route, headends, "Forwards encrypted packets over customer GRE")
+Rel(model, doctor, "Provides expected state")
+Rel(iptables, doctor, "Provides live rule state")
+Rel(route, doctor, "Provides live tunnel and route state")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

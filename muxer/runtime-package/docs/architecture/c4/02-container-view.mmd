@@ -1,0 +1,38 @@
+C4Container
+title MUXER3 Container View
+
+Person(peer, "Customer Peer", "Known customer VPN peer")
+Person(ops, "Operator", "Runs onboarding, apply, validation, and troubleshooting")
+System_Ext(core, "Core Services", "Protected backend systems")
+System_Ext(cw, "Amazon CloudWatch", "Metrics, dashboards, and logs")
+
+System_Boundary(platform, "MuxingPlus VPN Edge Platform") {
+    ContainerDb(sot, "Customer Source of Truth", "Amazon DynamoDB", "Customer records, backend roles, peer settings, rendered source")
+    Container(renderer, "Artifact Renderers", "Python scripts", "Render muxer customer artifacts and head-end bundles")
+    Container(muxctl, "Muxer Control Plane", "Python CLI", "Loads config and customer modules, then applies pass-through dataplane")
+    Container(muxdp, "Muxer Dataplane", "Linux networking", "iptables chains, policy routing, route tables, GRE forwarding")
+    Container(nathe, "NAT VPN Head Ends", "Libreswan on EC2", "Terminate NAT-T customers and apply post-IPsec NAT when required")
+    Container(nonnathe, "Non-NAT VPN Head Ends", "Libreswan on EC2", "Terminate strict UDP 500 and ESP customers")
+    Container(shared, "Shared Bundle Store", "Amazon EFS", "Head-end install bundles and shared artifacts")
+    Container(doctor, "Doctor and Trace Tooling", "Python plus logs", "Explains expected state, checks drift, and guides repair")
+}
+
+Rel(ops, renderer, "Authors and renders customer changes")
+Rel(ops, muxctl, "Applies and inspects muxer state")
+Rel(ops, doctor, "Checks runtime and drift")
+Rel(peer, muxdp, "Sends encrypted traffic")
+Rel(renderer, sot, "Reads and syncs customer records")
+Rel(renderer, shared, "Writes head-end bundles")
+Rel(muxctl, sot, "Loads customer modules")
+Rel(muxctl, muxdp, "Builds live dataplane")
+Rel(muxdp, nathe, "Forwards NAT-T customers over GRE")
+Rel(muxdp, nonnathe, "Forwards strict non-NAT customers over GRE")
+Rel(nathe, core, "Delivers decrypted traffic")
+Rel(nonnathe, core, "Delivers decrypted traffic")
+Rel(doctor, sot, "Uses expected customer model")
+Rel(doctor, muxdp, "Compares live state to expected state")
+Rel(muxdp, cw, "Publishes traces and metrics")
+Rel(nathe, cw, "Publishes host and tunnel metrics")
+Rel(nonnathe, cw, "Publishes host and tunnel metrics")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

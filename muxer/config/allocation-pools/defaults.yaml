@@ -1,0 +1,94 @@
+schema_version: 1
+
+pools:
+  customer_id:
+    nat:
+      start: 41000
+      end: 49999
+      step: 1
+    non-nat:
+      start: 2000
+      end: 39999
+      step: 1
+
+  fwmark:
+    nat:
+      start: 266240
+      end: 327679
+      step: 1
+      format: hex
+    non-nat:
+      start: 8192
+      end: 39999
+      step: 1
+      format: hex
+
+  route_table:
+    nat:
+      start: 41000
+      end: 49999
+      step: 1
+    non-nat:
+      start: 2000
+      end: 39999
+      step: 1
+
+  rpdb_priority:
+    nat:
+      start: 11000
+      end: 19999
+      step: 1
+    non-nat:
+      start: 1000
+      end: 9999
+      step: 1
+
+  tunnel_key:
+    nat:
+      start: 41000
+      end: 49999
+      step: 1
+    non-nat:
+      start: 2000
+      end: 39999
+      step: 1
+
+  overlay_block:
+    nat:
+      network: 169.254.128.0/17
+      prefixlen: 30
+      start_index: 0
+    non-nat:
+      network: 169.254.0.0/17
+      prefixlen: 30
+      start_index: 0
+
+  transport_interface:
+    nat:
+      template: gre-vpn-{customer_id:05d}
+    non-nat:
+      template: gre-cust-{customer_id:04d}
+
+  vti_interface:
+    nat:
+      template: vti-vpn{customer_id:05d}
+    non-nat:
+      template: vti-cust{customer_id:04d}
+
+  backend_assignment:
+    nat:
+      options:
+        - nat-pool-01
+        - nat-pool-02
+        - nat-pool-03
+    non-nat:
+      options:
+        - nonnat-pool-01
+        - nonnat-pool-02
+        - nonnat-pool-03
+
+  backend_role:
+    nat:
+      value: nat-active
+    non-nat:
+      value: nonnat-active

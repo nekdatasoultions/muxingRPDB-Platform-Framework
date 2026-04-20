@@ -1,0 +1,51 @@
+schema_version: 1
+
+customer:
+  name: example-service-intent-netmap
+  customer_class: nat
+  peer:
+    public_ip: 198.51.100.44
+    remote_id: 198.51.100.44
+    psk_secret_ref: /muxingrpdb/customers/example-service-intent-netmap/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.3.128/27
+  backend:
+    cluster: nat
+  protocols:
+    udp500: true
+    udp4500: true
+    esp50: false
+  ipsec:
+    ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+      - aes128-sha256-modp2048
+    esp_policies:
+      - aes256-sha256-modp2048
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    replay_protection: true
+    pfs_required: true
+    pfs_groups:
+      - modp2048
+    forceencaps: true
+    mobike: false
+    fragmentation: true
+    clear_df_bit: true
+  post_ipsec_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 10.129.3.128/27
+    translated_subnets:
+      - 172.30.0.64/27
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    tcp_mss_clamp: 1360

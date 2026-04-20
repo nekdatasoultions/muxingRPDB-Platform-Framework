@@ -1,0 +1,22 @@
+schema_version: 1
+
+customer:
+  name: example-minimal-nonnat
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.41
+    psk_secret_ref: /muxingrpdb/customers/example-minimal-nonnat/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.129.4.12/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true

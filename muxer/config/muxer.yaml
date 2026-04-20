@@ -1,0 +1,24 @@
+customer_sot:
+  backend: dynamodb
+  mode: per_customer
+  dynamodb:
+    region: us-east-1
+    table_name: muxingrpdb-customer-sot
+
+rpdb:
+  customer_priority_start: 1000
+  customer_priority_end: 19999
+  operator_priority_start: 20000
+  operator_priority_end: 20999
+
+routing:
+  table_id_start: 1000
+  fwmark_namespace: customer
+
+render:
+  default_mode: customer
+  allow_full_fleet_render: true
+
+apply:
+  default_mode: customer
+  require_explicit_all: true

@@ -1,0 +1,31 @@
+C4Component
+title VPN Head-End Component View
+
+System_Ext(muxer, "MUXER3 Muxer", "Forwards encrypted customer traffic over GRE")
+System_Ext(core, "Core Services", "Protected backend systems")
+Container_Ext(shared, "Shared Bundle Store", "Amazon EFS", "Head-end install bundles")
+
+Container_Boundary(headend, "VPN Head End") {
+    Component(installer, "Bundle Installer", "install-on-headend.sh", "Installs rendered customer files, scripts, and services on the node")
+    Component(validator, "Bundle Validator", "validate-on-headend.sh", "Checks Libreswan includes, services, and generated customer assets")
+    Component(gre, "GRE Service Units", "generated scripts and systemd", "Create per-customer GRE interfaces and peer routes back to the muxer")
+    Component(conf, "Customer IPsec Files", "generated conf and secrets", "Per-customer Libreswan connection files and PSKs")
+    Component(libreswan, "Libreswan Runtime", "libreswan and pluto", "Terminates IKE and IPsec for NAT-T and strict non-NAT customers")
+    Component(postnat, "Post-IPsec NAT", "generated post-ipsec-nat scripts", "Handles overlap translation and reply marking after decrypt")
+    Component(retpath, "Return Path", "GRE and routing", "Sends encrypted return traffic back to the muxer")
+}
+
+Rel(shared, installer, "Provides rendered bundles")
+Rel(installer, validator, "Installs then validates")
+Rel(installer, gre, "Installs GRE scripts and units")
+Rel(installer, conf, "Installs customer conf and secrets")
+Rel(conf, libreswan, "Loaded by Libreswan")
+Rel(muxer, gre, "Delivers encrypted packets over GRE")
+Rel(gre, libreswan, "Provides encrypted packet path")
+Rel(libreswan, postnat, "Passes decrypted traffic when overlap handling is needed")
+Rel(libreswan, core, "Delivers decrypted traffic")
+Rel(postnat, core, "Delivers translated traffic")
+Rel(core, retpath, "Generates return traffic")
+Rel(retpath, muxer, "Sends encrypted return traffic over GRE")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

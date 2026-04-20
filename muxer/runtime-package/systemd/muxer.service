@@ -1,0 +1,12 @@
+[Unit]
+Description=MUXER Router (per-customer IPIP + static iptables)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/muxer/src/muxctl.py apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
