@@ -159,7 +159,7 @@ Relevant RPDB references:
 
 - [`muxer/config/allocation-pools/defaults.yaml`](../muxer/config/allocation-pools/defaults.yaml)
 - [`muxer/config/schema/customer-source.schema.json`](../muxer/config/schema/customer-source.schema.json)
-- [`docs/RPDB_CUSTOMER_FILE_TO_DEPLOY_FULL_PROJECT_PLAN.md`](./RPDB_CUSTOMER_FILE_TO_DEPLOY_FULL_PROJECT_PLAN.md)
+- [`muxer/docs/RESOURCE_ALLOCATION_MODEL.md`](../muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
 
 ### Why this matters
 
@@ -320,7 +320,7 @@ Relevant RPDB references:
 
 - [`muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml`](../muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml)
 - [`muxer/config/schema/dynamic-nat-t-observation.schema.json`](../muxer/config/schema/dynamic-nat-t-observation.schema.json)
-- [`docs/RPDB_DYNAMIC_NAT_T_PROVISIONING_PLAN.md`](./RPDB_DYNAMIC_NAT_T_PROVISIONING_PLAN.md)
+- [`muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md`](../muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md)
 - [`scripts/customers/deploy_customer.py`](../scripts/customers/deploy_customer.py)
 
 ### Why this matters
@@ -597,7 +597,7 @@ RPDB is currently centered on:
 Relevant RPDB references:
 
 - [`docs/HEADEND_CUSTOMER_ORCHESTRATION.md`](./HEADEND_CUSTOMER_ORCHESTRATION.md)
-- [`docs/DEPLOYMENT_MODEL.md`](./DEPLOYMENT_MODEL.md)
+- [`docs/MUXER_AND_HEADEND_PLATFORM_DEPLOY_CHECKLIST.md`](./MUXER_AND_HEADEND_PLATFORM_DEPLOY_CHECKLIST.md)
 - [`docs/RPDB_TARGET_ARCHITECTURE.md`](./RPDB_TARGET_ARCHITECTURE.md)
 
 ### Why this matters
@@ -622,7 +622,6 @@ RPDB now carries a much larger documentation layer for:
 - onboarding
 - deployment
 - dry-run review
-- project planning
 - platform deploy
 - double verification
 - dynamic NAT-T
@@ -631,7 +630,6 @@ RPDB now carries a much larger documentation layer for:
 Examples:
 
 - [`docs/CUSTOMER_ONBOARDING_USER_GUIDE.md`](./CUSTOMER_ONBOARDING_USER_GUIDE.md)
-- [`docs/CUSTOMER_ONBOARDING_RUNBOOK.md`](./CUSTOMER_ONBOARDING_RUNBOOK.md)
 - [`docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md`](./FRESH_EMPTY_PLATFORM_RUNBOOK.md)
 - [`docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md`](./PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 - [`docs/MUXER_GUIDE.md`](./MUXER_GUIDE.md)

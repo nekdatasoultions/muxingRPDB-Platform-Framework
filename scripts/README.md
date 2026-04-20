@@ -32,4 +32,4 @@ paths later.
 
 Reference:
 
-- [CURRENT_PLATFORM_IMPORT.md](../docs/CURRENT_PLATFORM_IMPORT.md)
+- [RPDB documentation index](../docs/README.md)

@@ -1429,7 +1429,7 @@ If you only memorize a few things, memorize these:
 They usually mean one or more of these:
 
 - Is the customer loaded at all?
-- Are the right `iptables` rules present?
+- Are the right `nftables` rules present?
 - Is the packet being marked?
 - Does the RPDB rule exist?
 - Does the customer route table point to the correct tunnel?
@@ -1443,8 +1443,8 @@ That is the checklist hidden inside the phrase "check the muxer."
 After this document, the best follow-on references are:
 
 - [`RPDB_TARGET_ARCHITECTURE.md`](./RPDB_TARGET_ARCHITECTURE.md)
-- [`DEPLOYMENT_MODEL.md`](./DEPLOYMENT_MODEL.md)
-- [`CUSTOMER_ONBOARDING_RUNBOOK.md`](./CUSTOMER_ONBOARDING_RUNBOOK.md)
+- [`CUSTOMER_ONBOARDING_USER_GUIDE.md`](./CUSTOMER_ONBOARDING_USER_GUIDE.md)
+- [`MUXER_AND_HEADEND_PLATFORM_DEPLOY_CHECKLIST.md`](./MUXER_AND_HEADEND_PLATFORM_DEPLOY_CHECKLIST.md)
 - [`HEADEND_CUSTOMER_ORCHESTRATION.md`](./HEADEND_CUSTOMER_ORCHESTRATION.md)
 - [`muxer/runtime-package/config/muxer.yaml`](../muxer/runtime-package/config/muxer.yaml)
 - [`muxer/runtime-package/src/muxerlib/variables.py`](../muxer/runtime-package/src/muxerlib/variables.py)
