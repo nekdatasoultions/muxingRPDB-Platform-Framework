@@ -318,12 +318,21 @@ def _render_nft_remove_script(enabled: bool) -> str:
 def _render_master_apply_script(layout: dict[str, Path], customer_name: str) -> str:
     customer_root = f"/{HEADEND_STATE_ROOT.as_posix()}/{customer_name}"
     swanctl_conf = f"/{SWANCTL_CONF_ROOT.as_posix()}/{customer_name}.conf"
+    swanctl_main = "/etc/swanctl/swanctl.conf"
     return _render_shell_script(
         [
             'ROOT="${RPDB_HEADEND_ROOT:-/}"',
             'ROOT="${ROOT%/}"',
             f'CUSTOMER_ROOT="${{ROOT}}{customer_root}"',
             f'SWANCTL_CONF="${{ROOT}}{swanctl_conf}"',
+            f'SWANCTL_MAIN="${{ROOT}}{swanctl_main}"',
+            'mkdir -p "$(dirname "${SWANCTL_MAIN}")"',
+            'if [ ! -f "${SWANCTL_MAIN}" ]; then',
+            "  printf 'connections {}\\n\\nsecrets {}\\n\\ninclude conf.d/*.conf\\n' > \"${SWANCTL_MAIN}\"",
+            'fi',
+            'if ! grep -qxF "include conf.d/rpdb-customers/*.conf" "${SWANCTL_MAIN}"; then',
+            "  printf '\\ninclude conf.d/rpdb-customers/*.conf\\n' >> \"${SWANCTL_MAIN}\"",
+            'fi',
             'bash "${CUSTOMER_ROOT}/routing/apply-routes.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/apply-post-ipsec-nat.sh"',
             'if command -v swanctl >/dev/null 2>&1 && systemctl is-active --quiet strongswan; then',

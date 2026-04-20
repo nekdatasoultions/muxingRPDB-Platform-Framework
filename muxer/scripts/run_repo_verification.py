@@ -2228,12 +2228,20 @@ def main() -> int:
         raise SystemExit("head-end customer apply must stage configs when standby strongSwan is inactive")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
+    if "include conf.d/rpdb-customers/*.conf" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must ensure swanctl includes RPDB customer snippets")
+    vpn_headend_template_text = (REPO_ROOT / "infra" / "cfn" / "vpn-headend-unit.yaml").read_text(
+        encoding="utf-8"
+    )
+    if vpn_headend_template_text.count("include conf.d/rpdb-customers/*.conf") < 4:
+        raise SystemExit("VPN head-end bootstrap must include RPDB customer swanctl snippets on both nodes")
     record_step(
         "headend_standby_swanctl_reload_guard",
         {
             "source": str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
             "apply_stages_when_strongswan_inactive": True,
             "remove_tolerates_inactive_strongswan": True,
+            "customer_swanctl_include_enforced": True,
             "ha_promote_loads_swanctl": "swanctl --load-all"
             in (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
                 encoding="utf-8"

@@ -262,6 +262,20 @@ fi
 if [[ "$IPSEC_BACKEND" == "strongswan" ]]; then
   STRONGSWAN_ARCHIVE_URI="$STRONGSWAN_ARCHIVE_URI" \
     bash "$APP_DIR/muxingplus-ha/scripts/install_strongswan_from_source.sh"
+  mkdir -p /etc/swanctl/conf.d/rpdb-customers
+  if [[ ! -f /etc/swanctl/swanctl.conf ]]; then
+    cat >/etc/swanctl/swanctl.conf <<'EOF'
+connections {}
+
+secrets {}
+
+include conf.d/*.conf
+include conf.d/rpdb-customers/*.conf
+EOF
+  fi
+  if ! grep -q 'conf.d/rpdb-customers/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
+    printf '\ninclude conf.d/rpdb-customers/*.conf\n' >> /etc/swanctl/swanctl.conf
+  fi
 fi
 
 bash "$APP_DIR/muxingplus-ha/ops/headend-ha-active-standby/scripts/install-local.sh" "$APP_DIR/muxingplus-ha"

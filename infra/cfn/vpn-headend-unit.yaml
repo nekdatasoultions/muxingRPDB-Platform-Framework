@@ -398,10 +398,14 @@ Resources:
           secrets {}
 
           include conf.d/*.conf
+          include conf.d/rpdb-customers/*.conf
           EOF
             fi
             if ! grep -q 'conf.d/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
               printf '\ninclude conf.d/*.conf\n' >> /etc/swanctl/swanctl.conf
+            fi
+            if ! grep -q 'conf.d/rpdb-customers/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
+              printf '\ninclude conf.d/rpdb-customers/*.conf\n' >> /etc/swanctl/swanctl.conf
             fi
           else
             mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/ipsec.d/customers
@@ -701,10 +705,14 @@ Resources:
           secrets {}
 
           include conf.d/*.conf
+          include conf.d/rpdb-customers/*.conf
           EOF
             fi
             if ! grep -q 'conf.d/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
               printf '\ninclude conf.d/*.conf\n' >> /etc/swanctl/swanctl.conf
+            fi
+            if ! grep -q 'conf.d/rpdb-customers/\*.conf' /etc/swanctl/swanctl.conf 2>/dev/null; then
+              printf '\ninclude conf.d/rpdb-customers/*.conf\n' >> /etc/swanctl/swanctl.conf
             fi
           else
             mkdir -p "$LOG_DIR" "$APP_DIR" /etc/muxingplus-ha /opt /etc/ipsec.d/customers
