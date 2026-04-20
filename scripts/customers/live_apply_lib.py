@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shlex
 import shutil
 import subprocess
@@ -247,7 +248,7 @@ def execute_staged_live_apply(
     artifact_run_root = staged_artifact_root / customer_name / run_id
     artifact_package_root = artifact_run_root / "package"
     artifact_execution_plan = artifact_run_root / "execution-plan.json"
-    apply_dir = deploy_dir / "approved-apply"
+    apply_dir = deploy_dir / "a"
     apply_dir.mkdir(parents=True, exist_ok=True)
 
     journal: list[dict[str, Any]] = []
@@ -257,6 +258,93 @@ def execute_staged_live_apply(
         artifact_run_root.mkdir(parents=True, exist_ok=True)
         _copy_tree(package_dir, artifact_package_root)
         shutil.copy2(execution_plan_path, artifact_execution_plan)
+
+        muxer_prepared = _prepare_muxer_root(
+            journal,
+            customer_name=customer_name,
+            bundle_dir=bundle_dir,
+            apply_dir=apply_dir,
+        )
+        headend_prepared = _prepare_headend_root(
+            journal,
+            customer_name=customer_name,
+            bundle_dir=bundle_dir,
+            apply_dir=apply_dir,
+        )
+
+        muxer_prepared_root = Path(muxer_prepared["root"]).resolve()
+        muxer_customer_root = Path(muxer_prepared["apply"]["state_json"]).resolve().parent
+        muxer_module_root = Path(muxer_prepared["apply"]["customer_module"]).resolve().parent
+        muxer_activation = _build_activation_bundle(
+            journal,
+            customer_name=customer_name,
+            component_name="muxer",
+            target_name=str((target_selection.get("muxer") or {}).get("name") or "muxer"),
+            apply_dir=apply_dir,
+            prepared_root=muxer_prepared_root,
+            target_root=muxer_root,
+            relative_paths=[
+                muxer_customer_root.relative_to(muxer_prepared_root),
+                muxer_module_root.relative_to(muxer_prepared_root),
+            ],
+            validate_paths=[
+                Path(muxer_prepared["apply"]["state_json"]).resolve().relative_to(muxer_prepared_root),
+                Path(muxer_prepared["apply"]["customer_module"]).resolve().relative_to(muxer_prepared_root),
+                Path(muxer_prepared["apply"]["master_apply_script"]).resolve().relative_to(muxer_prepared_root),
+            ],
+            cleanup_paths=[
+                muxer_customer_root.relative_to(muxer_prepared_root),
+                muxer_module_root.relative_to(muxer_prepared_root),
+            ],
+            cleanup_files=[],
+            apply_script=Path(muxer_prepared["apply"]["master_apply_script"]).resolve(),
+            remove_script=Path(muxer_prepared["apply"]["master_remove_script"]).resolve(),
+        )
+
+        headend_prepared_root = Path(headend_prepared["root"]).resolve()
+        headend_customer_root = Path(headend_prepared["apply"]["state_json"]).resolve().parent
+        headend_swanctl_conf = Path(headend_prepared["apply"]["swanctl_conf"]).resolve()
+        headend_relative_paths = [
+            headend_customer_root.relative_to(headend_prepared_root),
+            headend_swanctl_conf.relative_to(headend_prepared_root),
+        ]
+        headend_validate_paths = [
+            Path(headend_prepared["apply"]["state_json"]).resolve().relative_to(headend_prepared_root),
+            headend_swanctl_conf.relative_to(headend_prepared_root),
+            Path(headend_prepared["apply"]["master_apply_script"]).resolve().relative_to(headend_prepared_root),
+        ]
+        headend_cleanup_paths = [headend_customer_root.relative_to(headend_prepared_root)]
+        headend_cleanup_files = [headend_swanctl_conf.relative_to(headend_prepared_root)]
+        active_activation = _build_activation_bundle(
+            journal,
+            customer_name=customer_name,
+            component_name="headend",
+            target_name=str((target_selection.get("headend_active") or {}).get("name") or "headend-active"),
+            apply_dir=apply_dir,
+            prepared_root=headend_prepared_root,
+            target_root=headend_active_root,
+            relative_paths=headend_relative_paths,
+            validate_paths=headend_validate_paths,
+            cleanup_paths=headend_cleanup_paths,
+            cleanup_files=headend_cleanup_files,
+            apply_script=Path(headend_prepared["apply"]["master_apply_script"]).resolve(),
+            remove_script=Path(headend_prepared["apply"]["master_remove_script"]).resolve(),
+        )
+        standby_activation = _build_activation_bundle(
+            journal,
+            customer_name=customer_name,
+            component_name="headend",
+            target_name=str((target_selection.get("headend_standby") or {}).get("name") or "headend-standby"),
+            apply_dir=apply_dir,
+            prepared_root=headend_prepared_root,
+            target_root=headend_standby_root,
+            relative_paths=headend_relative_paths,
+            validate_paths=headend_validate_paths,
+            cleanup_paths=headend_cleanup_paths,
+            cleanup_files=headend_cleanup_files,
+            apply_script=Path(headend_prepared["apply"]["master_apply_script"]).resolve(),
+            remove_script=Path(headend_prepared["apply"]["master_remove_script"]).resolve(),
+        )
 
         backend_apply = _execute_json(
             journal,
@@ -305,29 +393,25 @@ def execute_staged_live_apply(
 
         muxer_apply = _execute_json(
             journal,
-            action="apply_muxer_customer",
+            action="apply_muxer_activation_bundle",
             target=str((target_selection.get("muxer") or {}).get("name") or "muxer"),
             command=[
                 sys.executable,
-                "scripts/deployment/apply_muxer_customer.py",
-                "--bundle-dir",
-                str(bundle_dir),
-                "--muxer-root",
-                str(muxer_root),
+                "scripts/customers/node_activation_runner.py",
+                "--request",
+                str(muxer_activation["request_path_obj"]),
                 "--json",
             ],
         )
         rollback_steps.append(
             {
-                "action": "remove_muxer_customer",
+                "action": "rollback_muxer_activation_bundle",
                 "target": str((target_selection.get("muxer") or {}).get("name") or "muxer"),
                 "command": [
                     sys.executable,
-                    "scripts/deployment/remove_muxer_customer.py",
-                    "--customer-name",
-                    customer_name,
-                    "--muxer-root",
-                    str(muxer_root),
+                    "scripts/customers/node_activation_runner.py",
+                    "--rollback-request",
+                    str(muxer_activation["rollback_request_path_obj"]),
                     "--json",
                 ],
             }
@@ -350,29 +434,25 @@ def execute_staged_live_apply(
 
         active_apply = _execute_json(
             journal,
-            action="apply_headend_customer",
+            action="apply_headend_activation_bundle",
             target=str((target_selection.get("headend_active") or {}).get("name") or "headend-active"),
             command=[
                 sys.executable,
-                "scripts/deployment/apply_headend_customer.py",
-                "--bundle-dir",
-                str(bundle_dir),
-                "--headend-root",
-                str(headend_active_root),
+                "scripts/customers/node_activation_runner.py",
+                "--request",
+                str(active_activation["request_path_obj"]),
                 "--json",
             ],
         )
         rollback_steps.append(
             {
-                "action": "remove_headend_customer",
+                "action": "rollback_headend_activation_bundle",
                 "target": str((target_selection.get("headend_active") or {}).get("name") or "headend-active"),
                 "command": [
                     sys.executable,
-                    "scripts/deployment/remove_headend_customer.py",
-                    "--customer-name",
-                    customer_name,
-                    "--headend-root",
-                    str(headend_active_root),
+                    "scripts/customers/node_activation_runner.py",
+                    "--rollback-request",
+                    str(active_activation["rollback_request_path_obj"]),
                     "--json",
                 ],
             }
@@ -395,29 +475,25 @@ def execute_staged_live_apply(
 
         standby_apply = _execute_json(
             journal,
-            action="apply_headend_customer",
+            action="apply_headend_activation_bundle",
             target=str((target_selection.get("headend_standby") or {}).get("name") or "headend-standby"),
             command=[
                 sys.executable,
-                "scripts/deployment/apply_headend_customer.py",
-                "--bundle-dir",
-                str(bundle_dir),
-                "--headend-root",
-                str(headend_standby_root),
+                "scripts/customers/node_activation_runner.py",
+                "--request",
+                str(standby_activation["request_path_obj"]),
                 "--json",
             ],
         )
         rollback_steps.append(
             {
-                "action": "remove_headend_customer",
+                "action": "rollback_headend_activation_bundle",
                 "target": str((target_selection.get("headend_standby") or {}).get("name") or "headend-standby"),
                 "command": [
                     sys.executable,
-                    "scripts/deployment/remove_headend_customer.py",
-                    "--customer-name",
-                    customer_name,
-                    "--headend-root",
-                    str(headend_standby_root),
+                    "scripts/customers/node_activation_runner.py",
+                    "--rollback-request",
+                    str(standby_activation["rollback_request_path_obj"]),
                     "--json",
                 ],
             }
@@ -455,13 +531,50 @@ def execute_staged_live_apply(
             "customer_name": customer_name,
             "status": "applied",
             "generated_at": utc_now(),
-            "mode": "staged_live_apply",
+            "mode": "staged_activation_apply",
+            "activation_contract": {
+                "strategy": "node_local_activation_bundle",
+                "primary_backend": "staged_runner",
+                "break_glass_compatibility": "ssh_live_apply",
+            },
             "roots": {
                 "artifacts": repo_relative(staged_artifact_root),
                 "datastores": repo_relative(staged_datastore_root),
                 "muxer": repo_relative(muxer_root),
                 "headend_active": repo_relative(headend_active_root),
                 "headend_standby": repo_relative(headend_standby_root),
+            },
+            "activation_bundles": {
+                "muxer": {
+                    "bundle_root": muxer_activation["bundle_root"],
+                    "request_path": muxer_activation["request_path"],
+                    "rollback_request_path": muxer_activation["rollback_request_path"],
+                    "payload_root": muxer_activation["payload_root"],
+                    "activation_journal": repo_relative(muxer_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(muxer_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(muxer_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(muxer_activation["bundle_root_path"] / "rollback-result.json"),
+                },
+                "headend_active": {
+                    "bundle_root": active_activation["bundle_root"],
+                    "request_path": active_activation["request_path"],
+                    "rollback_request_path": active_activation["rollback_request_path"],
+                    "payload_root": active_activation["payload_root"],
+                    "activation_journal": repo_relative(active_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(active_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(active_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(active_activation["bundle_root_path"] / "rollback-result.json"),
+                },
+                "headend_standby": {
+                    "bundle_root": standby_activation["bundle_root"],
+                    "request_path": standby_activation["request_path"],
+                    "rollback_request_path": standby_activation["rollback_request_path"],
+                    "payload_root": standby_activation["payload_root"],
+                    "activation_journal": repo_relative(standby_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(standby_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(standby_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(standby_activation["bundle_root_path"] / "rollback-result.json"),
+                },
             },
             "published_artifacts": {
                 "run_root": repo_relative(artifact_run_root),
@@ -500,7 +613,7 @@ def execute_staged_live_apply(
             "customer_name": customer_name,
             "status": rollback_result["status"],
             "generated_at": utc_now(),
-            "mode": "staged_live_apply",
+            "mode": "staged_activation_apply",
             "error": str(exc),
             "rollback": rollback_result,
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
@@ -565,7 +678,7 @@ def _prepare_backend_root(
     package_dir: Path,
     apply_dir: Path,
 ) -> dict[str, Any]:
-    backend_root = apply_dir / "prepared-roots" / "backend"
+    backend_root = apply_dir / "pb"
     if backend_root.exists():
         shutil.rmtree(backend_root)
     backend_root.mkdir(parents=True, exist_ok=True)
@@ -608,7 +721,7 @@ def _prepare_muxer_root(
     bundle_dir: Path,
     apply_dir: Path,
 ) -> dict[str, Any]:
-    muxer_root = apply_dir / "prepared-roots" / "muxer"
+    muxer_root = apply_dir / "pm"
     if muxer_root.exists():
         shutil.rmtree(muxer_root)
     muxer_root.mkdir(parents=True, exist_ok=True)
@@ -651,7 +764,7 @@ def _prepare_headend_root(
     bundle_dir: Path,
     apply_dir: Path,
 ) -> dict[str, Any]:
-    headend_root = apply_dir / "prepared-roots" / "headend"
+    headend_root = apply_dir / "ph"
     if headend_root.exists():
         shutil.rmtree(headend_root)
     headend_root.mkdir(parents=True, exist_ok=True)
@@ -685,6 +798,111 @@ def _prepare_headend_root(
         ],
     )
     return {"root": headend_root, "apply": apply_report, "validate": validate_report}
+
+
+def _copy_relative_paths(source_root: Path, destination_root: Path, relative_paths: list[Path]) -> None:
+    for relative_path in relative_paths:
+        source_path = (source_root / relative_path).resolve()
+        destination_path = (destination_root / relative_path).resolve()
+        if not source_path.exists():
+            raise RuntimeError(f"prepared activation payload path missing: {source_path}")
+        if source_path.is_dir():
+            if destination_path.exists():
+                shutil.rmtree(destination_path)
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_path, destination_path)
+        else:
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination_path)
+
+
+def _build_activation_bundle(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    component_name: str,
+    target_name: str,
+    apply_dir: Path,
+    prepared_root: Path,
+    target_root: Path,
+    relative_paths: list[Path],
+    validate_paths: list[Path],
+    cleanup_paths: list[Path],
+    cleanup_files: list[Path],
+    apply_script: Path | None = None,
+    remove_script: Path | None = None,
+    execute_apply_command: bool = False,
+    execute_remove_command: bool = False,
+) -> dict[str, Any]:
+    target_slug = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in target_name).strip("-") or component_name
+    target_slug = f"{target_slug[:6]}-{hashlib.sha1(target_name.encode('utf-8')).hexdigest()[:6]}"
+    component_slug = (component_name[:1] or "c").lower()
+    bundle_root = apply_dir / "b" / component_slug / target_slug
+    if bundle_root.exists():
+        shutil.rmtree(bundle_root)
+    payload_root = bundle_root / "p"
+    payload_root.mkdir(parents=True, exist_ok=True)
+    _copy_relative_paths(prepared_root, payload_root, relative_paths)
+
+    apply_script_rel = (
+        str(apply_script.resolve().relative_to(prepared_root.resolve())).replace("\\", "/")
+        if apply_script is not None
+        else ""
+    )
+    remove_script_rel = (
+        str(remove_script.resolve().relative_to(prepared_root.resolve())).replace("\\", "/")
+        if remove_script is not None
+        else ""
+    )
+    request = {
+        "schema_version": 1,
+        "customer_name": customer_name,
+        "component_name": component_name,
+        "target_name": target_name,
+        "target_root": str(target_root.resolve()),
+        "payload_root": "p",
+        "copy_paths": [str(path).replace("\\", "/") for path in relative_paths],
+        "validate_paths": [str(path).replace("\\", "/") for path in validate_paths],
+        "execute_apply_command": execute_apply_command,
+        "apply_command": [],
+        "apply_script_relative": apply_script_rel,
+    }
+    rollback_request = {
+        "schema_version": 1,
+        "customer_name": customer_name,
+        "component_name": component_name,
+        "target_name": target_name,
+        "target_root": str(target_root.resolve()),
+        "cleanup_paths": [str(path).replace("\\", "/") for path in cleanup_paths],
+        "cleanup_files": [str(path).replace("\\", "/") for path in cleanup_files],
+        "execute_remove_command": execute_remove_command,
+        "remove_command": [],
+        "remove_script_relative": remove_script_rel,
+    }
+    request_path = bundle_root / "r.json"
+    rollback_request_path = bundle_root / "rr.json"
+    write_json(request_path, request)
+    write_json(rollback_request_path, rollback_request)
+    payload = {
+        "bundle_root": repo_relative(bundle_root),
+        "request_path": repo_relative(request_path),
+        "rollback_request_path": repo_relative(rollback_request_path),
+        "payload_root": repo_relative(payload_root),
+        "component_name": component_name,
+        "target_name": target_name,
+    }
+    _record_structured(
+        journal,
+        action=f"build_{component_name}_activation_bundle",
+        target=target_name,
+        payload=payload,
+    )
+    return {
+        **payload,
+        "bundle_root_path": bundle_root,
+        "request_path_obj": request_path,
+        "rollback_request_path_obj": rollback_request_path,
+    }
 
 
 def _record_remote_result(

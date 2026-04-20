@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "target_counts": [1000, 5000, 10000, 20000],
+  "profiles": {
+    "strict_non_nat": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands": 0,
+      "max_headend_rollback_commands": 0,
+      "max_headend_apply_commands_per_customer": 0,
+      "max_plan_build_ms": {
+        "1000": 400,
+        "5000": 2000,
+        "10000": 6000,
+        "20000": 20000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 300,
+        "5000": 2000,
+        "10000": 6000,
+        "20000": 20000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 4194304,
+        "5000": 16777216,
+        "10000": 33554432,
+        "20000": 67108864
+      }
+    },
+    "nat_t": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands": 0,
+      "max_headend_rollback_commands": 0,
+      "max_headend_apply_commands_per_customer": 0,
+      "max_plan_build_ms": {
+        "1000": 500,
+        "5000": 3000,
+        "10000": 8000,
+        "20000": 30000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 400,
+        "5000": 3000,
+        "10000": 8000,
+        "20000": 30000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 8388608,
+        "5000": 33554432,
+        "10000": 67108864,
+        "20000": 104857600
+      }
+    },
+    "nat_t_netmap": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands_multiplier": 2,
+      "max_headend_rollback_commands_multiplier": 2,
+      "max_headend_apply_commands_per_customer": 2,
+      "max_plan_build_ms": {
+        "1000": 500,
+        "5000": 3000,
+        "10000": 8000,
+        "20000": 30000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 400,
+        "5000": 3000,
+        "10000": 8000,
+        "20000": 30000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 8388608,
+        "5000": 33554432,
+        "10000": 67108864,
+        "20000": 104857600
+      }
+    },
+    "mixed": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands": 0,
+      "max_headend_rollback_commands": 0,
+      "max_headend_apply_commands_per_customer": 0,
+      "max_plan_build_ms": {
+        "1000": 400,
+        "5000": 2500,
+        "10000": 7000,
+        "20000": 40000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 300,
+        "5000": 2500,
+        "10000": 7000,
+        "20000": 40000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 6291456,
+        "5000": 25165824,
+        "10000": 50331648,
+        "20000": 100663296
+      }
+    },
+    "force4500_bridge": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands": 0,
+      "max_headend_rollback_commands": 0,
+      "max_headend_apply_commands_per_customer": 0,
+      "max_plan_build_ms": {
+        "1000": 500,
+        "5000": 5000,
+        "10000": 20000,
+        "20000": 100000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 500,
+        "5000": 5000,
+        "10000": 20000,
+        "20000": 100000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 8388608,
+        "5000": 33554432,
+        "10000": 67108864,
+        "20000": 134217728
+      }
+    },
+    "natd_bridge": {
+      "max_legacy_rules": 0,
+      "max_bridge_rules": 0,
+      "max_headend_apply_commands": 0,
+      "max_headend_rollback_commands": 0,
+      "max_headend_apply_commands_per_customer": 0,
+      "max_plan_build_ms": {
+        "1000": 400,
+        "5000": 3000,
+        "10000": 9000,
+        "20000": 40000
+      },
+      "max_plan_cpu_ms": {
+        "1000": 400,
+        "5000": 3000,
+        "10000": 9000,
+        "20000": 40000
+      },
+      "max_plan_peak_memory_bytes": {
+        "1000": 4194304,
+        "5000": 16777216,
+        "10000": 33554432,
+        "20000": 67108864
+      }
+    }
+  }
+}

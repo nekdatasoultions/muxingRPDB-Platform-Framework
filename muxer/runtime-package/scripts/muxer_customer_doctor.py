@@ -178,6 +178,7 @@ def load_muxer_customer(config_root: Path, source_backend: str, selector: str) -
         customers_vars_path=config_root / "config" / "customers.variables.yaml",
         global_cfg=muxer_doc,
         source_backend=source_backend,
+        allow_scan_fallback=False,
     )
     return muxer_doc, customer
 

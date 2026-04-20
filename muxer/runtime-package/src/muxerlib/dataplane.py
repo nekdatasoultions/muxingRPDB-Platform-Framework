@@ -13,6 +13,11 @@ from .customers import (
     customer_protocol_flags,
     customer_tunnel_settings,
 )
+from .nftables import (
+    normalize_passthrough_classification_backend,
+    normalize_passthrough_bridge_backend,
+    normalize_passthrough_translation_backend,
+)
 from .variables import strict_non_nat_customer
 
 
@@ -365,7 +370,7 @@ def derive_customer_transport(
     module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
     cust_inside_ip = inside_ip if transport_local_mode == "interface_ip" else module_inside_ip
     cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
-    mark_hex = hex(int(str(module["mark"]), 0)) if "mark" in module else hex(int(allocation["base_mark"], 0) + cid)
+    mark_hex = hex(int(str(module["mark"]), 0)) if "mark" in module else hex(int(str(allocation["base_mark"]), 0) + cid)
     table_id = int(module["table"]) if "table" in module else int(allocation["base_table"]) + cid
     headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
 
@@ -410,6 +415,7 @@ def derive_passthrough_dataplane(
 ) -> Dict[str, Any]:
     interfaces = muxer_doc.get("interfaces", {}) or {}
     iptables_cfg = muxer_doc.get("iptables", {}) or {}
+    nft_cfg = (muxer_doc.get("nftables") or {}).get("pass_through", {}) or {}
     chains = iptables_cfg.get("chains", {}) or {}
     public_ip = str(muxer_doc["public_ip"]).strip()
     public_priv_ip = str(interfaces.get("public_private_ip") or public_ip).strip()
@@ -421,6 +427,18 @@ def derive_passthrough_dataplane(
     nat_post_chain = str(chains.get("nat_postrouting_chain", "MUXER_NAT_POST"))
     nat_rewrite = bool(iptables_cfg.get("use_nat_rewrite", True))
     default_drop = bool(iptables_cfg.get("default_drop_ipsec_to_public_ip", True))
+    classification_backend = normalize_passthrough_classification_backend(
+        nft_cfg.get("classification_backend", "legacy_iptables")
+    )
+    translation_backend = normalize_passthrough_translation_backend(
+        nft_cfg.get("translation_backend", "legacy_iptables")
+    )
+    bridge_backend = normalize_passthrough_bridge_backend(
+        nft_cfg.get("bridge_backend", "legacy_iptables")
+    )
+    use_nft_classification = classification_backend == "nftables"
+    use_nft_translation = translation_backend == "nftables"
+    use_nft_bridge = bridge_backend == "nftables"
     peer_cidr = str(module["peer_ip"])
 
     transport = derive_customer_transport(module, muxer_doc)
@@ -437,29 +455,33 @@ def derive_passthrough_dataplane(
     nat_prerouting: List[Dict[str, str]] = []
     nat_postrouting: List[Dict[str, str]] = []
     mangle_postrouting: List[Dict[str, str]] = []
+    bridge_prerouting: List[Dict[str, str]] = []
+    bridge_postrouting: List[Dict[str, str]] = []
     default_drop_rules: List[Dict[str, str]] = []
 
     if udp500:
-        _append_rule(
-            filter_accept,
-            "Allow inbound IKE on UDP/500 to the muxer public identity",
-            None,
-            ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "ACCEPT"],
-        )
-        _append_rule(
-            mangle_mark,
-            "Mark inbound UDP/500 for the customer-specific route table",
-            "mangle",
-            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-        )
-        if public_priv_ip != public_ip:
+        if not use_nft_classification:
+            _append_rule(
+                filter_accept,
+                "Allow inbound IKE on UDP/500 to the muxer public identity",
+                None,
+                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "ACCEPT"],
+            )
             _append_rule(
                 mangle_mark,
-                "Also mark UDP/500 addressed to the ENI private IP used behind the EIP edge",
+                "Mark inbound UDP/500 for the customer-specific route table",
                 "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
             )
-            if nat_rewrite:
+        if public_priv_ip != public_ip:
+            if not use_nft_classification:
+                _append_rule(
+                    mangle_mark,
+                    "Also mark UDP/500 addressed to the ENI private IP used behind the EIP edge",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                )
+            if nat_rewrite and not use_nft_translation:
                 for nat_pre_target in nat_preroute_targets:
                     _append_rule(
                         nat_prerouting,
@@ -485,20 +507,22 @@ def derive_passthrough_dataplane(
                         )
 
     if force_4500_to_500:
-        _append_rule(
-            mangle_mark,
-            "Mark inbound UDP/4500 for a forced 4500->500 bridge customer",
-            "mangle",
-            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-        )
-        if public_priv_ip != public_ip:
+        if not use_nft_classification:
             _append_rule(
                 mangle_mark,
-                "Also mark inbound UDP/4500 addressed to the ENI private IP",
+                "Mark inbound UDP/4500 for a forced 4500->500 bridge customer",
                 "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
             )
-            if nat_rewrite:
+        if public_priv_ip != public_ip:
+            if not use_nft_classification:
+                _append_rule(
+                    mangle_mark,
+                    "Also mark inbound UDP/4500 addressed to the ENI private IP",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                )
+            if nat_rewrite and not use_nft_translation:
                 for nat_pre_target in nat_preroute_targets:
                     _append_rule(
                         nat_prerouting,
@@ -513,34 +537,69 @@ def derive_passthrough_dataplane(
                         "nat",
                         ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
                     )
-        _append_rule(
-            mangle_postrouting,
-            "Userspace bridge queue for translating outbound backend UDP/500 replies into customer NAT-T format",
-            "mangle",
-            ["-A", mangle_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", "<queue_out>"],
-        )
+        if not use_nft_bridge:
+            _append_rule(
+                bridge_prerouting,
+                "Userspace bridge queue for inbound UDP/4500 packets targeting the muxer public identity",
+                "mangle",
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", "<queue_in>"],
+            )
+            _append_rule(
+                bridge_prerouting,
+                "Re-assert the customer fwmark after inbound UDP/4500 bridge processing on the muxer public identity",
+                "mangle",
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+            )
+            if public_priv_ip != public_ip:
+                _append_rule(
+                    bridge_prerouting,
+                    "Userspace bridge queue for inbound UDP/4500 packets targeting the muxer ENI private identity",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", "<queue_in>"],
+                )
+                _append_rule(
+                    bridge_prerouting,
+                    "Re-assert the customer fwmark after inbound UDP/4500 bridge processing on the muxer ENI private identity",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                )
+            _append_rule(
+                bridge_postrouting,
+                "Userspace bridge queue for translating outbound backend UDP/500 replies into customer NAT-T format",
+                "mangle",
+                ["-A", mangle_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", "<queue_out>"],
+            )
+            if public_ip != transport["backend_underlay_ip"]:
+                _append_rule(
+                    bridge_postrouting,
+                    "Userspace bridge queue for translating outbound muxer-public UDP/500 replies into customer NAT-T format",
+                    "mangle",
+                    ["-A", mangle_post_chain, "-o", pub_if, "-s", public_ip, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", "<queue_out>"],
+                )
 
     if udp4500:
-        _append_rule(
-            filter_accept,
-            "Allow inbound NAT-T on UDP/4500",
-            None,
-            ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"],
-        )
-        _append_rule(
-            mangle_mark,
-            "Mark inbound UDP/4500 for the customer-specific route table",
-            "mangle",
-            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-        )
-        if public_priv_ip != public_ip:
+        if not use_nft_classification:
+            _append_rule(
+                filter_accept,
+                "Allow inbound NAT-T on UDP/4500",
+                None,
+                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"],
+            )
             _append_rule(
                 mangle_mark,
-                "Also mark NAT-T traffic addressed to the ENI private IP",
+                "Mark inbound UDP/4500 for the customer-specific route table",
                 "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
             )
-            if nat_rewrite:
+        if public_priv_ip != public_ip:
+            if not use_nft_classification:
+                _append_rule(
+                    mangle_mark,
+                    "Also mark NAT-T traffic addressed to the ENI private IP",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                )
+            if nat_rewrite and not use_nft_translation:
                 for nat_pre_target in nat_preroute_targets:
                     _append_rule(
                         nat_prerouting,
@@ -557,26 +616,28 @@ def derive_passthrough_dataplane(
                     )
 
     if esp50:
-        _append_rule(
-            filter_accept,
-            "Allow inbound ESP for native IPsec peers",
-            None,
-            ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"],
-        )
-        _append_rule(
-            mangle_mark,
-            "Mark inbound ESP for the customer-specific route table",
-            "mangle",
-            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-        )
-        if public_priv_ip != public_ip:
+        if not use_nft_classification:
+            _append_rule(
+                filter_accept,
+                "Allow inbound ESP for native IPsec peers",
+                None,
+                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"],
+            )
             _append_rule(
                 mangle_mark,
-                "Also mark ESP addressed to the ENI private IP",
+                "Mark inbound ESP for the customer-specific route table",
                 "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
             )
-            if nat_rewrite:
+        if public_priv_ip != public_ip:
+            if not use_nft_classification:
+                _append_rule(
+                    mangle_mark,
+                    "Also mark ESP addressed to the ENI private IP",
+                    "mangle",
+                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
+                )
+            if nat_rewrite and not use_nft_translation:
                 for nat_pre_target in nat_preroute_targets:
                     _append_rule(
                         nat_prerouting,
@@ -592,7 +653,7 @@ def derive_passthrough_dataplane(
                         ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip],
                     )
 
-    if default_drop:
+    if default_drop and not use_nft_classification:
         for drop_dst in sorted({public_ip, public_priv_ip}):
             _append_rule(
                 default_drop_rules,
@@ -612,6 +673,27 @@ def derive_passthrough_dataplane(
                 None,
                 ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "50", "-j", "DROP"],
             )
+
+    if natd_rewrite_enabled and not use_nft_bridge:
+        _append_rule(
+            bridge_prerouting,
+            "Userspace NAT-D rewrite queue for inbound UDP/500 packets destined to the backend underlay identity",
+            "mangle",
+            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", transport["backend_underlay_ip"], "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_in>"],
+        )
+        if public_priv_ip != public_ip:
+            _append_rule(
+                bridge_prerouting,
+                "Userspace NAT-D rewrite queue for inbound UDP/500 packets destined to the muxer ENI private identity",
+                "mangle",
+                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_in>"],
+            )
+        _append_rule(
+            bridge_postrouting,
+            "Userspace NAT-D rewrite queue for outbound backend UDP/500 replies",
+            "mangle",
+            ["-A", mangle_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "500", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_out>"],
+        )
 
     return {
         "customer_class": "strict_non_nat" if strict_non_nat_customer(module) else "nat_t_or_custom",
@@ -640,6 +722,8 @@ def derive_passthrough_dataplane(
             ],
         },
         "nat_framework": {
+            "classification_backend": classification_backend,
+            "translation_backend": translation_backend,
             "rewrite_enabled": nat_rewrite,
             "public_identity": public_ip,
             "eni_private_identity": public_priv_ip,
@@ -650,7 +734,10 @@ def derive_passthrough_dataplane(
             "nat_prerouting_rules": nat_prerouting,
             "nat_postrouting_rules": nat_postrouting,
             "mangle_postrouting_rules": mangle_postrouting,
+            "bridge_prerouting_rules": bridge_prerouting,
+            "bridge_postrouting_rules": bridge_postrouting,
             "default_drop_rules": default_drop_rules,
+            "bridge_backend": bridge_backend,
         },
     }
 

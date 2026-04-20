@@ -20,6 +20,13 @@ def normalize_customer_sot_backend(value: str | None, *, default: str = "custome
         return default
     aliases = {
         "ddb": "dynamodb",
+        "ddb_lookup": "dynamodb",
+        "dynamodb_lookup": "dynamodb",
+        "ddb_inventory": "dynamodb_inventory",
+        "dynamodb_scan": "dynamodb_inventory",
+        "dynamodb_inventory": "dynamodb_inventory",
+        "inventory": "dynamodb_inventory",
+        "fleet": "dynamodb_inventory",
         "modules": "customer_modules",
         "module_dir": "customer_modules",
         "local": "customer_modules",

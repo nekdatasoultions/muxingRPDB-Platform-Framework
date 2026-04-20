@@ -486,7 +486,7 @@ def load_modules(
         table_name = ""
         region = ""
 
-    if chosen_backend == "dynamodb":
+    if chosen_backend in {"dynamodb", "dynamodb_inventory"}:
         modules = load_customer_modules_from_dynamodb(table_name=table_name, region=region or None)
         if global_cfg:
             return resolve_backend_identities(modules, global_cfg)
@@ -516,7 +516,7 @@ def load_modules(
 
     raise SystemExit(
         "Unsupported customer source backend "
-        f"'{chosen_backend}'. Use one of: dynamodb, customer_modules, legacy_variables, legacy_tunnels."
+        f"'{chosen_backend}'. Use one of: dynamodb, dynamodb_inventory, customer_modules, legacy_variables, legacy_tunnels."
     )
 
 
@@ -552,14 +552,17 @@ def load_module(
         table_name = ""
         region = ""
 
-    if chosen_backend == "dynamodb":
+    if chosen_backend in {"dynamodb", "dynamodb_inventory"}:
         module = load_customer_module_from_dynamodb(table_name=table_name, customer_name=selector, region=region or None)
         if module is not None:
             if global_cfg:
                 return resolve_backend_identity(module, global_cfg)
             return module
         if not allow_scan_fallback:
-            raise SystemExit(f"Customer '{selector}' was not found in DynamoDB table {table_name}")
+            raise SystemExit(
+                f"Customer '{selector}' was not found in DynamoDB table {table_name}; "
+                "fleet scan fallback is disabled for customer-scoped operations"
+            )
 
     modules = load_modules(
         overlay_pool,

@@ -64,7 +64,7 @@ The target model above is still ahead of the runtime implementation.
 
 Today the runtime still has two important fleet-style behaviors:
 
-- DynamoDB-backed loading still uses table scan for normal module loading
+- explicit fleet inventory against DynamoDB still uses table scan
 - apply still flushes and rebuilds the active chains for the loaded module set
 
 The first safe customer-scoped runtime read path now exists:
@@ -78,14 +78,17 @@ The first safe customer-scoped pass-through write paths now also exist:
 
 Current boundary:
 
+- customer-scoped commands now refuse DynamoDB fleet-scan fallback
 - these customer-scoped write commands are implemented for pass-through mode
 - termination mode is intentionally blocked for customer-scoped writes
 - `apply` remains the explicit fleet-style command
+- explicit fleet scan still exists for admin and inventory workflows
 
 That gives us a real one-customer path for the migration architecture we are
 actually using.
 
 The completion checklist for closing that gap lives in:
 
-- [RUNTIME_COMPLETION_PLAN.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_COMPLETION_PLAN.md)
-- [RUNTIME_MODE_BOUNDARIES.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_MODE_BOUNDARIES.md)
+- [RUNTIME_COMPLETION_PLAN.md](./RUNTIME_COMPLETION_PLAN.md)
+- [RUNTIME_MODE_BOUNDARIES.md](./RUNTIME_MODE_BOUNDARIES.md)
+- [SCALE_BASELINE_HARNESS.md](./SCALE_BASELINE_HARNESS.md)

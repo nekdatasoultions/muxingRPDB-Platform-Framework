@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the first batched nftables preview for pass-through customers."""
+"""Render the pass-through nftables classification model for review."""
 
 from __future__ import annotations
 

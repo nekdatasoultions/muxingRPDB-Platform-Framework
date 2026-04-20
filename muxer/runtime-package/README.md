@@ -27,14 +27,17 @@ Important boundary:
 - this subtree is only for the muxer runtime and its deployment-time support
   assets
 - the runtime should prefer `customer_sot.backend=dynamodb`
+- explicit fleet inventory may use `customer_sot.backend=dynamodb_inventory`
 - for isolated staging or offline validation, the runtime may also load
   RPDB-native `customer-module.json` files from `config/customer-modules/`
-- the runtime now also includes a render-first batched nftables preview via:
-  - [render_nft_passthrough.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/scripts/render_nft_passthrough.py)
+- the runtime now also includes a batched `nftables` classification backend and
+  review renderer via:
+  - [render_nft_passthrough.py](./scripts/render_nft_passthrough.py)
 - old `customers.variables.yaml` and `config/tunnels.d/` loading is legacy
   compatibility only and should never be the default path in this repo
 
 See:
 
-- [MUXER3_RUNTIME_PORT_MAP.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/MUXER3_RUNTIME_PORT_MAP.md)
-- [NFTABLES_BATCH_RENDER_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/NFTABLES_BATCH_RENDER_MODEL.md)
+- [MUXER3_RUNTIME_PORT_MAP.md](../docs/MUXER3_RUNTIME_PORT_MAP.md)
+- [NFTABLES_BATCH_RENDER_MODEL.md](../docs/NFTABLES_BATCH_RENDER_MODEL.md)
+- [SCALE_BASELINE_HARNESS.md](../docs/SCALE_BASELINE_HARNESS.md)

@@ -32,8 +32,9 @@ from .modes import (
     apply_termination,
     remove_customer_passthrough,
 )
+from .nftables import flush_passthrough_nft_classification, passthrough_nft_settings
 from .strongswan import render_strongswan
-from .variables import load_module, load_modules
+from .variables import CUSTOMER_MODULES_DIR, load_module, load_modules
 
 
 def print_module_summary(
@@ -119,6 +120,10 @@ def main() -> None:
     nfqueue_enabled, nfqueue_queue_in, nfqueue_queue_out, nfqueue_queue_bypass = nfqueue_bridge_settings(global_cfg)
     natd_dpi_enabled, natd_dpi_queue_in, natd_dpi_queue_out, natd_dpi_queue_bypass = natd_dpi_settings(global_cfg)
     mode = str(global_cfg.get("mode", "pass_through")).lower()
+    nft_settings = passthrough_nft_settings(global_cfg)
+    classification_backend = str(nft_settings["classification_backend"])
+    translation_backend = str(nft_settings["translation_backend"])
+    bridge_backend = str(nft_settings["bridge_backend"])
 
     if args.cmd == "show":
         modules: List[Dict[str, Any]] = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
@@ -133,6 +138,9 @@ def main() -> None:
             f"natd_dpi_rewrite(enabled={natd_dpi_enabled},queue_in={natd_dpi_queue_in},"
             f"queue_out={natd_dpi_queue_out},queue_bypass={natd_dpi_queue_bypass})"
         )
+        print(f"pass_through_classification_backend={classification_backend}")
+        print(f"pass_through_translation_backend={translation_backend}")
+        print(f"pass_through_bridge_backend={bridge_backend}")
         return
 
     if args.cmd == "show-customer":
@@ -144,6 +152,7 @@ def main() -> None:
             cfg_dir=CFG_DIR,
             global_cfg=global_cfg,
             source_backend="auto",
+            allow_scan_fallback=False,
         )
         print_module_summary(module, base_mark=base_mark, base_table=base_table, overlay_pool=overlay_pool)
         print(f"mode={mode}")
@@ -158,10 +167,24 @@ def main() -> None:
             cfg_dir=CFG_DIR,
             global_cfg=global_cfg,
             source_backend="auto",
+            allow_scan_fallback=False,
         )
         ensure_sysctl()
         if mode in {"terminate", "termination", "ipsec_termination", "mux_terminate"}:
             raise SystemExit(f"{args.cmd} is not implemented yet for muxer termination mode")
+        classification_modules: List[Dict[str, Any]] | None = None
+        if classification_backend == "nftables" or translation_backend == "nftables" or bridge_backend == "nftables":
+            classification_modules = load_modules(
+                overlay_pool,
+                cfg_dir=CFG_DIR,
+                customer_modules_dir=CUSTOMER_MODULES_DIR,
+                global_cfg=global_cfg,
+                source_backend="customer_modules",
+            )
+            if not classification_modules:
+                raise SystemExit(
+                    "nftables pass-through backends require local customer inventory in config/customer-modules"
+                )
         if args.cmd == "apply-customer":
             apply_customer_passthrough(
                 module,
@@ -190,6 +213,13 @@ def main() -> None:
                 natd_dpi_queue_out=natd_dpi_queue_out,
                 natd_dpi_queue_bypass=natd_dpi_queue_bypass,
                 default_drop=default_drop,
+                classification_backend=classification_backend,
+                translation_backend=translation_backend,
+                bridge_backend=bridge_backend,
+                classification_state_root=str(nft_settings["state_root"]),
+                classification_table_name=str(nft_settings["table_name"]),
+                translation_table_name=str(nft_settings["nat_table_name"]),
+                classification_modules=classification_modules,
             )
         else:
             remove_customer_passthrough(
@@ -204,6 +234,25 @@ def main() -> None:
                 filter_chain=filter_chain,
                 nat_pre_chain=nat_pre_chain,
                 nat_post_chain=nat_post_chain,
+                nfqueue_enabled=nfqueue_enabled,
+                nfqueue_queue_in=nfqueue_queue_in,
+                nfqueue_queue_out=nfqueue_queue_out,
+                nfqueue_queue_bypass=nfqueue_queue_bypass,
+                natd_dpi_enabled=natd_dpi_enabled,
+                natd_dpi_queue_in=natd_dpi_queue_in,
+                natd_dpi_queue_out=natd_dpi_queue_out,
+                natd_dpi_queue_bypass=natd_dpi_queue_bypass,
+                classification_backend=classification_backend,
+                translation_backend=translation_backend,
+                bridge_backend=bridge_backend,
+                classification_state_root=str(nft_settings["state_root"]),
+                classification_table_name=str(nft_settings["table_name"]),
+                translation_table_name=str(nft_settings["nat_table_name"]),
+                classification_modules=classification_modules,
+                pub_if=pub_if,
+                public_ip=public_ip,
+                public_priv_ip=public_priv_ip,
+                default_drop=default_drop,
             )
         return
 
@@ -214,6 +263,8 @@ def main() -> None:
         return
 
     if args.cmd == "flush":
+        if classification_backend == "nftables" or translation_backend == "nftables" or bridge_backend == "nftables":
+            flush_passthrough_nft_classification(global_cfg)
         remove_jump("mangle", "PREROUTING", mangle_chain)
         remove_jump("mangle", "POSTROUTING", mangle_post_chain)
         remove_jump("filter", "FORWARD", filter_chain)
@@ -282,4 +333,10 @@ def main() -> None:
             natd_dpi_queue_out,
             natd_dpi_queue_bypass,
             default_drop,
+            classification_backend,
+            translation_backend,
+            bridge_backend,
+            str(nft_settings["state_root"]),
+            str(nft_settings["table_name"]),
+            str(nft_settings["nat_table_name"]),
         )

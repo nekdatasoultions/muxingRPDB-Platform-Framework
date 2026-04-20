@@ -2,11 +2,13 @@
 
 ## Goal
 
-The first `nftables` layer in this repo is render-first.
+The first `nftables` layer in this repo now serves two purposes:
 
-It does not replace the live apply path yet. Instead, it gives us a batched
-model for the parts of pass-through dataplane programming that are most clearly
-linear today:
+1. it is the repo-modeled live backend for pass-through classification
+2. it still produces reviewable render artifacts for diffs and troubleshooting
+
+It currently covers the parts of pass-through dataplane programming that were
+most clearly linear:
 
 - peer classification
 - fwmark assignment
@@ -14,7 +16,7 @@ linear today:
 
 ## Current Scope
 
-The render path currently batches:
+The current backend batches:
 
 - UDP/500 peer classification
 - UDP/4500 peer classification
@@ -22,15 +24,15 @@ The render path currently batches:
 - source-IP-to-fwmark maps
 - public-edge default drop rules
 
-It renders those as:
+It models those as:
 
 - `nft` sets for peer membership
 - `nft` maps for customer-specific marks
-- a preview `inet` table called `muxer_passthrough`
+- an `inet` table called `muxer_passthrough`
 
 ## Current Non-Goals
 
-This first render path does **not** yet replace:
+This first backend does **not** yet replace:
 
 - per-customer DNAT/SNAT rewrite
 - NFQUEUE bridge handling
@@ -39,18 +41,18 @@ This first render path does **not** yet replace:
 
 Those remain on the legacy per-customer runtime path for now.
 
-## Script
+## Review Script
 
 Use:
 
-- [render_nft_passthrough.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/scripts/render_nft_passthrough.py)
+- [render_nft_passthrough.py](../runtime-package/scripts/render_nft_passthrough.py)
 
 Example:
 
 ```powershell
 python muxer\runtime-package\scripts\render_nft_passthrough.py `
   --global-config muxer\runtime-package\config\muxer.yaml `
-  --customer-module-dir E:\path\to\customer-modules
+  --customer-module-dir path\to\customer-modules
 ```
 
 Print the intermediate model instead of script text:
@@ -58,21 +60,32 @@ Print the intermediate model instead of script text:
 ```powershell
 python muxer\runtime-package\scripts\render_nft_passthrough.py `
   --global-config muxer\runtime-package\config\muxer.yaml `
-  --customer-module-dir E:\path\to\customer-modules `
+  --customer-module-dir path\to\customer-modules `
   --json
 ```
 
-## Why This Still Matters Before Live Apply
+## Live Apply Boundary
 
-Even as a render-first step, this gives us two important wins:
+The repo now uses this same model in the pass-through apply paths for:
 
-1. it proves the customer-scoped control plane can feed a batched dataplane
-   model
-2. it gives us a concrete migration target away from long linear iptables
-   programming
+- fleet `apply`
+- customer-scoped `apply-customer`
+- customer-scoped `remove-customer`
+
+That means peer classification, fwmark assignment, and default-drop behavior no
+longer rely on the old per-customer `iptables` classification rules when the
+backend selector is `nftables`.
+
+DNAT, SNAT, and NFQUEUE bridge behavior still remain on the legacy path for
+now.
 
 ## Verification
 
-The repo-only verifier exercises this render path and records the result in:
+The repo-only verifier exercises both:
 
-- [repo-verification-summary.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/build/repo-verification/repo-verification-summary.json)
+- the review render path
+- the repo-modeled live pass-through classification backend
+
+It records the result in:
+
+- `build/repo-verification/repo-verification-summary.json`

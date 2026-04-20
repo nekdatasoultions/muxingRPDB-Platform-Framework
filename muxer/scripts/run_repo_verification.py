@@ -156,6 +156,7 @@ def main() -> int:
             "provisioning_input_model": str(MUXER_DIR / "docs" / "PROVISIONING_INPUT_MODEL.md"),
             "resource_allocation_model": str(MUXER_DIR / "docs" / "RESOURCE_ALLOCATION_MODEL.md"),
             "dynamic_nat_t_provisioning": str(MUXER_DIR / "docs" / "DYNAMIC_NAT_T_PROVISIONING.md"),
+            "translation_bridge_scale_decisions": str(MUXER_DIR / "docs" / "TRANSLATION_AND_BRIDGE_SCALE_DECISIONS.md"),
         },
     }
 
@@ -179,6 +180,10 @@ def main() -> int:
         str(MUXER_DIR / "scripts" / "provision_customer_end_to_end.py"),
         str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
         str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
+        str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
+        str(RUNTIME_ROOT / "src" / "muxerlib" / "cli.py"),
+        str(RUNTIME_ROOT / "src" / "muxerlib" / "dataplane.py"),
+        str(RUNTIME_ROOT / "src" / "muxerlib" / "modes.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
@@ -964,7 +969,140 @@ def main() -> int:
     )
     record_step("runtime_single_customer_load", runtime_load_result)
 
-    # Step 7: verify customer-scoped delta apply/remove in pass-through mode without full chain flush.
+    # Step 6b: verify customer-scoped DynamoDB lookup does not fall back to fleet scan,
+    # while explicit fleet inventory still uses the scan path.
+    runtime_ddb_boundary_code = textwrap.dedent(
+        """
+        import ipaddress
+        import json
+        import os
+        from pathlib import Path
+
+        from muxerlib.core import load_yaml
+        from muxerlib.variables import load_module, load_modules
+        import muxerlib.variables as variables
+
+        module_dir = Path(os.environ["RPDB_VERIFY_MODULE_DIR"])
+        cfg_path = Path(os.environ["RPDB_VERIFY_CFG"])
+        global_cfg = load_yaml(cfg_path)
+        global_cfg["customer_sot"] = {
+            "backend": "dynamodb",
+            "dynamodb": {
+                "table_name": "rpdb-scale-boundary-test",
+                "region": "us-east-1",
+            },
+        }
+        overlay_pool = ipaddress.ip_network(str(global_cfg["overlay_pool"]), strict=False)
+
+        counters = {"get_calls": 0, "scan_calls": 0}
+
+        def fake_get(table_name, customer_name, region=None):
+            counters["get_calls"] += 1
+            if customer_name != "ddb-customer-scale":
+                return None
+            return {
+                "id": 7100,
+                "name": "ddb-customer-scale",
+                "peer_ip": "198.18.220.10/32",
+                "protocols": {"udp500": True, "udp4500": False, "esp50": True},
+                "backend_underlay_ip": "172.31.220.10",
+                "headend_egress_sources": ["172.31.221.10"],
+                "rpdb_priority": 17100,
+            }
+
+        def fake_scan(table_name, region=None):
+            counters["scan_calls"] += 1
+            return [
+                {
+                    "id": 7100,
+                    "name": "ddb-customer-scale",
+                    "peer_ip": "198.18.220.10/32",
+                    "protocols": {"udp500": True, "udp4500": False, "esp50": True},
+                    "backend_underlay_ip": "172.31.220.10",
+                    "headend_egress_sources": ["172.31.221.10"],
+                    "rpdb_priority": 17100,
+                }
+            ]
+
+        variables.load_customer_module_from_dynamodb = fake_get
+        variables.load_customer_modules_from_dynamodb = fake_scan
+
+        customer = load_module(
+            "ddb-customer-scale",
+            overlay_pool,
+            cfg_dir=module_dir,
+            customer_modules_dir=module_dir,
+            customers_vars_path=module_dir / "customers.variables.yaml",
+            global_cfg=global_cfg,
+            source_backend="auto",
+            allow_scan_fallback=False,
+        )
+
+        missing_error = ""
+        try:
+            load_module(
+                "missing-customer",
+                overlay_pool,
+                cfg_dir=module_dir,
+                customer_modules_dir=module_dir,
+                customers_vars_path=module_dir / "customers.variables.yaml",
+                global_cfg=global_cfg,
+                source_backend="auto",
+                allow_scan_fallback=False,
+            )
+        except SystemExit as exc:
+            missing_error = str(exc)
+
+        global_cfg["customer_sot"]["backend"] = "dynamodb_inventory"
+        modules = load_modules(
+            overlay_pool,
+            cfg_dir=module_dir,
+            customer_modules_dir=module_dir,
+            customers_vars_path=module_dir / "customers.variables.yaml",
+            global_cfg=global_cfg,
+            source_backend="auto",
+        )
+
+        print(
+            json.dumps(
+                {
+                    "customer_name": customer["name"],
+                    "get_calls": counters["get_calls"],
+                    "scan_calls": counters["scan_calls"],
+                    "explicit_fleet_count": len(modules),
+                    "missing_customer_error": missing_error,
+                }
+            )
+        )
+        """
+    )
+    runtime_ddb_boundary = _run_python_json(
+        runtime_ddb_boundary_code,
+        pythonpath=RUNTIME_SRC,
+        extra_env={
+            "RPDB_VERIFY_CFG": str(pass_cfg_path),
+            "RPDB_VERIFY_MODULE_DIR": str(module_root),
+        },
+    )
+    if runtime_ddb_boundary.get("customer_name") != "ddb-customer-scale":
+        raise SystemExit("DynamoDB customer-scoped lookup did not return the expected customer")
+    if runtime_ddb_boundary.get("get_calls") != 2:
+        raise SystemExit("DynamoDB customer-scoped lookup did not use direct get-item semantics twice")
+    if runtime_ddb_boundary.get("scan_calls") != 1:
+        raise SystemExit("Explicit fleet inventory path did not exercise exactly one scan-backed load")
+    if runtime_ddb_boundary.get("explicit_fleet_count") != 1:
+        raise SystemExit("Explicit fleet inventory path did not return the expected module count")
+    if "fleet scan fallback is disabled" not in str(runtime_ddb_boundary.get("missing_customer_error") or ""):
+        raise SystemExit("Missing DynamoDB customer did not return the strict no-scan boundary error")
+    record_step("runtime_dynamodb_boundary", runtime_ddb_boundary)
+
+    # Step 7: verify customer-scoped delta apply/remove in pass-through mode without
+    # full chain flush, while the pass-through classification layer uses the
+    # nftables backend instead of legacy per-customer iptables classification rules.
+    delta_apply_state_root = BUILD_ROOT / "delta-apply-nft"
+    if delta_apply_state_root.exists():
+        shutil.rmtree(delta_apply_state_root)
+    delta_apply_state_root.mkdir(parents=True, exist_ok=True)
     delta_apply_code = textwrap.dedent(
         """
         import builtins
@@ -973,12 +1111,19 @@ def main() -> int:
         import os
         from pathlib import Path
         from muxerlib.core import load_yaml
-        from muxerlib.variables import load_module
+        from muxerlib.variables import load_module, load_modules
         import muxerlib.modes as modes
+        import muxerlib.nftables as nftables
 
         cfg_path = Path(os.environ["RPDB_VERIFY_CFG"])
         module_dir = Path(os.environ["RPDB_VERIFY_MODULE_DIR"])
+        state_root = Path(os.environ["RPDB_VERIFY_NFT_STATE_ROOT"])
         global_cfg = load_yaml(cfg_path)
+        global_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
+        global_cfg["nftables"]["pass_through"]["classification_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["translation_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["state_root"] = str(state_root)
+        global_cfg["nftables"]["pass_through"]["nat_table_name"] = "muxer_passthrough_nat"
         overlay_pool = ipaddress.ip_network(str(global_cfg["overlay_pool"]), strict=False)
         module = load_module(
             "example-minimal-nonnat",
@@ -990,6 +1135,14 @@ def main() -> int:
             source_backend="customer_modules",
             allow_scan_fallback=False,
         )
+        classification_modules = load_modules(
+            overlay_pool,
+            cfg_dir=module_dir,
+            customer_modules_dir=module_dir,
+            customers_vars_path=module_dir / "customers.variables.yaml",
+            global_cfg=global_cfg,
+            source_backend="customer_modules",
+        )
 
         counts = {
             "flush_chain": 0,
@@ -998,6 +1151,9 @@ def main() -> int:
             "remove_policy": 0,
             "remove_tunnel": 0,
             "must": 0,
+            "legacy_classification_commands": 0,
+            "legacy_translation_commands": 0,
+            "nft_apply_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
@@ -1013,7 +1169,32 @@ def main() -> int:
         modes.remove_policy = lambda *args, **kwargs: counts.__setitem__("remove_policy", counts["remove_policy"] + 1)
         modes.flush_route_table = lambda *args, **kwargs: None
         modes.remove_tunnel = lambda *args, **kwargs: counts.__setitem__("remove_tunnel", counts["remove_tunnel"] + 1)
-        modes.must = lambda *args, **kwargs: counts.__setitem__("must", counts["must"] + 1)
+
+        def record_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            counts["must"] += 1
+            if not cmd or cmd[0] != "iptables":
+                return
+            table = "filter"
+            if "-t" in cmd:
+                table = cmd[cmd.index("-t") + 1]
+            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
+            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
+            if (
+                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
+                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
+            ):
+                counts["legacy_classification_commands"] += 1
+            else:
+                counts["legacy_translation_commands"] += 1
+
+        def record_nft_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:2] == ["nft", "-f"]:
+                counts["nft_apply_calls"] += 1
+
+        modes.must = record_must
+        nftables.must = record_nft_must
         builtins.print = lambda *args, **kwargs: None
 
         modes.apply_customer_passthrough(
@@ -1043,7 +1224,16 @@ def main() -> int:
             natd_dpi_queue_out=2112,
             natd_dpi_queue_bypass=True,
             default_drop=True,
+            classification_backend="nftables",
+            translation_backend="nftables",
+            classification_state_root=str(state_root),
+            classification_table_name="muxer_passthrough",
+            translation_table_name="muxer_passthrough_nat",
+            classification_modules=classification_modules,
         )
+        model_path = state_root / "pass-through-state-model.json"
+        script_path = state_root / "pass-through-state.nft"
+        apply_model = json.loads(model_path.read_text(encoding="utf-8"))
         modes.remove_customer_passthrough(
             module,
             inside_if="ens35",
@@ -1056,9 +1246,32 @@ def main() -> int:
             filter_chain="MUXER_FILTER",
             nat_pre_chain="MUXER_NAT_PRE",
             nat_post_chain="MUXER_NAT_POST",
+            classification_backend="nftables",
+            translation_backend="nftables",
+            classification_state_root=str(state_root),
+            classification_table_name="muxer_passthrough",
+            translation_table_name="muxer_passthrough_nat",
+            classification_modules=classification_modules,
+            pub_if="ens34",
+            public_ip=str(global_cfg["public_ip"]),
+            public_priv_ip=str((global_cfg.get("interfaces") or {}).get("public_private_ip") or global_cfg["public_ip"]),
+            default_drop=True,
         )
+        remove_model = json.loads(model_path.read_text(encoding="utf-8"))
         import sys
-        sys.stdout.write(json.dumps(counts))
+        sys.stdout.write(
+            json.dumps(
+                {
+                    **counts,
+                    "classification_module_count": len(classification_modules),
+                    "artifact_script_exists": script_path.exists(),
+                    "artifact_model_exists": model_path.exists(),
+                    "apply_render_mode": apply_model["render_mode"],
+                    "apply_customer_count": apply_model["customer_count"],
+                    "remove_customer_count": remove_model["customer_count"],
+                }
+            )
+        )
         """
     )
     delta_apply_result = _run_python_json(
@@ -1067,11 +1280,184 @@ def main() -> int:
         extra_env={
             "RPDB_VERIFY_CFG": str(pass_cfg_path),
             "RPDB_VERIFY_MODULE_DIR": str(module_root),
+            "RPDB_VERIFY_NFT_STATE_ROOT": str(delta_apply_state_root),
         },
     )
     if delta_apply_result["flush_chain"] != 0:
         raise SystemExit("customer-scoped delta apply unexpectedly flushed chains")
+    if delta_apply_result["legacy_classification_commands"] != 0:
+        raise SystemExit("customer-scoped delta apply/remove still emitted legacy classification iptables rules")
+    if delta_apply_result["nft_apply_calls"] != 2:
+        raise SystemExit("customer-scoped delta apply/remove did not program nftables classification twice")
+    if not delta_apply_result["artifact_script_exists"] or not delta_apply_result["artifact_model_exists"]:
+        raise SystemExit("customer-scoped delta apply/remove did not write nftables artifacts")
+    if delta_apply_result["apply_render_mode"] != "nftables-live-pass-through":
+        raise SystemExit("customer-scoped delta apply/remove did not use the live nftables classification render mode")
+    if delta_apply_result["apply_customer_count"] != delta_apply_result["classification_module_count"]:
+        raise SystemExit("customer-scoped delta apply/remove did not render the full classification inventory on apply")
+    if delta_apply_result["remove_customer_count"] != (delta_apply_result["classification_module_count"] - 1):
+        raise SystemExit("customer-scoped delta apply/remove did not rebuild the remaining classification inventory on remove")
+    if delta_apply_result["legacy_translation_commands"] != 0:
+        raise SystemExit("customer-scoped delta apply/remove still emitted legacy translation iptables commands")
     record_step("pass_through_delta_apply_remove", delta_apply_result)
+
+    # Step 7b: verify the explicit fleet apply path also switches pass-through
+    # classification to nftables while leaving translation/NAT commands on the
+    # legacy compatibility path for now.
+    full_apply_state_root = BUILD_ROOT / "full-apply-nft"
+    if full_apply_state_root.exists():
+        shutil.rmtree(full_apply_state_root)
+    full_apply_state_root.mkdir(parents=True, exist_ok=True)
+    full_apply_code = textwrap.dedent(
+        """
+        import builtins
+        import ipaddress
+        import json
+        import os
+        from pathlib import Path
+        from muxerlib.core import load_yaml
+        from muxerlib.variables import load_modules
+        import muxerlib.modes as modes
+        import muxerlib.nftables as nftables
+
+        cfg_path = Path(os.environ["RPDB_VERIFY_CFG"])
+        module_dir = Path(os.environ["RPDB_VERIFY_MODULE_DIR"])
+        state_root = Path(os.environ["RPDB_VERIFY_NFT_STATE_ROOT"])
+        global_cfg = load_yaml(cfg_path)
+        global_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
+        global_cfg["nftables"]["pass_through"]["classification_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["translation_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["state_root"] = str(state_root)
+        global_cfg["nftables"]["pass_through"]["nat_table_name"] = "muxer_passthrough_nat"
+        overlay_pool = ipaddress.ip_network(str(global_cfg["overlay_pool"]), strict=False)
+        modules = load_modules(
+            overlay_pool,
+            cfg_dir=module_dir,
+            customer_modules_dir=module_dir,
+            customers_vars_path=module_dir / "customers.variables.yaml",
+            global_cfg=global_cfg,
+            source_backend="customer_modules",
+        )
+
+        counts = {
+            "flush_chain": 0,
+            "must": 0,
+            "legacy_classification_commands": 0,
+            "legacy_translation_commands": 0,
+            "nft_apply_calls": 0,
+        }
+
+        modes.ensure_chain = lambda *args, **kwargs: None
+        modes.ensure_jump = lambda *args, **kwargs: None
+        modes.remove_jump = lambda *args, **kwargs: None
+        modes.ensure_local_ipv4 = lambda *args, **kwargs: None
+        modes.remove_local_ipv4 = lambda *args, **kwargs: None
+        modes.ensure_tunnel = lambda *args, **kwargs: None
+        modes.ensure_policy = lambda *args, **kwargs: None
+        modes.flush_route_table = lambda *args, **kwargs: None
+        modes.flush_chain = lambda *args, **kwargs: counts.__setitem__("flush_chain", counts["flush_chain"] + 1)
+
+        def record_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            counts["must"] += 1
+            if not cmd or cmd[0] != "iptables":
+                return
+            table = "filter"
+            if "-t" in cmd:
+                table = cmd[cmd.index("-t") + 1]
+            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
+            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
+            if (
+                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
+                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
+            ):
+                counts["legacy_classification_commands"] += 1
+            else:
+                counts["legacy_translation_commands"] += 1
+
+        def record_nft_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:2] == ["nft", "-f"]:
+                counts["nft_apply_calls"] += 1
+
+        modes.must = record_must
+        nftables.must = record_nft_must
+        builtins.print = lambda *args, **kwargs: None
+
+        modes.apply_passthrough(
+            modules,
+            "ens34",
+            "ens35",
+            str(global_cfg["public_ip"]),
+            str((global_cfg.get("interfaces") or {}).get("public_private_ip") or global_cfg["public_ip"]),
+            str((global_cfg.get("interfaces") or {}).get("inside_ip")),
+            str(global_cfg.get("backend_underlay_ip") or "172.31.40.220"),
+            "interface_ip",
+            overlay_pool,
+            int((global_cfg.get("allocation") or {}).get("base_table", 2000)),
+            int(str((global_cfg.get("allocation") or {}).get("base_mark", "0x2000")), 0),
+            "MUXER_MANGLE",
+            "MUXER_FILTER",
+            True,
+            "MUXER_NAT_PRE",
+            "MUXER_NAT_POST",
+            "MUXER_MANGLE_POST",
+            False,
+            2101,
+            2102,
+            True,
+            False,
+            2111,
+            2112,
+            True,
+            True,
+            "nftables",
+            "nftables",
+            "nftables",
+            str(state_root),
+            "muxer_passthrough",
+            "muxer_passthrough_nat",
+        )
+        model_path = state_root / "pass-through-state-model.json"
+        script_path = state_root / "pass-through-state.nft"
+        model = json.loads(model_path.read_text(encoding="utf-8"))
+        import sys
+        sys.stdout.write(
+            json.dumps(
+                {
+                    **counts,
+                    "module_count": len(modules),
+                    "artifact_script_exists": script_path.exists(),
+                    "artifact_model_exists": model_path.exists(),
+                    "render_mode": model["render_mode"],
+                    "customer_count": model["customer_count"],
+                }
+            )
+        )
+        """
+    )
+    full_apply_result = _run_python_json(
+        full_apply_code,
+        pythonpath=RUNTIME_SRC,
+        extra_env={
+            "RPDB_VERIFY_CFG": str(pass_cfg_path),
+            "RPDB_VERIFY_MODULE_DIR": str(module_root),
+            "RPDB_VERIFY_NFT_STATE_ROOT": str(full_apply_state_root),
+        },
+    )
+    if full_apply_result["legacy_classification_commands"] != 0:
+        raise SystemExit("fleet apply still emitted legacy classification iptables rules under nftables backend")
+    if full_apply_result["nft_apply_calls"] != 1:
+        raise SystemExit("fleet apply did not program the nftables classification backend exactly once")
+    if not full_apply_result["artifact_script_exists"] or not full_apply_result["artifact_model_exists"]:
+        raise SystemExit("fleet apply did not write nftables classification artifacts")
+    if full_apply_result["render_mode"] != "nftables-live-pass-through":
+        raise SystemExit("fleet apply did not render the live nftables classification backend")
+    if full_apply_result["customer_count"] != full_apply_result["module_count"]:
+        raise SystemExit("fleet apply did not render the full module set into nftables classification state")
+    if full_apply_result["legacy_translation_commands"] != 0:
+        raise SystemExit("fleet apply still emitted legacy translation iptables commands")
+    record_step("pass_through_nftables_full_apply", full_apply_result)
 
     # Step 8: verify the termination-mode guard remains explicit.
     termination_guard_code = textwrap.dedent(
@@ -1114,7 +1500,8 @@ def main() -> int:
     termination_payload = json.loads(completed.stdout or "{}")
     record_step("termination_mode_boundary", termination_payload)
 
-    # Step 9: verify the first batched nftables render path.
+    # Step 9: verify the repo still emits the reviewable nftables artifacts for
+    # pass-through classification outside the live apply path.
     nft_model = _run_json(
         [
             "python",
@@ -1148,6 +1535,675 @@ def main() -> int:
             "table_name": nft_model["table"]["name"],
         },
     )
+
+    # Step 9b: run the synthetic scale baseline harness against the current
+    # nftables classification backend.
+    scale_baseline_path = BUILD_ROOT / "scale-baseline-summary.json"
+    scale_baseline = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
+            "--muxer-config",
+            str(pass_cfg_path),
+            "--out",
+            str(scale_baseline_path),
+            "--json",
+        ]
+    )
+    scenarios = scale_baseline.get("scenarios") or []
+    expected_scenarios = len(scale_baseline.get("counts") or []) * len(scale_baseline.get("profiles") or [])
+    if len(scenarios) != expected_scenarios:
+        raise SystemExit("Scale baseline did not produce the expected number of scenarios")
+
+    def _scenario(profile: str, customer_count: int) -> dict:
+        for item in scenarios:
+            if item.get("profile") == profile and int(item.get("customer_count") or 0) == customer_count:
+                return item
+        raise SystemExit(f"Scale baseline scenario missing: {profile}/{customer_count}")
+
+    strict_100 = _scenario("strict_non_nat", 100)
+    strict_20000 = _scenario("strict_non_nat", 20000)
+    nat_100 = _scenario("nat_t", 100)
+    nat_20000 = _scenario("nat_t", 20000)
+    mixed_20000 = _scenario("mixed", 20000)
+    netmap_20000 = _scenario("nat_t_netmap", 20000)
+    force4500_100 = _scenario("force4500_bridge", 100)
+    force4500_20000 = _scenario("force4500_bridge", 20000)
+    natd_bridge_100 = _scenario("natd_bridge", 100)
+    natd_bridge_20000 = _scenario("natd_bridge", 20000)
+
+    if int(strict_20000["muxer_legacy_runtime"]["transport_command_count"]) <= int(strict_100["muxer_legacy_runtime"]["transport_command_count"]):
+        raise SystemExit("Scale baseline did not preserve expected strict_non_nat transport command growth")
+    if int(nat_20000["muxer_legacy_runtime"]["transport_command_count"]) <= int(nat_100["muxer_legacy_runtime"]["transport_command_count"]):
+        raise SystemExit("Scale baseline did not preserve expected nat_t transport command growth")
+    if int(strict_20000["muxer_legacy_runtime"]["total_rules"]) != 0:
+        raise SystemExit("Scale baseline strict_non_nat profile still emitted legacy muxer rules after the nftables translation migration")
+    if int(nat_20000["muxer_legacy_runtime"]["total_rules"]) != 0:
+        raise SystemExit("Scale baseline nat_t profile still emitted legacy muxer rules after the nftables translation migration")
+    if int(strict_20000["nftables_preview"]["legacy_translation_customer_count"]) != 0:
+        raise SystemExit("Scale baseline strict_non_nat profile still reports legacy translation customers")
+    if int(nat_20000["nftables_preview"]["legacy_translation_customer_count"]) != 0:
+        raise SystemExit("Scale baseline nat_t profile still reports legacy translation customers")
+    if int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]) != 0:
+        raise SystemExit("Scale baseline force4500 bridge profile still emitted legacy bridge rules after the nftables bridge migration")
+    if int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]) != 0:
+        raise SystemExit("Scale baseline natd bridge profile still emitted legacy bridge rules after the nftables bridge migration")
+    if int(force4500_20000["nftables_preview"]["legacy_bridge_customer_count"]) != 0:
+        raise SystemExit("Scale baseline force4500 bridge profile still reports legacy bridge customers")
+    if int(natd_bridge_20000["nftables_preview"]["legacy_bridge_customer_count"]) != 0:
+        raise SystemExit("Scale baseline natd bridge profile still reports legacy bridge customers")
+    if int(force4500_20000["nftables_preview"]["bridge_set_entry_count"]) <= int(
+        force4500_100["nftables_preview"]["bridge_set_entry_count"]
+    ):
+        raise SystemExit("Scale baseline force4500 bridge selector growth did not scale with customer count")
+    if int(natd_bridge_20000["nftables_preview"]["bridge_set_entry_count"]) <= int(
+        natd_bridge_100["nftables_preview"]["bridge_set_entry_count"]
+    ):
+        raise SystemExit("Scale baseline natd bridge selector growth did not scale with customer count")
+    if int(force4500_20000["nftables_preview"]["bridge_manifest_entry_count"]) <= int(
+        force4500_100["nftables_preview"]["bridge_manifest_entry_count"]
+    ):
+        raise SystemExit("Scale baseline force4500 bridge manifest growth did not scale with customer count")
+    if int(natd_bridge_20000["nftables_preview"]["bridge_manifest_entry_count"]) <= int(
+        natd_bridge_100["nftables_preview"]["bridge_manifest_entry_count"]
+    ):
+        raise SystemExit("Scale baseline natd bridge manifest growth did not scale with customer count")
+    if int(netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"]) <= 0:
+        raise SystemExit("Scale baseline did not produce post-IPsec NAT command growth for the netmap profile")
+    mixed_mix = mixed_20000.get("customer_mix") or {}
+    if int(mixed_mix.get("strict_non_nat") or 0) != 10000 or int(mixed_mix.get("nat_t") or 0) != 10000:
+        raise SystemExit("Scale baseline mixed profile did not produce the expected 50/50 customer mix")
+    if not scale_baseline_path.exists():
+        raise SystemExit("Scale baseline summary path was not written")
+    record_step(
+        "synthetic_scale_baseline",
+        {
+            "summary_path": str(scale_baseline_path),
+            "scenario_count": len(scenarios),
+            "classification_backend": scale_baseline.get("classification_backend"),
+            "translation_backend": scale_baseline.get("translation_backend"),
+            "bridge_backend": scale_baseline.get("bridge_backend"),
+            "strict_non_nat_20000_legacy_rules": strict_20000["muxer_legacy_runtime"]["total_rules"],
+            "nat_t_20000_legacy_rules": nat_20000["muxer_legacy_runtime"]["total_rules"],
+            "force4500_bridge_20000_legacy_bridge_rules": force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"],
+            "natd_bridge_20000_legacy_bridge_rules": natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"],
+            "force4500_bridge_20000_selector_entries": force4500_20000["nftables_preview"]["bridge_set_entry_count"],
+            "natd_bridge_20000_selector_entries": natd_bridge_20000["nftables_preview"]["bridge_set_entry_count"],
+            "force4500_bridge_20000_manifest_entries": force4500_20000["nftables_preview"]["bridge_manifest_entry_count"],
+            "natd_bridge_20000_manifest_entries": natd_bridge_20000["nftables_preview"]["bridge_manifest_entry_count"],
+            "nat_t_20000_nft_set_entries": nat_20000["nftables_preview"]["set_entry_count"],
+            "nat_t_20000_nft_map_entries": nat_20000["nftables_preview"]["map_entry_count"],
+            "nat_t_netmap_20000_headend_apply_commands": netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"],
+        },
+    )
+
+    # Step 9c: compare the current fully nftables pass-through backend against
+    # both the Phase 2 compatibility baseline (classification on nftables,
+    # translation still legacy) and the fully legacy iptables baseline.
+    phase2_scale_cfg_path = BUILD_ROOT / "runtime-pass-through-phase2-compat.yaml"
+    phase2_scale_cfg = yaml.safe_load(pass_cfg_path.read_text(encoding="utf-8"))
+    phase2_scale_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
+    phase2_scale_cfg["nftables"]["pass_through"]["classification_backend"] = "nftables"
+    phase2_scale_cfg["nftables"]["pass_through"]["translation_backend"] = "legacy_iptables"
+    phase2_scale_cfg["nftables"]["pass_through"]["bridge_backend"] = "legacy_iptables"
+    _write_yaml(phase2_scale_cfg_path, phase2_scale_cfg)
+    phase2_scale_baseline_path = BUILD_ROOT / "scale-baseline-summary-phase2-compat.json"
+    phase2_scale_baseline = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
+            "--muxer-config",
+            str(phase2_scale_cfg_path),
+            "--out",
+            str(phase2_scale_baseline_path),
+            "--json",
+        ]
+    )
+    if phase2_scale_baseline.get("classification_backend") != "nftables":
+        raise SystemExit("Phase 2 compatibility baseline did not preserve the nftables classification backend")
+    if phase2_scale_baseline.get("translation_backend") != "legacy_iptables":
+        raise SystemExit("Phase 2 compatibility baseline did not preserve the legacy translation backend")
+    if phase2_scale_baseline.get("bridge_backend") != "legacy_iptables":
+        raise SystemExit("Phase 2 compatibility baseline did not preserve the legacy bridge backend")
+
+    phase2_strict_20000 = None
+    phase2_nat_20000 = None
+    phase2_force4500_20000 = None
+    phase2_natd_bridge_20000 = None
+    for item in phase2_scale_baseline.get("scenarios") or []:
+        if item.get("profile") == "strict_non_nat" and int(item.get("customer_count") or 0) == 20000:
+            phase2_strict_20000 = item
+        if item.get("profile") == "nat_t" and int(item.get("customer_count") or 0) == 20000:
+            phase2_nat_20000 = item
+        if item.get("profile") == "force4500_bridge" and int(item.get("customer_count") or 0) == 20000:
+            phase2_force4500_20000 = item
+        if item.get("profile") == "natd_bridge" and int(item.get("customer_count") or 0) == 20000:
+            phase2_natd_bridge_20000 = item
+    if (
+        phase2_strict_20000 is None
+        or phase2_nat_20000 is None
+        or phase2_force4500_20000 is None
+        or phase2_natd_bridge_20000 is None
+    ):
+        raise SystemExit("Phase 2 compatibility baseline did not produce the expected 20k comparison scenarios")
+    if int(strict_20000["muxer_legacy_runtime"]["total_rules"]) >= int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"]):
+        raise SystemExit("Current fully nftables pass-through backend did not reduce strict_non_nat 20k legacy rule growth relative to Phase 2")
+    if int(nat_20000["muxer_legacy_runtime"]["total_rules"]) >= int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"]):
+        raise SystemExit("Current fully nftables pass-through backend did not reduce nat_t 20k legacy rule growth relative to Phase 2")
+    if int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]) >= int(
+        phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+    ):
+        raise SystemExit("Current fully nftables pass-through backend did not reduce force4500 bridge legacy rule growth relative to Phase 2")
+    if int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]) >= int(
+        phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+    ):
+        raise SystemExit("Current fully nftables pass-through backend did not reduce natd bridge legacy rule growth relative to Phase 2")
+
+    full_legacy_scale_cfg_path = BUILD_ROOT / "runtime-pass-through-full-legacy-iptables.yaml"
+    full_legacy_scale_cfg = yaml.safe_load(pass_cfg_path.read_text(encoding="utf-8"))
+    full_legacy_scale_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
+    full_legacy_scale_cfg["nftables"]["pass_through"]["classification_backend"] = "legacy_iptables"
+    full_legacy_scale_cfg["nftables"]["pass_through"]["translation_backend"] = "legacy_iptables"
+    full_legacy_scale_cfg["nftables"]["pass_through"]["bridge_backend"] = "legacy_iptables"
+    _write_yaml(full_legacy_scale_cfg_path, full_legacy_scale_cfg)
+    full_legacy_scale_baseline_path = BUILD_ROOT / "scale-baseline-summary-full-legacy-iptables.json"
+    full_legacy_scale_baseline = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
+            "--muxer-config",
+            str(full_legacy_scale_cfg_path),
+            "--out",
+            str(full_legacy_scale_baseline_path),
+            "--json",
+        ]
+    )
+    if full_legacy_scale_baseline.get("classification_backend") != "legacy_iptables":
+        raise SystemExit("Full legacy scale baseline did not run with the forced legacy classification backend")
+    if full_legacy_scale_baseline.get("translation_backend") != "legacy_iptables":
+        raise SystemExit("Full legacy scale baseline did not run with the forced legacy translation backend")
+    if full_legacy_scale_baseline.get("bridge_backend") != "legacy_iptables":
+        raise SystemExit("Full legacy scale baseline did not run with the forced legacy bridge backend")
+
+    full_legacy_strict_20000 = None
+    full_legacy_nat_20000 = None
+    full_legacy_force4500_20000 = None
+    full_legacy_natd_bridge_20000 = None
+    for item in full_legacy_scale_baseline.get("scenarios") or []:
+        if item.get("profile") == "strict_non_nat" and int(item.get("customer_count") or 0) == 20000:
+            full_legacy_strict_20000 = item
+        if item.get("profile") == "nat_t" and int(item.get("customer_count") or 0) == 20000:
+            full_legacy_nat_20000 = item
+        if item.get("profile") == "force4500_bridge" and int(item.get("customer_count") or 0) == 20000:
+            full_legacy_force4500_20000 = item
+        if item.get("profile") == "natd_bridge" and int(item.get("customer_count") or 0) == 20000:
+            full_legacy_natd_bridge_20000 = item
+    if (
+        full_legacy_strict_20000 is None
+        or full_legacy_nat_20000 is None
+        or full_legacy_force4500_20000 is None
+        or full_legacy_natd_bridge_20000 is None
+    ):
+        raise SystemExit("Full legacy scale baseline did not produce the expected 20k comparison scenarios")
+    record_step(
+        "synthetic_scale_backend_comparison",
+        {
+            "current_backend": scale_baseline.get("classification_backend"),
+            "current_translation_backend": scale_baseline.get("translation_backend"),
+            "current_bridge_backend": scale_baseline.get("bridge_backend"),
+            "phase2_backend": phase2_scale_baseline.get("classification_backend"),
+            "phase2_translation_backend": phase2_scale_baseline.get("translation_backend"),
+            "phase2_bridge_backend": phase2_scale_baseline.get("bridge_backend"),
+            "full_legacy_backend": full_legacy_scale_baseline.get("classification_backend"),
+            "full_legacy_translation_backend": full_legacy_scale_baseline.get("translation_backend"),
+            "full_legacy_bridge_backend": full_legacy_scale_baseline.get("bridge_backend"),
+            "current_summary_path": str(scale_baseline_path),
+            "phase2_summary_path": str(phase2_scale_baseline_path),
+            "full_legacy_summary_path": str(full_legacy_scale_baseline_path),
+            "strict_non_nat_20000_rule_delta_vs_phase2": int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"])
+            - int(strict_20000["muxer_legacy_runtime"]["total_rules"]),
+            "nat_t_20000_rule_delta_vs_phase2": int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"])
+            - int(nat_20000["muxer_legacy_runtime"]["total_rules"]),
+            "strict_non_nat_20000_rule_delta_vs_full_legacy": int(full_legacy_strict_20000["muxer_legacy_runtime"]["total_rules"])
+            - int(strict_20000["muxer_legacy_runtime"]["total_rules"]),
+            "nat_t_20000_rule_delta_vs_full_legacy": int(full_legacy_nat_20000["muxer_legacy_runtime"]["total_rules"])
+            - int(nat_20000["muxer_legacy_runtime"]["total_rules"]),
+            "force4500_bridge_20000_rule_delta_vs_phase2": int(
+                phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+            )
+            - int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
+            "natd_bridge_20000_rule_delta_vs_phase2": int(
+                phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+            )
+            - int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
+            "force4500_bridge_20000_rule_delta_vs_full_legacy": int(
+                full_legacy_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+            )
+            - int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
+            "natd_bridge_20000_rule_delta_vs_full_legacy": int(
+                full_legacy_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+            )
+            - int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
+        },
+    )
+
+    # Step 9d: verify the Phase 2 translation, NFQUEUE bridge, and head-end NAT
+    # design decisions exist in both human-readable and machine-checkable form,
+    # and that they are anchored to the current measured baseline.
+    scale_decision_manifest_path = MUXER_DIR / "config" / "scale-decisions.yaml"
+    scale_decision_doc_path = MUXER_DIR / "docs" / "TRANSLATION_AND_BRIDGE_SCALE_DECISIONS.md"
+    scale_decision_manifest = yaml.safe_load(scale_decision_manifest_path.read_text(encoding="utf-8"))
+    scale_decision_doc = scale_decision_doc_path.read_text(encoding="utf-8")
+    if int(scale_decision_manifest.get("schema_version") or 0) != 1:
+        raise SystemExit("Scale decision manifest schema_version must be 1")
+    if int(scale_decision_manifest.get("phase") or 0) != 2:
+        raise SystemExit("Scale decision manifest must describe the Phase 2 design gate")
+
+    translation_decision = ((scale_decision_manifest.get("translation") or {}).get("decision") or "").strip()
+    bridge_decision = ((scale_decision_manifest.get("nfqueue_bridge") or {}).get("decision") or "").strip()
+    headend_decision = ((scale_decision_manifest.get("headend_post_ipsec_nat") or {}).get("decision") or "").strip()
+    if translation_decision != "nftables_nat_maps":
+        raise SystemExit("Scale decision manifest translation strategy is missing or incorrect")
+    if bridge_decision != "nftables_selector_sets_plus_manifested_bridge_worker":
+        raise SystemExit("Scale decision manifest NFQUEUE bridge strategy is missing or incorrect")
+    if headend_decision != "batched_iptables_restore_customer_chains":
+        raise SystemExit("Scale decision manifest head-end NAT strategy is missing or incorrect")
+
+    translation_baseline = (scale_decision_manifest.get("translation") or {}).get("baseline_mapping") or {}
+    bridge_baseline = (scale_decision_manifest.get("nfqueue_bridge") or {}).get("baseline_mapping") or {}
+    headend_baseline = (scale_decision_manifest.get("headend_post_ipsec_nat") or {}).get("baseline_mapping") or {}
+    if int(translation_baseline.get("strict_non_nat_20000_legacy_rules") or 0) != int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"]):
+        raise SystemExit("Scale decision manifest strict non-NAT translation baseline is out of sync with the Phase 2 compatibility baseline")
+    if int(translation_baseline.get("nat_t_20000_legacy_rules") or 0) != int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"]):
+        raise SystemExit("Scale decision manifest NAT-T translation baseline is out of sync with the Phase 2 compatibility baseline")
+    if int(bridge_baseline.get("force4500_bridge_20000_legacy_bridge_rules") or 0) != int(
+        phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+    ):
+        raise SystemExit("Scale decision manifest force4500 bridge baseline is out of sync with the Phase 2 compatibility baseline")
+    if int(bridge_baseline.get("natd_bridge_20000_legacy_bridge_rules") or 0) != int(
+        phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+    ):
+        raise SystemExit("Scale decision manifest natd bridge baseline is out of sync with the Phase 2 compatibility baseline")
+    if int(headend_baseline.get("nat_t_netmap_20000_headend_apply_commands") or 0) != int(netmap_20000["headend_post_ipsec_nat_runtime"]["apply_command_count"]):
+        raise SystemExit("Scale decision manifest head-end NAT baseline is out of sync with the measured scale harness")
+
+    for required_heading in (
+        "## 1. Muxer Translation Decision",
+        "## 2. NFQUEUE Bridge Decision",
+        "## 3. Head-End Post-IPsec NAT Decision",
+    ):
+        if required_heading not in scale_decision_doc:
+            raise SystemExit(f"Scale decision doc is missing required section heading: {required_heading}")
+    record_step(
+        "translation_bridge_scale_decisions",
+        {
+            "manifest_path": str(scale_decision_manifest_path),
+            "doc_path": str(scale_decision_doc_path),
+            "translation_strategy": translation_decision,
+            "nfqueue_bridge_strategy": bridge_decision,
+            "headend_nat_strategy": headend_decision,
+            "translation_baseline_source": "phase2_compatibility_baseline",
+            "bridge_baseline_source": "phase2_compatibility_baseline",
+        },
+    )
+
+    # Step 9d2: generate an explicit scale gate report from the measured summary
+    # and the committed threshold manifest, then verify repeated generation
+    # produces the same pass/fail matrix.
+    scale_threshold_path = MUXER_DIR / "config" / "scale-thresholds.json"
+    scale_report_path_a = BUILD_ROOT / "scale-gate-report-a.json"
+    scale_report_path_b = BUILD_ROOT / "scale-gate-report-b.json"
+    scale_report_md_path = BUILD_ROOT / "scale-gate-report.md"
+    scale_report_a = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "generate_scale_report.py"),
+            "--summary",
+            str(scale_baseline_path),
+            "--thresholds",
+            str(scale_threshold_path),
+            "--out-json",
+            str(scale_report_path_a),
+            "--out-md",
+            str(scale_report_md_path),
+            "--json",
+        ]
+    )
+    scale_report_b = _run_json(
+        [
+            "python",
+            str(MUXER_DIR / "scripts" / "generate_scale_report.py"),
+            "--summary",
+            str(scale_baseline_path),
+            "--thresholds",
+            str(scale_threshold_path),
+            "--out-json",
+            str(scale_report_path_b),
+            "--json",
+        ]
+    )
+    if not scale_report_path_a.exists() or not scale_report_path_b.exists() or not scale_report_md_path.exists():
+        raise SystemExit("Scale gate report outputs were not written")
+
+    def _normalize_scale_report(report: dict) -> list[dict]:
+        normalized: list[dict] = []
+        for item in report.get("evaluations") or []:
+            normalized.append(
+                {
+                    "profile": item.get("profile"),
+                    "customer_count": int(item.get("customer_count") or 0),
+                    "status": item.get("status"),
+                    "failed_checks": list(item.get("failed_checks") or []),
+                }
+            )
+        return sorted(normalized, key=lambda item: (str(item["profile"]), int(item["customer_count"])))
+
+    normalized_report_a = _normalize_scale_report(scale_report_a)
+    normalized_report_b = _normalize_scale_report(scale_report_b)
+    if normalized_report_a != normalized_report_b:
+        raise SystemExit("Repeated scale gate reports did not agree on pass/fail outcomes")
+    if scale_report_a.get("missing_targets") or scale_report_b.get("missing_targets"):
+        raise SystemExit("Scale gate report is missing one or more target scenarios")
+    failed_scale_evaluations = [item for item in normalized_report_a if item["status"] != "passed"]
+    record_step(
+        "explicit_scale_gate_report",
+        {
+            "threshold_path": str(scale_threshold_path),
+            "summary_path": str(scale_baseline_path),
+            "report_json": str(scale_report_path_a),
+            "report_markdown": str(scale_report_md_path),
+            "overall_status": scale_report_a.get("overall_status"),
+            "failed_evaluation_count": len(failed_scale_evaluations),
+            "failed_evaluations": failed_scale_evaluations,
+        },
+    )
+
+    # Step 9e: verify the NFQUEUE bridge path uses the shared nftables selector
+    # sets plus manifest model in customer-scoped delta operations.
+    bridge_delta_state_root = BUILD_ROOT / "bridge-delta-nft"
+    if bridge_delta_state_root.exists():
+        shutil.rmtree(bridge_delta_state_root)
+    bridge_delta_state_root.mkdir(parents=True, exist_ok=True)
+    bridge_delta_code = textwrap.dedent(
+        """
+        import builtins
+        import json
+        import os
+        from pathlib import Path
+
+        from muxerlib.core import load_yaml
+        import muxerlib.modes as modes
+        import muxerlib.nftables as nftables
+
+        cfg_path = Path(os.environ["RPDB_VERIFY_CFG"])
+        state_root = Path(os.environ["RPDB_VERIFY_NFT_STATE_ROOT"])
+        global_cfg = load_yaml(cfg_path)
+        global_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
+        global_cfg["nftables"]["pass_through"]["classification_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["translation_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["bridge_backend"] = "nftables"
+        global_cfg["nftables"]["pass_through"]["state_root"] = str(state_root)
+        global_cfg["nftables"]["pass_through"]["nat_table_name"] = "muxer_passthrough_nat"
+
+        modules = [
+            {
+                "id": 501,
+                "name": "bridge-force4500",
+                "peer_ip": "198.18.60.1/32",
+                "protocols": {
+                    "udp500": True,
+                    "udp4500": False,
+                    "esp50": True,
+                    "force_rewrite_4500_to_500": True,
+                },
+                "backend_underlay_ip": "172.31.200.51",
+                "headend_egress_sources": ["172.31.210.51"],
+                "ipip_ifname": "gre-bridge-0501",
+                "tunnel_type": "gre",
+                "tunnel_key": 60501,
+                "rpdb_priority": 90501,
+                "overlay": {
+                    "mux_ip": "169.254.60.1/30",
+                    "router_ip": "169.254.60.2/30",
+                },
+            },
+            {
+                "id": 502,
+                "name": "bridge-natd",
+                "peer_ip": "198.18.60.2/32",
+                "protocols": {
+                    "udp500": True,
+                    "udp4500": False,
+                    "esp50": False,
+                },
+                "natd_rewrite": {
+                    "enabled": True,
+                    "initiator_inner_ip": "10.250.0.20",
+                },
+                "backend_underlay_ip": "172.31.200.52",
+                "headend_egress_sources": ["172.31.210.52"],
+                "ipip_ifname": "gre-bridge-0502",
+                "tunnel_type": "gre",
+                "tunnel_key": 60502,
+                "rpdb_priority": 90502,
+                "overlay": {
+                    "mux_ip": "169.254.61.1/30",
+                    "router_ip": "169.254.61.2/30",
+                },
+            },
+        ]
+
+        counts = {
+            "flush_chain": 0,
+            "delete_peer_rules": 0,
+            "remove_policy": 0,
+            "remove_tunnel": 0,
+            "must": 0,
+            "legacy_classification_commands": 0,
+            "legacy_translation_commands": 0,
+            "legacy_bridge_commands": 0,
+            "nft_apply_calls": 0,
+        }
+
+        modes.ensure_chain = lambda *args, **kwargs: None
+        modes.ensure_jump = lambda *args, **kwargs: None
+        modes.remove_jump = lambda *args, **kwargs: None
+        modes.ensure_iptables_rule = lambda *args, **kwargs: None
+        modes.ensure_local_ipv4 = lambda *args, **kwargs: None
+        modes.remove_local_ipv4 = lambda *args, **kwargs: None
+        modes.ensure_tunnel = lambda *args, **kwargs: None
+        modes.ensure_policy = lambda *args, **kwargs: None
+        modes.flush_route_table = lambda *args, **kwargs: None
+        modes.flush_chain = lambda *args, **kwargs: counts.__setitem__("flush_chain", counts["flush_chain"] + 1)
+        modes.delete_iptables_rules_by_peer = (
+            lambda *args, **kwargs: counts.__setitem__("delete_peer_rules", counts["delete_peer_rules"] + 1) or 1
+        )
+        modes.remove_policy = lambda *args, **kwargs: counts.__setitem__("remove_policy", counts["remove_policy"] + 1)
+        modes.remove_tunnel = lambda *args, **kwargs: counts.__setitem__("remove_tunnel", counts["remove_tunnel"] + 1)
+
+        def record_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            counts["must"] += 1
+            if not cmd or cmd[0] != "iptables":
+                return
+            table = "filter"
+            if "-t" in cmd:
+                table = cmd[cmd.index("-t") + 1]
+            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
+            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
+            if target == "NFQUEUE" or chain == "MUXER_MANGLE_POST":
+                counts["legacy_bridge_commands"] += 1
+            elif (
+                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
+                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
+            ):
+                counts["legacy_classification_commands"] += 1
+            else:
+                counts["legacy_translation_commands"] += 1
+
+        def record_nft_must(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:2] == ["nft", "-f"]:
+                counts["nft_apply_calls"] += 1
+
+        modes.must = record_must
+        nftables.must = record_nft_must
+        builtins.print = lambda *args, **kwargs: None
+
+        modes.apply_customer_passthrough(
+            modules[0],
+            pub_if="ens34",
+            inside_if="ens35",
+            public_ip=str(global_cfg["public_ip"]),
+            public_priv_ip=str((global_cfg.get("interfaces") or {}).get("public_private_ip") or global_cfg["public_ip"]),
+            inside_ip=str((global_cfg.get("interfaces") or {}).get("inside_ip")),
+            backend_ul=str(global_cfg.get("backend_underlay_ip") or "172.31.40.220"),
+            transport_local_mode="interface_ip",
+            overlay_pool=None,
+            base_table=int((global_cfg.get("allocation") or {}).get("base_table", 2000)),
+            base_mark=int(str((global_cfg.get("allocation") or {}).get("base_mark", "0x2000")), 0),
+            mangle_chain="MUXER_MANGLE",
+            filter_chain="MUXER_FILTER",
+            nat_rewrite=True,
+            nat_pre_chain="MUXER_NAT_PRE",
+            nat_post_chain="MUXER_NAT_POST",
+            mangle_post_chain="MUXER_MANGLE_POST",
+            nfqueue_enabled=True,
+            nfqueue_queue_in=2101,
+            nfqueue_queue_out=2102,
+            nfqueue_queue_bypass=True,
+            natd_dpi_enabled=True,
+            natd_dpi_queue_in=2111,
+            natd_dpi_queue_out=2112,
+            natd_dpi_queue_bypass=True,
+            default_drop=True,
+            classification_backend="nftables",
+            translation_backend="nftables",
+            bridge_backend="nftables",
+            classification_state_root=str(state_root),
+            classification_table_name="muxer_passthrough",
+            translation_table_name="muxer_passthrough_nat",
+            classification_modules=modules,
+        )
+
+        model_path = state_root / "pass-through-state-model.json"
+        script_path = state_root / "pass-through-state.nft"
+        bridge_manifest_path = state_root / "pass-through-bridge-manifest.json"
+        apply_model = json.loads(model_path.read_text(encoding="utf-8"))
+        apply_bridge_manifest = json.loads(bridge_manifest_path.read_text(encoding="utf-8"))
+
+        modes.remove_customer_passthrough(
+            modules[0],
+            inside_if="ens35",
+            inside_ip=str((global_cfg.get("interfaces") or {}).get("inside_ip")),
+            transport_local_mode="interface_ip",
+            base_table=int((global_cfg.get("allocation") or {}).get("base_table", 2000)),
+            base_mark=int(str((global_cfg.get("allocation") or {}).get("base_mark", "0x2000")), 0),
+            mangle_chain="MUXER_MANGLE",
+            mangle_post_chain="MUXER_MANGLE_POST",
+            filter_chain="MUXER_FILTER",
+            nat_pre_chain="MUXER_NAT_PRE",
+            nat_post_chain="MUXER_NAT_POST",
+            nfqueue_enabled=True,
+            nfqueue_queue_in=2101,
+            nfqueue_queue_out=2102,
+            nfqueue_queue_bypass=True,
+            natd_dpi_enabled=True,
+            natd_dpi_queue_in=2111,
+            natd_dpi_queue_out=2112,
+            natd_dpi_queue_bypass=True,
+            classification_backend="nftables",
+            translation_backend="nftables",
+            bridge_backend="nftables",
+            classification_state_root=str(state_root),
+            classification_table_name="muxer_passthrough",
+            translation_table_name="muxer_passthrough_nat",
+            classification_modules=modules,
+            pub_if="ens34",
+            public_ip=str(global_cfg["public_ip"]),
+            public_priv_ip=str((global_cfg.get("interfaces") or {}).get("public_private_ip") or global_cfg["public_ip"]),
+            default_drop=True,
+        )
+
+        remove_model = json.loads(model_path.read_text(encoding="utf-8"))
+        remove_bridge_manifest = json.loads(bridge_manifest_path.read_text(encoding="utf-8"))
+
+        def selector_total(payload, *keys):
+            hooks = ((payload.get("bridge") or payload).get("queue_hooks") or {})
+            return sum(int(((hooks.get(key) or {}).get("selector_count")) or 0) for key in keys)
+
+        def manifest_total(payload):
+            manifest = ((payload.get("bridge") or payload).get("manifest") or {})
+            return sum(len(value or []) for value in manifest.values())
+
+        import sys
+        sys.stdout.write(
+            json.dumps(
+                {
+                    **counts,
+                    "artifact_script_exists": script_path.exists(),
+                    "artifact_model_exists": model_path.exists(),
+                    "bridge_manifest_exists": bridge_manifest_path.exists(),
+                    "classification_module_count": len(modules),
+                    "apply_render_mode": apply_model["render_mode"],
+                    "apply_customer_count": apply_model["customer_count"],
+                    "apply_bridge_backend": apply_model["bridge_backend"],
+                    "apply_bridge_enabled": bool((apply_model.get("bridge") or {}).get("enabled")),
+                    "apply_force4500_selector_count": selector_total(apply_model, "force4500_in", "force4500_out"),
+                    "apply_natd_selector_count": selector_total(apply_model, "natd_in", "natd_out"),
+                    "apply_manifest_entry_count": manifest_total(apply_bridge_manifest),
+                    "apply_legacy_bridge_customer_count": len(apply_model.get("legacy_bridge_customers") or []),
+                    "remove_customer_count": remove_model["customer_count"],
+                    "remove_force4500_selector_count": selector_total(remove_model, "force4500_in", "force4500_out"),
+                    "remove_natd_selector_count": selector_total(remove_model, "natd_in", "natd_out"),
+                    "remove_manifest_entry_count": manifest_total(remove_bridge_manifest),
+                    "remove_legacy_bridge_customer_count": len(remove_model.get("legacy_bridge_customers") or []),
+                }
+            )
+        )
+        """
+    )
+    bridge_delta_result = _run_python_json(
+        bridge_delta_code,
+        pythonpath=RUNTIME_SRC,
+        extra_env={
+            "RPDB_VERIFY_CFG": str(pass_cfg_path),
+            "RPDB_VERIFY_NFT_STATE_ROOT": str(bridge_delta_state_root),
+        },
+    )
+    if bridge_delta_result["flush_chain"] != 0:
+        raise SystemExit("bridge delta apply unexpectedly flushed chains")
+    if bridge_delta_result["legacy_classification_commands"] != 0:
+        raise SystemExit("bridge delta apply/remove still emitted legacy classification commands")
+    if bridge_delta_result["legacy_translation_commands"] != 0:
+        raise SystemExit("bridge delta apply/remove still emitted legacy translation commands")
+    if bridge_delta_result["legacy_bridge_commands"] != 0:
+        raise SystemExit("bridge delta apply/remove still emitted legacy NFQUEUE bridge commands")
+    if bridge_delta_result["nft_apply_calls"] != 2:
+        raise SystemExit("bridge delta apply/remove did not program nftables state twice")
+    if not (
+        bridge_delta_result["artifact_script_exists"]
+        and bridge_delta_result["artifact_model_exists"]
+        and bridge_delta_result["bridge_manifest_exists"]
+    ):
+        raise SystemExit("bridge delta apply/remove did not write the expected nftables bridge artifacts")
+    if bridge_delta_result["apply_render_mode"] != "nftables-live-pass-through":
+        raise SystemExit("bridge delta apply/remove did not use the live nftables render mode")
+    if bridge_delta_result["apply_customer_count"] != bridge_delta_result["classification_module_count"]:
+        raise SystemExit("bridge delta apply/remove did not render the full bridge inventory on apply")
+    if bridge_delta_result["remove_customer_count"] != (bridge_delta_result["classification_module_count"] - 1):
+        raise SystemExit("bridge delta apply/remove did not rebuild the remaining bridge inventory on remove")
+    if bridge_delta_result["apply_bridge_backend"] != "nftables" or not bridge_delta_result["apply_bridge_enabled"]:
+        raise SystemExit("bridge delta apply/remove did not select the nftables bridge backend")
+    if bridge_delta_result["apply_force4500_selector_count"] <= 0 or bridge_delta_result["apply_natd_selector_count"] <= 0:
+        raise SystemExit("bridge delta apply/remove did not render both force4500 and natd selector groups")
+    if bridge_delta_result["remove_force4500_selector_count"] != 0 or bridge_delta_result["remove_natd_selector_count"] <= 0:
+        raise SystemExit("bridge delta apply/remove did not remove only the selected bridge customer inventory")
+    if bridge_delta_result["remove_manifest_entry_count"] >= bridge_delta_result["apply_manifest_entry_count"]:
+        raise SystemExit("bridge delta apply/remove did not shrink the bridge manifest after remove")
+    if bridge_delta_result["apply_legacy_bridge_customer_count"] != 0 or bridge_delta_result["remove_legacy_bridge_customer_count"] != 0:
+        raise SystemExit("bridge delta apply/remove still reported legacy bridge customers under the nftables bridge backend")
+    record_step("pass_through_bridge_delta_apply_remove", bridge_delta_result)
 
     # Step 10: verify the customer-scoped head-end staging/apply/remove flow
     # against staged filesystem roots, including the richer VPN service intent
@@ -1620,6 +2676,10 @@ def main() -> int:
         raise SystemExit("Phase 6 Customer 2 staged approved apply did not succeed")
     if (phase6_customer2_apply.get("selected_targets") or {}).get("headend_family") != "non_nat":
         raise SystemExit("Phase 6 Customer 2 staged approved apply chose the wrong head-end family")
+    if ((phase6_customer2_apply.get("apply") or {}).get("mode")) != "staged_activation_apply":
+        raise SystemExit("Phase 6 Customer 2 staged approved apply did not use the staged activation contract")
+    if (((phase6_customer2_apply.get("apply") or {}).get("activation_contract") or {}).get("strategy")) != "node_local_activation_bundle":
+        raise SystemExit("Phase 6 Customer 2 staged approved apply did not record the node-local activation strategy")
 
     phase6_customer4_apply = _run_json(
         [
@@ -1653,6 +2713,10 @@ def main() -> int:
         raise SystemExit("Phase 6 Customer 4 staged approved apply did not succeed")
     if (phase6_customer4_apply.get("selected_targets") or {}).get("headend_family") != "nat":
         raise SystemExit("Phase 6 Customer 4 staged approved apply chose the wrong head-end family")
+    if ((phase6_customer4_apply.get("apply") or {}).get("mode")) != "staged_activation_apply":
+        raise SystemExit("Phase 6 Customer 4 staged approved apply did not use the staged activation contract")
+    if (((phase6_customer4_apply.get("apply") or {}).get("activation_contract") or {}).get("strategy")) != "node_local_activation_bundle":
+        raise SystemExit("Phase 6 Customer 4 staged approved apply did not record the node-local activation strategy")
 
     phase6_artifacts: dict[str, dict[str, str]] = {}
     for customer_name, report in (
@@ -1669,10 +2733,33 @@ def main() -> int:
             raise SystemExit(f"Phase 6 rollback plan missing for {customer_name}")
         if not published_root.exists():
             raise SystemExit(f"Phase 6 published artifact root missing for {customer_name}")
+        activation_bundles = apply.get("activation_bundles") or {}
+        activation_artifacts: dict[str, dict[str, str]] = {}
+        for component_name, activation in activation_bundles.items():
+            request_path = _resolve_repo_path(str(activation.get("request_path") or ""))
+            rollback_request_path = _resolve_repo_path(str(activation.get("rollback_request_path") or ""))
+            activation_journal = _resolve_repo_path(str(activation.get("activation_journal") or ""))
+            activation_result = _resolve_repo_path(str(activation.get("activation_result") or ""))
+            if not request_path.exists():
+                raise SystemExit(f"Phase 6 activation request missing for {customer_name}/{component_name}")
+            if not rollback_request_path.exists():
+                raise SystemExit(f"Phase 6 rollback request missing for {customer_name}/{component_name}")
+            if not activation_journal.exists():
+                raise SystemExit(f"Phase 6 activation journal missing for {customer_name}/{component_name}")
+            if not activation_result.exists():
+                raise SystemExit(f"Phase 6 activation result missing for {customer_name}/{component_name}")
+            activation_artifacts[component_name] = {
+                "request_path": str(request_path),
+                "rollback_request_path": str(rollback_request_path),
+                "activation_journal": str(activation_journal),
+                "activation_result": str(activation_result),
+            }
         phase6_artifacts[customer_name] = {
             "apply_journal": str(journal_path),
             "rollback_plan": str(rollback_plan_path),
             "published_root": str(published_root),
+            "activation_contract": ((apply.get("activation_contract") or {}).get("strategy")),
+            "activation_artifacts": activation_artifacts,
         }
     record_step(
         "approved_staged_live_apply_gate",
@@ -1771,6 +2858,59 @@ def main() -> int:
     ):
         if path.exists():
             raise SystemExit(f"Phase 7 auto-rollback left customer state behind: {path}")
+    phase7_failure_result_second = _run_python_json(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+            import yaml
+
+            repo_root = Path(os.environ["RPDB_REPO_ROOT"]).resolve()
+            sys.path.insert(0, str((repo_root / "scripts" / "customers").resolve()))
+
+            from live_apply_lib import execute_staged_live_apply
+
+            environment_doc = yaml.safe_load(
+                Path(os.environ["RPDB_ENVIRONMENT"]).read_text(encoding="utf-8")
+            )
+            result = execute_staged_live_apply(
+                customer_name=os.environ["RPDB_CUSTOMER_NAME"],
+                package_dir=Path(os.environ["RPDB_PACKAGE_DIR"]).resolve(),
+                bundle_dir=Path(os.environ["RPDB_BUNDLE_DIR"]).resolve(),
+                deploy_dir=Path(os.environ["RPDB_DEPLOY_DIR"]).resolve(),
+                target_selection=json.loads(os.environ["RPDB_TARGET_SELECTION"]),
+                environment_doc=environment_doc,
+                execution_plan_path=Path(os.environ["RPDB_EXECUTION_PLAN"]).resolve(),
+            )
+            print(json.dumps(result))
+            """
+        ),
+        extra_env={
+            "RPDB_REPO_ROOT": str(REPO_ROOT),
+            "RPDB_ENVIRONMENT": str(phase7_env_path),
+            "RPDB_CUSTOMER_NAME": "legacy-cust0002",
+            "RPDB_PACKAGE_DIR": str(failure_package_dir),
+            "RPDB_BUNDLE_DIR": str(failure_package_dir / "bundle"),
+            "RPDB_DEPLOY_DIR": str(phase7_root / "fr2"),
+            "RPDB_EXECUTION_PLAN": str(_resolve_repo_path(failure_prep["artifacts"]["execution_plan"])),
+            "RPDB_TARGET_SELECTION": json.dumps(failure_prep["selected_targets"]),
+        },
+    )
+    if phase7_failure_result_second.get("status") != "rolled_back":
+        raise SystemExit("Phase 7 repeated staged failure did not roll back automatically")
+    for path in (
+        phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "customer-modules" / "legacy-cust0002",
+        phase7_root / "r" / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
+        phase7_root / "r" / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
+    ):
+        if path.exists():
+            raise SystemExit(f"Phase 7 repeated auto-rollback left customer state behind: {path}")
     record_step(
         "post_apply_auto_rollback_gate",
         {
@@ -1779,6 +2919,9 @@ def main() -> int:
             "error": phase7_failure_result["error"],
             "rollback_plan": _resolve_repo_path(phase7_failure_result["rollback_plan"]).as_posix(),
             "apply_journal": _resolve_repo_path(phase7_failure_result["apply_journal"]).as_posix(),
+            "repeat_status": phase7_failure_result_second["status"],
+            "repeat_rollback_plan": _resolve_repo_path(phase7_failure_result_second["rollback_plan"]).as_posix(),
+            "repeat_apply_journal": _resolve_repo_path(phase7_failure_result_second["apply_journal"]).as_posix(),
         },
     )
 

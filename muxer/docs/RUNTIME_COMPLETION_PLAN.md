@@ -12,7 +12,7 @@ verification harness.
 
 The next service-intent modeling step is tracked in:
 
-- [VPN_SERVICE_INTENT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
+- [VPN_SERVICE_INTENT_MODEL.md](./VPN_SERVICE_INTENT_MODEL.md)
 
 ## What Is Already Fixed
 
@@ -27,7 +27,7 @@ main blocker.
 
 ## Current Runtime Boundaries
 
-### 1. Normal DynamoDB loading still scans the whole table
+### 1. Explicit fleet inventory still scans the whole table
 
 Current behavior lives in:
 
@@ -46,6 +46,13 @@ It is not the right default for:
 - onboarding one customer
 - removing one customer
 - validating one customer
+
+Current boundary:
+
+- customer-scoped commands now use direct customer lookup and refuse fleet-scan
+  fallback
+- explicit fleet inventory and admin/export workflows may still use the scan
+  path
 
 ### 2. The muxer CLI is only partially customer-scoped outside pass-through
 
@@ -77,18 +84,27 @@ The explicit fleet `apply` path still:
 That is acceptable as an explicit fleet command, but it is no longer the normal
 customer-by-customer path for pass-through mode.
 
-### 4. The live dataplane still includes legacy linear programming
+### 4. The live dataplane still includes legacy linear programming outside the
+pass-through classification layer
 
 Current behavior lives in:
 
 - `muxer/runtime-package/src/muxerlib/modes.py`
 - `muxer/runtime-package/src/muxerlib/core.py`
 
-The live path still contains legacy per-customer `iptables` and `ip`
-programming for translation and bridge behavior.
+The live path still contains legacy per-customer programming for bridge
+behavior and still relies on per-customer transport object programming.
 
-The repo now has the first batched `nftables` render path, but that render path
-is not yet the live apply backend.
+The pass-through classification and translation layers are now repo-implemented
+through the `nftables` backend for:
+
+- peer classification
+- fwmark assignment
+- muxer-side DNAT/SNAT translation
+- default-drop behavior
+
+The remaining bridge and head-end activation layers are still on the legacy or
+compatibility path.
 
 ## Target Runtime Behavior
 
@@ -149,7 +165,7 @@ Add DB-backed tracking for reusable namespaces such as:
 
 The allocation model and examples live in:
 
-- [RESOURCE_ALLOCATION_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
+- [RESOURCE_ALLOCATION_MODEL.md](./RESOURCE_ALLOCATION_MODEL.md)
 
 This is a growth requirement, not an optional cleanup item. Provisioning should
 reserve and release these resources explicitly instead of inferring "next free"
@@ -162,8 +178,8 @@ The target provisioning contract should be operator-light:
 
 That contract is documented in:
 
-- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
-- [RESOURCE_NAMESPACE_CATALOG.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RESOURCE_NAMESPACE_CATALOG.md)
+- [PROVISIONING_INPUT_MODEL.md](./PROVISIONING_INPUT_MODEL.md)
+- [RESOURCE_NAMESPACE_CATALOG.md](./RESOURCE_NAMESPACE_CATALOG.md)
 
 Current status:
 
@@ -237,19 +253,26 @@ sizes.
 
 Current status:
 
-- the first batched `nftables` render path exists in:
-  - [nftables.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/src/muxerlib/nftables.py)
-  - [render_nft_passthrough.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/runtime-package/scripts/render_nft_passthrough.py)
-- this layer currently covers peer classification, fwmark maps, and default
-  drop render
-- live DNAT/SNAT rewrite and NFQUEUE bridge stages remain on the legacy
-  per-customer path for now
+- the first batched `nftables` layer exists in:
+  - [nftables.py](../runtime-package/src/muxerlib/nftables.py)
+  - [render_nft_passthrough.py](../runtime-package/scripts/render_nft_passthrough.py)
+- peer classification, fwmark maps, and default-drop behavior now use the
+  repo-modeled live `nftables` backend in pass-through apply paths
+- live DNAT/SNAT rewrite now also uses the repo-modeled live `nftables` backend
+  in pass-through apply paths
+- NFQUEUE bridge stages remain on the legacy per-customer path for now
+- the synthetic `20k` strict non-NAT and NAT-T profiles now reach `0`
+  remaining legacy muxer rules in repo-only verification
 
-## Migration Gate
+The current repo-only baseline harness for measuring this gap lives in:
+
+- [SCALE_BASELINE_HARNESS.md](./SCALE_BASELINE_HARNESS.md)
+
+## Customer-Scoped Migration Gate
 
 Do not treat the RPDB runtime as migration-ready until all of these are true:
 
-- normal customer operations do not depend on DynamoDB full-table scan
+- normal customer operations do not depend on DynamoDB fleet scan
 - a single customer can be applied without rebuilding all customers
 - a single customer can be removed without rebuilding all customers
 - the dataplane update path is at least delta-based, even if `nftables`
@@ -258,6 +281,27 @@ Do not treat the RPDB runtime as migration-ready until all of these are true:
 Current status for the pass-through migration target:
 
 - met in repo-only verification
+
+## Scale-Readiness Gate
+
+Do not treat the RPDB runtime as scale-ready until all of these are true:
+
+- the live pass-through classification backend no longer depends on large
+  per-customer linear `iptables` growth
+- the translation layer no longer depends on large per-customer linear
+  `iptables` growth
+- the bridge stage has an approved growth strategy and a measured
+  implementation
+- shell fan-out is no longer the normal live apply backend
+- measured synthetic scale gates exist for at least 1k, 5k, 10k, and 20k
+  customers
+
+Current status:
+
+- not met
+- the repo now records the current baseline, but the scalable backend work is
+  still open around NFQUEUE bridge, head-end activation shape, shell fan-out,
+  and explicit pass/fail thresholds
 
 ## Exit Criteria
 
@@ -274,11 +318,11 @@ prove:
 
 The repo-only completion proof now lives in:
 
-- [run_repo_verification.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/scripts/run_repo_verification.py)
+- [run_repo_verification.py](../scripts/run_repo_verification.py)
 
 And the generated summary lives in:
 
-- [repo-verification-summary.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/build/repo-verification/repo-verification-summary.json)
+- `build/repo-verification/repo-verification-summary.json`
 
 That verifier proves:
 
@@ -286,8 +330,11 @@ That verifier proves:
 - smart allocation expands them into full customer records
 - allocation DDB items are generated for exclusive namespaces
 - pass-through runtime can load one customer
+- customer-scoped DynamoDB lookup refuses fleet-scan fallback
 - pass-through `apply-customer` and `remove-customer` stay delta-oriented
 - termination mode remains explicitly blocked
-- the first batched `nftables` render path works repo-only
+- the pass-through `nftables` classification backend is selected and exercised
+  repo-only for customer-scoped and fleet apply paths
+- the synthetic scale baseline harness runs through 20k customers repo-only
 - richer VPN service intent renders into head-end artifacts
 - one-to-one netmap and explicit host-map NAT examples stage and remove cleanly

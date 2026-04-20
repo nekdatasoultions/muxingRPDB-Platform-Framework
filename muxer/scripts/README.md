@@ -74,8 +74,34 @@ Current scaffold helpers:
 - `run_repo_verification.py`
   - runs the repo-only completion proof
   - verifies provisioning, allocation tracking, customer-scoped runtime
-    behavior, termination guards, and nftables batch render
+    behavior, termination guards, strict DynamoDB customer lookup boundaries,
+    the live pass-through `nftables` classification backend, and the synthetic
+    scale baseline harness
+- `run_scale_baseline.py`
+  - generates synthetic strict non-NAT, NAT-T, translated NAT-T, and mixed
+    customer scenarios plus bridge-focused profiles
+  - records rule growth, command growth, classification backend, batched
+    `nftables` model size, apply/remove/rollback plan timing, CPU time, and
+    peak memory for 100, 1k, 5k, 10k, and 20k customer counts
+  - writes a repo-only scale baseline artifact without touching AWS or live
+    nodes
+- `generate_scale_report.py`
+  - evaluates one scale harness summary against
+    `muxer/config/scale-thresholds.json`
+  - writes machine-checked JSON and Markdown pass/fail reports
+  - is allowed to report `failed` so the repo can record an honest no-go state
+    without interpretation drift
 
 Current proof artifact:
 
-- [repo-verification-summary.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/build/repo-verification/repo-verification-summary.json)
+- `build/repo-verification/repo-verification-summary.json`
+
+Current scale baseline artifact:
+
+- `build/scale-baseline/scale-baseline-summary.json`
+
+Current explicit scale gate artifacts:
+
+- `build/scale-baseline/phase7-metrics.json`
+- `build/scale-baseline/phase7-report.json`
+- `build/scale-baseline/phase7-report.md`
