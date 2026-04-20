@@ -249,6 +249,19 @@ def _derive_routing_remove_lines(rule_text: str, route_text: str) -> list[str]:
     return removals
 
 
+def _derive_routing_apply_lines(rule_text: str, route_text: str) -> list[str]:
+    apply_lines: list[str] = []
+    for line in _executable_lines(rule_text):
+        if line.startswith("ip rule add "):
+            rule_spec = line.removeprefix("ip rule add ")
+            apply_lines.append("ip rule del " + rule_spec + " 2>/dev/null || true")
+            apply_lines.append(line)
+        else:
+            apply_lines.append(line)
+    apply_lines.extend(_executable_lines(route_text))
+    return apply_lines
+
+
 def _derive_tunnel_remove_lines(bundle: MuxerBundle) -> list[str]:
     intent = bundle.json_payloads["tunnel/tunnel-intent.json"]
     interface = str(intent.get("interface") or "").strip()
@@ -257,8 +270,42 @@ def _derive_tunnel_remove_lines(bundle: MuxerBundle) -> list[str]:
     return ["true"]
 
 
+def _derive_tunnel_apply_lines(bundle: MuxerBundle) -> list[str]:
+    intent = bundle.json_payloads["tunnel/tunnel-intent.json"]
+    interface = str(intent.get("interface") or "").strip()
+    apply_lines: list[str] = []
+    for line in _executable_lines(bundle.text_payloads["tunnel/ip-link.command.txt"]):
+        if interface and line.startswith(f"ip link add {interface} "):
+            apply_lines.append(
+                f"if ip link show {interface} >/dev/null 2>&1; then ip link del {interface}; fi"
+            )
+        apply_lines.append(line)
+    return apply_lines
+
+
 def _render_shell_script(lines: list[str]) -> str:
     return "\n".join(["#!/usr/bin/env bash", "set -eu", *lines]) + "\n"
+
+
+def _render_nft_apply_script() -> str:
+    return _render_shell_script(
+        [
+            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'NFT_APPLY="${SCRIPT_DIR}/nftables.apply.nft"',
+            'nft -c -f "${NFT_APPLY}"',
+            'nft -f "${NFT_APPLY}"',
+        ]
+    )
+
+
+def _render_nft_remove_script() -> str:
+    return _render_shell_script(
+        [
+            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'NFT_REMOVE="${SCRIPT_DIR}/nftables.remove.nft"',
+            'nft -f "${NFT_REMOVE}" || true',
+        ]
+    )
 
 
 def _render_master_apply_script(customer_name: str) -> str:
@@ -332,23 +379,18 @@ def install_muxer_bundle(bundle_dir: Path, muxer_root: Path) -> dict[str, Any]:
 
     _write_text(
         layout["firewall_apply_script"],
-        _render_shell_script(
-            [
-                f'nft -c -f "{layout["firewall_apply_nft"]}"',
-                f'nft -f "{layout["firewall_apply_nft"]}"',
-            ]
-        ),
+        _render_nft_apply_script(),
     )
     _write_text(
         layout["firewall_remove_script"],
-        _render_shell_script([f'nft -f "{layout["firewall_remove_nft"]}" || true']),
+        _render_nft_remove_script(),
     )
     _write_text(
         layout["routing_apply_script"],
         _render_shell_script(
-            (
-                _executable_lines(bundle.text_payloads["routing/ip-rule.command.txt"])
-                + _executable_lines(bundle.text_payloads["routing/ip-route-default.command.txt"])
+            _derive_routing_apply_lines(
+                bundle.text_payloads["routing/ip-rule.command.txt"],
+                bundle.text_payloads["routing/ip-route-default.command.txt"],
             )
             or ["true"]
         ),
@@ -365,7 +407,7 @@ def install_muxer_bundle(bundle_dir: Path, muxer_root: Path) -> dict[str, Any]:
     )
     _write_text(
         layout["tunnel_apply_script"],
-        _render_shell_script(_executable_lines(bundle.text_payloads["tunnel/ip-link.command.txt"]) or ["true"]),
+        _render_shell_script(_derive_tunnel_apply_lines(bundle) or ["true"]),
     )
     _write_text(
         layout["tunnel_remove_script"],

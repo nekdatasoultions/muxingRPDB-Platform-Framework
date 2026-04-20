@@ -965,6 +965,15 @@ def _apply_remote_component(
     if not copy_result.get("success"):
         raise RuntimeError(f"copy_{component_name}_payload failed for {target_name}")
 
+    cleanup_parts: list[str] = [
+        f"if [ -f {shlex.quote(remote_remove_script)} ]; then bash {shlex.quote(remote_remove_script)}; fi"
+    ]
+    if remote_cleanup_paths:
+        cleanup_parts.append("rm -rf " + " ".join(shlex.quote(path) for path in remote_cleanup_paths))
+    if remote_cleanup_files:
+        cleanup_parts.append("rm -f " + " ".join(shlex.quote(path) for path in remote_cleanup_files))
+    cleanup_command = "; ".join(cleanup_parts)
+
     apply_result = run_remote_command(
         context=context,
         target_instance_id=target_instance_id,
@@ -978,6 +987,18 @@ def _apply_remote_component(
         result=apply_result,
     )
     if not apply_result.get("success"):
+        cleanup_result = run_remote_command(
+            context=context,
+            target_instance_id=target_instance_id,
+            via_bastion=via_bastion,
+            remote_command=_sudo_shell(cleanup_command, strict=False),
+        )
+        _record_remote_result(
+            journal,
+            action=f"cleanup_{component_name}_payload_after_failed_apply",
+            target=target_name,
+            result=cleanup_result,
+        )
         raise RuntimeError(f"apply_{component_name}_customer failed for {target_name}")
 
     validate_result = run_remote_command(
@@ -993,15 +1014,19 @@ def _apply_remote_component(
         result=validate_result,
     )
     if not validate_result.get("success"):
+        cleanup_result = run_remote_command(
+            context=context,
+            target_instance_id=target_instance_id,
+            via_bastion=via_bastion,
+            remote_command=_sudo_shell(cleanup_command, strict=False),
+        )
+        _record_remote_result(
+            journal,
+            action=f"cleanup_{component_name}_payload_after_failed_validate",
+            target=target_name,
+            result=cleanup_result,
+        )
         raise RuntimeError(f"validate_{component_name}_customer failed for {target_name}")
-
-    cleanup_parts: list[str] = [
-        f"if [ -f {shlex.quote(remote_remove_script)} ]; then bash {shlex.quote(remote_remove_script)}; fi"
-    ]
-    if remote_cleanup_paths:
-        cleanup_parts.append("rm -rf " + " ".join(shlex.quote(path) for path in remote_cleanup_paths))
-    if remote_cleanup_files:
-        cleanup_parts.append("rm -f " + " ".join(shlex.quote(path) for path in remote_cleanup_files))
 
     return {
         "copy": copy_result,
@@ -1013,7 +1038,7 @@ def _apply_remote_component(
             "target": target_name,
             "target_instance_id": target_instance_id,
             "via_bastion": via_bastion,
-            "command_text": "; ".join(cleanup_parts),
+            "command_text": cleanup_command,
         },
     }
 

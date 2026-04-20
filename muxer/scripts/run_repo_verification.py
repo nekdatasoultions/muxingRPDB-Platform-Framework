@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,6 +75,25 @@ def _generated_files_with_crlf(root: Path, suffixes: set[str]) -> list[str]:
         if not path.is_file() or path.suffix.lower() not in suffixes:
             continue
         if b"\r\n" in path.read_bytes():
+            matches.append(str(path))
+    return matches
+
+
+def _is_linux_activation_artifact(path: Path) -> bool:
+    if path.suffix.lower() in {".conf", ".nft", ".sh"}:
+        return True
+    return path.name.endswith((".command.txt", ".commands.txt"))
+
+
+def _generated_activation_files_with_windows_paths(root: Path) -> list[str]:
+    matches: list[str] = []
+    windows_path_re = re.compile(rb"[A-Za-z]:[\\/]")
+    if not root.exists():
+        return matches
+    for path in root.rglob("*"):
+        if not path.is_file() or not _is_linux_activation_artifact(path):
+            continue
+        if windows_path_re.search(path.read_bytes()):
             matches.append(str(path))
     return matches
 
@@ -2757,6 +2777,21 @@ def main() -> int:
             "root": str(BUILD_ROOT),
             "checked_suffixes": [".nft", ".sh", ".txt"],
             "crlf_match_count": 0,
+        },
+    )
+
+    host_path_matches = _generated_activation_files_with_windows_paths(BUILD_ROOT)
+    if host_path_matches:
+        raise SystemExit(
+            "generated Linux activation artifacts contain host Windows paths: "
+            + ", ".join(host_path_matches[:20])
+        )
+    record_step(
+        "generated_linux_artifact_host_path_boundary",
+        {
+            "root": str(BUILD_ROOT),
+            "checked_artifacts": [".conf", ".nft", ".sh", "*.command.txt", "*.commands.txt"],
+            "windows_path_match_count": 0,
         },
     )
 
