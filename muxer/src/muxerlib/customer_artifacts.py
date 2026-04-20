@@ -695,7 +695,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
         "routing/ip-route-default.command.txt": "\n".join(
             [
                 "# Per-customer table default route on the muxer",
-                f"ip route replace table {transport.get('table')} default via ${'{BACKEND_UNDERLAY_IP}'} dev ${'{MUXER_UNDERLAY_IFACE}'}",
+                f"ip route replace table {transport.get('table')} default via ${'{BACKEND_UNDERLAY_IP}'} dev ${'{MUXER_UNDERLAY_IFACE}'} onlink",
             ]
         )
         + "\n",

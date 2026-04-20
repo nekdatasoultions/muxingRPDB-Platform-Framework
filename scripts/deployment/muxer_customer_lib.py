@@ -190,6 +190,9 @@ def validate_muxer_bundle(bundle_dir: Path) -> dict[str, Any]:
         report["warnings"].append("routing/ip-rule.command.txt contains no executable commands")
     if not route_lines:
         report["warnings"].append("routing/ip-route-default.command.txt contains no executable commands")
+    for line in route_lines:
+        if line.startswith("ip route replace table ") and " default via " in line and "onlink" not in line.split():
+            report["errors"].append("muxer backend default routes must include onlink for cross-subnet head-end gateways")
     if not tunnel_lines:
         report["warnings"].append("tunnel/ip-link.command.txt contains no executable commands")
     if "table ip " not in firewall_apply_text:
