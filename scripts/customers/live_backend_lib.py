@@ -73,6 +73,66 @@ def serialize_plain_item(item: dict[str, Any]) -> dict[str, Any]:
     return {str(key): _serialize_attribute(value) for key, value in item.items()}
 
 
+VOLATILE_TOP_LEVEL_ATTRIBUTES = {"allocated_at", "source_ref", "updated_at"}
+VOLATILE_CUSTOMER_JSON_METADATA = {"resolved_at", "source_ref"}
+
+
+def _normalize_customer_json_attribute(attribute: Any) -> Any:
+    if not isinstance(attribute, dict):
+        return attribute
+    raw = attribute.get("S")
+    if not isinstance(raw, str):
+        return attribute
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return attribute
+    if not isinstance(payload, dict):
+        return attribute
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        for key in VOLATILE_CUSTOMER_JSON_METADATA:
+            metadata.pop(key, None)
+    return {"S": json.dumps(payload, sort_keys=True, separators=(",", ":"))}
+
+
+def stable_typed_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the DynamoDB item fields that define customer/resource ownership.
+
+    Live applies are intentionally re-runnable. Timestamps and repo-local source
+    paths change each run, so they must not turn an otherwise identical customer
+    into a false conflict.
+    """
+    stable: dict[str, Any] = {}
+    for key, value in item.items():
+        if key in VOLATILE_TOP_LEVEL_ATTRIBUTES:
+            continue
+        stable[key] = _normalize_customer_json_attribute(value) if key == "customer_json" else value
+    return stable
+
+
+def typed_items_stably_equal(left: dict[str, Any] | None, right: dict[str, Any]) -> bool:
+    if left is None:
+        return False
+    return stable_typed_item(left) == stable_typed_item(right)
+
+
+def _classify_existing_item(
+    *,
+    existing: dict[str, Any] | None,
+    expected: dict[str, Any],
+    table_label: str,
+    key: dict[str, Any],
+) -> str:
+    if existing is None:
+        return "created"
+    if existing == expected:
+        return "already_present"
+    if typed_items_stably_equal(existing, expected):
+        return "already_present_metadata_diff"
+    raise RuntimeError(f"{table_label} table already contains conflicting item for key {sorted(key)}")
+
+
 def describe_table(region: str, table_name: str) -> dict[str, Any]:
     payload = _run_aws_json(
         [
@@ -207,29 +267,23 @@ def apply_backend_payloads(
 
     customer_key = extract_key(customer_item_typed, customer_key_names)
     customer_existing = get_typed_item(region, customer_table, customer_key)
-    customer_action = "created"
-    if customer_existing is None:
-        put_typed_item(region, customer_table, customer_item_typed)
-    elif customer_existing == customer_item_typed:
-        customer_action = "already_present"
-    else:
-        raise RuntimeError(
-            f"customer table already contains conflicting item for key {sorted(customer_key)}"
-        )
+    customer_action = _classify_existing_item(
+        existing=customer_existing,
+        expected=customer_item_typed,
+        table_label="customer",
+        key=customer_key,
+    )
 
     allocation_results: list[dict[str, Any]] = []
     for item in allocation_items_typed:
         allocation_key = extract_key(item, allocation_key_names)
         existing = get_typed_item(region, allocation_table, allocation_key)
-        action = "created"
-        if existing is None:
-            put_typed_item(region, allocation_table, item)
-        elif existing == item:
-            action = "already_present"
-        else:
-            raise RuntimeError(
-                f"allocation table already contains conflicting item for key {sorted(allocation_key)}"
-            )
+        action = _classify_existing_item(
+            existing=existing,
+            expected=item,
+            table_label="allocation",
+            key=allocation_key,
+        )
         allocation_results.append(
             {
                 "action": action,
@@ -237,6 +291,12 @@ def apply_backend_payloads(
                 "resource_key": (allocation_key.get("resource_key") or {}).get("S"),
             }
         )
+
+    if customer_action == "created":
+        put_typed_item(region, customer_table, customer_item_typed)
+    for item, result in zip(allocation_items_typed, allocation_results, strict=True):
+        if result["action"] == "created":
+            put_typed_item(region, allocation_table, item)
 
     return {
         "customer_item_typed": customer_item_typed,
@@ -260,7 +320,9 @@ def validate_backend_payloads(
     customer_actual = get_typed_item(region, customer_table, customer_key)
 
     errors: list[str] = []
-    if customer_actual != customer_item_typed:
+    customer_exact_match = customer_actual == customer_item_typed
+    customer_stable_match = typed_items_stably_equal(customer_actual, customer_item_typed)
+    if not customer_exact_match and not customer_stable_match:
         errors.append("customer SoT item does not match expected package payload")
 
     allocation_key_names = table_key_names(region, allocation_table)
@@ -268,13 +330,17 @@ def validate_backend_payloads(
     for item in allocation_items_typed:
         key = extract_key(item, allocation_key_names)
         actual = get_typed_item(region, allocation_table, key)
-        valid = actual == item
+        exact_match = actual == item
+        stable_match = typed_items_stably_equal(actual, item)
+        valid = exact_match or stable_match
         if not valid:
             errors.append(f"allocation item missing or mismatched for key {key}")
         allocation_checks.append(
             {
                 "key": key,
                 "resource_key": (key.get("resource_key") or {}).get("S"),
+                "exact_match": exact_match,
+                "stable_match": stable_match,
                 "valid": valid,
             }
         )
@@ -283,6 +349,8 @@ def validate_backend_payloads(
         "valid": not errors,
         "errors": errors,
         "customer_key": customer_key,
+        "customer_exact_match": customer_exact_match,
+        "customer_stable_match": customer_stable_match,
         "allocation_checks": allocation_checks,
     }
 
@@ -294,15 +362,26 @@ def rollback_backend_payloads(
     allocation_table: str,
     customer_item_plain: dict[str, Any],
     allocation_items_typed: list[dict[str, Any]],
+    customer_action: str = "created",
+    allocation_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     customer_item_typed = serialize_plain_item(customer_item_plain)
     customer_key = extract_key(customer_item_typed, table_key_names(region, customer_table))
     allocation_key_names = table_key_names(region, allocation_table)
+    created_allocation_keys: set[str] | None = None
+    if allocation_results is not None:
+        created_allocation_keys = {
+            json.dumps(result.get("key") or {}, sort_keys=True)
+            for result in allocation_results
+            if result.get("action") == "created"
+        }
 
     deleted_allocations: list[dict[str, Any]] = []
     allocation_errors: list[str] = []
     for item in reversed(allocation_items_typed):
         key = extract_key(item, allocation_key_names)
+        if created_allocation_keys is not None and json.dumps(key, sort_keys=True) not in created_allocation_keys:
+            continue
         try:
             if get_typed_item(region, allocation_table, key) is not None:
                 delete_typed_item(region, allocation_table, key)
@@ -317,12 +396,13 @@ def rollback_backend_payloads(
 
     customer_deleted = False
     customer_error = ""
-    try:
-        if get_typed_item(region, customer_table, customer_key) is not None:
-            delete_typed_item(region, customer_table, customer_key)
-            customer_deleted = True
-    except Exception as exc:  # pragma: no cover - rollback best effort
-        customer_error = str(exc)
+    if customer_action == "created":
+        try:
+            if get_typed_item(region, customer_table, customer_key) is not None:
+                delete_typed_item(region, customer_table, customer_key)
+                customer_deleted = True
+        except Exception as exc:  # pragma: no cover - rollback best effort
+            customer_error = str(exc)
 
     errors = allocation_errors + ([customer_error] if customer_error else [])
     return {

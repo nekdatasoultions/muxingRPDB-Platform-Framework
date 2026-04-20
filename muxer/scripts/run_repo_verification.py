@@ -922,6 +922,186 @@ def main() -> int:
         },
     )
 
+    live_backend_idempotency = _run_python_json(
+        r'''
+import copy
+import json
+
+import live_backend_lib as lib
+
+stores = {"customers": {}, "allocations": {}}
+put_calls = []
+delete_calls = []
+
+
+def key_names(region, table):
+    return ["customer_name"] if table == "customers" else ["customer_name", "resource_key"]
+
+
+def key_id(key):
+    return json.dumps(key, sort_keys=True)
+
+
+def get_item(region, table, key):
+    item = stores[table].get(key_id(key))
+    return copy.deepcopy(item) if item is not None else None
+
+
+def put_item(region, table, item):
+    key = lib.extract_key(item, key_names(region, table))
+    stores[table][key_id(key)] = copy.deepcopy(item)
+    put_calls.append({"table": table, "key": key})
+
+
+def delete_item(region, table, key):
+    stores[table].pop(key_id(key), None)
+    delete_calls.append({"table": table, "key": key})
+
+
+lib.table_key_names = key_names
+lib.get_typed_item = get_item
+lib.put_typed_item = put_item
+lib.delete_typed_item = delete_item
+
+customer_existing_plain = {
+    "customer_name": "vpn-customer-stage1-15-cust-0004",
+    "customer_id": 41000,
+    "fwmark": "0x41000",
+    "source_ref": "build/old/request.yaml",
+    "updated_at": "2026-04-20T08:00:00Z",
+    "customer_json": json.dumps(
+        {
+            "customer": {"id": 41000, "name": "vpn-customer-stage1-15-cust-0004"},
+            "metadata": {
+                "class_name": "nat",
+                "source_ref": "build/old/request.yaml",
+                "resolved_at": "2026-04-20T08:00:00Z",
+            },
+            "transport": {"mark": "0x41000"},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ),
+}
+customer_expected_plain = {
+    **customer_existing_plain,
+    "source_ref": "build/new/request.yaml",
+    "updated_at": "2026-04-20T09:00:00Z",
+}
+customer_expected_payload = json.loads(customer_existing_plain["customer_json"])
+customer_expected_payload["metadata"]["source_ref"] = "build/new/request.yaml"
+customer_expected_payload["metadata"]["resolved_at"] = "2026-04-20T09:00:00Z"
+customer_expected_plain["customer_json"] = json.dumps(customer_expected_payload, sort_keys=True, separators=(",", ":"))
+
+allocation_existing = lib.serialize_plain_item(
+    {
+        "customer_name": "vpn-customer-stage1-15-cust-0004",
+        "resource_key": "fwmark#0x41000",
+        "resource_type": "fwmark",
+        "resource_value": "0x41000",
+        "source_ref": "build/old/request.yaml",
+        "allocated_at": "2026-04-20T08:00:00Z",
+    }
+)
+allocation_expected = lib.serialize_plain_item(
+    {
+        "customer_name": "vpn-customer-stage1-15-cust-0004",
+        "resource_key": "fwmark#0x41000",
+        "resource_type": "fwmark",
+        "resource_value": "0x41000",
+        "source_ref": "build/new/request.yaml",
+        "allocated_at": "2026-04-20T09:00:00Z",
+    }
+)
+stores["customers"][key_id({"customer_name": {"S": "vpn-customer-stage1-15-cust-0004"}})] = (
+    lib.serialize_plain_item(customer_existing_plain)
+)
+stores["allocations"][key_id(
+    {
+        "customer_name": {"S": "vpn-customer-stage1-15-cust-0004"},
+        "resource_key": {"S": "fwmark#0x41000"},
+    }
+)] = allocation_existing
+
+apply_result = lib.apply_backend_payloads(
+    region="us-east-1",
+    customer_table="customers",
+    allocation_table="allocations",
+    customer_item_plain=customer_expected_plain,
+    allocation_items_typed=[allocation_expected],
+)
+validation_result = lib.validate_backend_payloads(
+    region="us-east-1",
+    customer_table="customers",
+    allocation_table="allocations",
+    customer_item_plain=customer_expected_plain,
+    allocation_items_typed=[allocation_expected],
+)
+rollback_result = lib.rollback_backend_payloads(
+    region="us-east-1",
+    customer_table="customers",
+    allocation_table="allocations",
+    customer_item_plain=customer_expected_plain,
+    allocation_items_typed=[allocation_expected],
+    customer_action=apply_result["customer_action"],
+    allocation_results=apply_result["allocation_results"],
+)
+conflict_plain = {**customer_expected_plain, "fwmark": "0x99999"}
+try:
+    lib.apply_backend_payloads(
+        region="us-east-1",
+        customer_table="customers",
+        allocation_table="allocations",
+        customer_item_plain=conflict_plain,
+        allocation_items_typed=[allocation_expected],
+    )
+    conflict_blocked = False
+except RuntimeError:
+    conflict_blocked = True
+
+print(
+    json.dumps(
+        {
+            "customer_action": apply_result["customer_action"],
+            "allocation_actions": [item["action"] for item in apply_result["allocation_results"]],
+            "put_call_count": len(put_calls),
+            "delete_call_count": len(delete_calls),
+            "validation_valid": validation_result["valid"],
+            "customer_stable_match": validation_result["customer_stable_match"],
+            "rollback_status": rollback_result["status"],
+            "customer_still_present": bool(stores["customers"]),
+            "allocation_still_present": bool(stores["allocations"]),
+            "conflict_blocked": conflict_blocked,
+        },
+        sort_keys=True,
+    )
+)
+''',
+        pythonpath=REPO_ROOT / "scripts" / "customers",
+    )
+    if live_backend_idempotency.get("customer_action") != "already_present_metadata_diff":
+        raise SystemExit("Live backend idempotency must accept customer metadata-only differences")
+    if live_backend_idempotency.get("allocation_actions") != ["already_present_metadata_diff"]:
+        raise SystemExit("Live backend idempotency must accept allocation metadata-only differences")
+    if live_backend_idempotency.get("put_call_count") != 0:
+        raise SystemExit("Metadata-only live backend reapply must not rewrite DynamoDB records")
+    if live_backend_idempotency.get("delete_call_count") != 0:
+        raise SystemExit("Metadata-only live backend rollback must not delete pre-existing records")
+    if not live_backend_idempotency.get("validation_valid"):
+        raise SystemExit("Live backend validation must accept metadata-only differences")
+    if not live_backend_idempotency.get("customer_stable_match"):
+        raise SystemExit("Live backend validation must report stable customer match")
+    if not live_backend_idempotency.get("customer_still_present"):
+        raise SystemExit("Live backend idempotent rollback removed the customer record")
+    if not live_backend_idempotency.get("allocation_still_present"):
+        raise SystemExit("Live backend idempotent rollback removed the allocation record")
+    if not live_backend_idempotency.get("conflict_blocked"):
+        raise SystemExit("Live backend idempotency allowed a real customer conflict")
+    live_apply_source = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(encoding="utf-8")
+    if "_backend_apply_created_records" not in live_apply_source:
+        raise SystemExit("Live apply must gate rollback on records created by the current apply")
+    record_step("live_backend_idempotent_reapply_gate", live_backend_idempotency)
+
     empty_platform_readiness = _run_json(
         [
             "python",

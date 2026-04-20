@@ -175,6 +175,16 @@ def _record_structured(
     )
 
 
+def _backend_apply_created_records(payload: dict[str, Any]) -> bool:
+    if payload.get("customer_action") == "created":
+        return True
+    return any(
+        result.get("action") == "created"
+        for result in (payload.get("allocation_results") or [])
+        if isinstance(result, dict)
+    )
+
+
 def _rollback_staged(
     *,
     rollback_steps: list[dict[str, Any]],
@@ -1059,6 +1069,8 @@ def _rollback_ssh_live(
                     allocation_table=step["allocation_table"],
                     customer_item_plain=step["customer_item_plain"],
                     allocation_items_typed=step["allocation_items_typed"],
+                    customer_action=str(step.get("customer_action") or "created"),
+                    allocation_results=list(step.get("allocation_results") or []),
                 )
                 results.append(
                     {
@@ -1177,18 +1189,22 @@ def execute_ssh_live_apply(
             target="dynamodb",
             payload=backend_apply,
         )
-        rollback_steps.append(
-            {
-                "kind": "backend",
-                "action": "remove_backend_customer",
-                "target": "dynamodb",
-                "region": region,
-                "customer_table": customer_table,
-                "allocation_table": allocation_table,
-                "customer_item_plain": customer_item_plain,
-                "allocation_items_typed": allocation_items_typed,
-            }
-        )
+        rollback_preexisting_remote_customer = not _backend_apply_created_records(backend_apply)
+        if not rollback_preexisting_remote_customer:
+            rollback_steps.append(
+                {
+                    "kind": "backend",
+                    "action": "remove_backend_customer",
+                    "target": "dynamodb",
+                    "region": region,
+                    "customer_table": customer_table,
+                    "allocation_table": allocation_table,
+                    "customer_item_plain": customer_item_plain,
+                    "allocation_items_typed": allocation_items_typed,
+                    "customer_action": backend_apply.get("customer_action"),
+                    "allocation_results": backend_apply.get("allocation_results") or [],
+                }
+            )
 
         backend_validation = validate_backend_payloads(
             region=region,
@@ -1262,7 +1278,8 @@ def execute_ssh_live_apply(
             remote_cleanup_files=[],
             remote_name=f"{customer_name}-muxer",
         )
-        rollback_steps.append(muxer_remote["rollback"])
+        if not rollback_preexisting_remote_customer:
+            rollback_steps.append(muxer_remote["rollback"])
 
         headend_customer_root = Path(headend_prepared["apply"]["state_json"]).resolve().parent
         headend_swanctl_conf = Path(headend_prepared["apply"]["swanctl_conf"]).resolve()
@@ -1296,7 +1313,8 @@ def execute_ssh_live_apply(
             remote_cleanup_files=headend_cleanup_files,
             remote_name=f"{customer_name}-headend-active",
         )
-        rollback_steps.append(active_remote["rollback"])
+        if not rollback_preexisting_remote_customer:
+            rollback_steps.append(active_remote["rollback"])
 
         standby_remote = _apply_remote_component(
             journal,
@@ -1314,7 +1332,8 @@ def execute_ssh_live_apply(
             remote_cleanup_files=headend_cleanup_files,
             remote_name=f"{customer_name}-headend-standby",
         )
-        rollback_steps.append(standby_remote["rollback"])
+        if not rollback_preexisting_remote_customer:
+            rollback_steps.append(standby_remote["rollback"])
 
         rollback_plan = {
             "schema_version": 1,
