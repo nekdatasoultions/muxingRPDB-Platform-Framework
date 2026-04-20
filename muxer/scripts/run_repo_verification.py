@@ -2565,6 +2565,8 @@ print(
         raise SystemExit("muxer customer apply must invoke the live muxer runtime customer apply path")
     if "/etc/muxer/src/muxctl.py remove-customer" not in muxer_customer_lib_text:
         raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
+    if 'Path("etc") / "muxer" / "config" / "customer-modules"' not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer modules must install under the runtime config/customer-modules inventory")
     runtime_nftables_text = (RUNTIME_ROOT / "src" / "muxerlib" / "nftables.py").read_text(encoding="utf-8")
     if 'sh(["nft", "delete", "table", "inet"' not in runtime_nftables_text:
         raise SystemExit("runtime nftables apply must replace the shared classifier table before loading")
@@ -2575,6 +2577,7 @@ print(
         {
             "muxer_apply_invokes_runtime": True,
             "muxer_remove_invokes_runtime": True,
+            "module_root_matches_runtime_inventory": True,
             "shared_nftables_tables_replaced": True,
         },
     )
@@ -2780,7 +2783,7 @@ print(
             backend_root / "var" / "lib" / "rpdb-backend" / "customers" / customer_name,
             backend_root / "var" / "lib" / "rpdb-backend" / "allocations" / customer_name,
             muxer_root / "var" / "lib" / "rpdb-muxer" / "customers" / customer_name,
-            muxer_root / "etc" / "muxer" / "customer-modules" / customer_name,
+            muxer_root / "etc" / "muxer" / "config" / "customer-modules" / customer_name,
             non_nat_headend_root / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
             nat_headend_root / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
         ):
@@ -3090,7 +3093,7 @@ print(
         phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "legacy-cust0002",
         phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "legacy-cust0002",
         phase7_root / "r" / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "legacy-cust0002",
-        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "customer-modules" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / "legacy-cust0002",
         phase7_root / "r" / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
         phase7_root / "r" / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
     ):
@@ -3143,7 +3146,7 @@ print(
         phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "legacy-cust0002",
         phase7_root / "r" / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "legacy-cust0002",
         phase7_root / "r" / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "legacy-cust0002",
-        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "customer-modules" / "legacy-cust0002",
+        phase7_root / "r" / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / "legacy-cust0002",
         phase7_root / "r" / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
         phase7_root / "r" / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "legacy-cust0002",
     ):

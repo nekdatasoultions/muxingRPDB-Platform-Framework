@@ -28,7 +28,7 @@ MUXER_REQUIRED_FILES = (
 )
 
 MUXER_STATE_ROOT = Path("var") / "lib" / "rpdb-muxer" / "customers"
-MUXER_MODULE_ROOT = Path("etc") / "muxer" / "customer-modules"
+MUXER_MODULE_ROOT = Path("etc") / "muxer" / "config" / "customer-modules"
 
 
 @dataclass(frozen=True)
