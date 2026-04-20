@@ -32,7 +32,7 @@ def _copy_tree_contents(source_dir: Path, destination_dir: Path) -> int:
 
 def _write_placeholder(path: Path, title: str, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8")
+    path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8", newline="\n")
 
 
 def _load_json(path: Path) -> dict:
@@ -177,6 +177,7 @@ def main() -> int:
     (bundle_dir / "bundle-metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     manifest_path = bundle_dir / "manifest.txt"

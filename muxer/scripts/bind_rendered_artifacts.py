@@ -79,7 +79,7 @@ def main() -> int:
     for path in iter_text_files(out_dir):
         original_text = path.read_text(encoding="utf-8")
         replaced_text, missing = replace_placeholders(original_text, bindings)
-        path.write_text(replaced_text, encoding="utf-8")
+        path.write_text(replaced_text, encoding="utf-8", newline="\n")
         relative_name = str(path.relative_to(out_dir))
         report["files"][relative_name] = {
             "replaced": original_text != replaced_text,
@@ -91,6 +91,7 @@ def main() -> int:
     (out_dir / "binding-report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     if report["unresolved"] and not args.allow_unresolved:

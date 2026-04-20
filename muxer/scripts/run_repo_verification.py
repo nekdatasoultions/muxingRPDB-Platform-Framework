@@ -53,17 +53,29 @@ def _run_python_json(code: str, *, pythonpath: Path | None = None, extra_env: di
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8", newline="\n")
 
 
 def _write_text(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8")
+    path.write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8", newline="\n")
+
+
+def _generated_files_with_crlf(root: Path, suffixes: set[str]) -> list[str]:
+    matches: list[str] = []
+    if not root.exists():
+        return matches
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        if b"\r\n" in path.read_bytes():
+            matches.append(str(path))
+    return matches
 
 
 def _resolve_repo_path(path_like: str) -> Path:
@@ -2733,6 +2745,18 @@ def main() -> int:
             "repeat_status": phase7_failure_result_second["status"],
             "repeat_rollback_plan": _resolve_repo_path(phase7_failure_result_second["rollback_plan"]).as_posix(),
             "repeat_apply_journal": _resolve_repo_path(phase7_failure_result_second["apply_journal"]).as_posix(),
+        },
+    )
+
+    crlf_matches = _generated_files_with_crlf(BUILD_ROOT, {".sh", ".nft", ".txt"})
+    if crlf_matches:
+        raise SystemExit("generated Linux activation artifacts contain CRLF line endings: " + ", ".join(crlf_matches[:20]))
+    record_step(
+        "generated_linux_artifact_line_endings",
+        {
+            "root": str(BUILD_ROOT),
+            "checked_suffixes": [".nft", ".sh", ".txt"],
+            "crlf_match_count": 0,
         },
     )
 

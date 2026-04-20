@@ -107,6 +107,6 @@ def render_strongswan(global_cfg: Dict[str, Any], modules: List[Dict[str, Any]])
         secret_lines.append(f'{local_id} {remote_id} : PSK "{psk}"')
         conn_count += 1
 
-    conf_path.write_text("\n".join(conf_lines).rstrip() + "\n")
-    secrets_path.write_text("\n".join(secret_lines).rstrip() + "\n")
+    conf_path.write_text("\n".join(conf_lines).rstrip() + "\n", newline="\n")
+    secrets_path.write_text("\n".join(secret_lines).rstrip() + "\n", newline="\n")
     return conf_path, secrets_path, conn_count
