@@ -11,16 +11,16 @@ separate from the currently deployed framework while we:
 - keep fwmark-based steering, but make RPDB priorities explicit
 - reduce full-fleet rebuild behavior before we touch production
 
-This repo starts as scaffolding only. It is intentionally light so we can
-design the model cleanly before migrating implementation code.
+This repo now carries the RPDB platform framework, runtime package, customer
+provisioning workflow, deployment helpers, and the current-state references we
+need while moving away from the legacy muxer stack.
 
-It now also carries imported current-state platform deploy assets so the new
-RPDB workspace can hold:
+It holds:
 
 - the current base-platform bootstrap references
 - the new RPDB-native customer lifecycle model
 
-## Initial Layout
+## Layout
 
 ```text
 docs/
@@ -32,24 +32,27 @@ scripts/
 ## Current Intent
 
 - `docs/`
-  - architecture and migration notes for the RPDB model
-  - imported current-state platform references
+  - the curated operator, architecture, and training docs
+  - imported current-state platform references that still matter
 - `infra/`
-  - future infrastructure packaging and deployment assets
+  - infrastructure packaging and deployment assets
   - imported current-state CloudFormation assets
 - `muxer/`
-  - future customer source model, renderers, docs, and control-plane logic
+  - customer source model, renderers, docs, runtime package, and control-plane logic
 - `scripts/`
-  - shared operator and packaging helpers for this repo
+  - shared operator, deployment, verification, and packaging helpers
   - imported current-state base-platform deploy scripts
 
 ## Guardrails
 
-- Do not assume this repo is live-deployable yet.
-- Do not point production nodes at this repo until the model is validated.
-- Treat the current deployed framework as the stable reference until the RPDB
-  path is complete.
+- Do not modify MUXER3 from this repo.
+- Do not touch AWS or live nodes without explicit approval.
+- Do not apply a customer without an approved change window.
+- Keep runtime and generated packet-handling artifacts on `nftables`, not
+  `iptables` or `iptables-restore`.
+- Treat customer onboarding as one customer file plus the RPDB deploy workflow,
+  with platform values auto-assigned and tracked.
 
 See:
 
-- [CURRENT_PLATFORM_IMPORT.md](docs/CURRENT_PLATFORM_IMPORT.md)
+- [RPDB documentation index](docs/README.md)

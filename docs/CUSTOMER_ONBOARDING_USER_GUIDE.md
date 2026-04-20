@@ -13,10 +13,8 @@ Use this guide when you need to answer:
 - what artifacts should I review
 - when do I stop before touching live nodes
 
-This guide does not replace the engineering runbook. For the deeper validation
-and deployment details, see:
+For deeper validation and deployment details, see:
 
-- `docs/CUSTOMER_ONBOARDING_RUNBOOK.md`
 - `docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md`
 - `docs/HEADEND_CUSTOMER_ORCHESTRATION.md`
 
