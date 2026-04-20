@@ -150,6 +150,7 @@ Expected result:
 - NAT head-end standby node healthy
 - non-NAT head-end active node healthy
 - non-NAT head-end standby node healthy
+- `nftables` present on every head-end node
 
 ## Step 7: Validate The Muxer Node
 
@@ -183,6 +184,8 @@ findmnt /Shared
 sudo systemctl status muxingplus-ha --no-pager
 sudo systemctl status conntrackd --no-pager
 sudo systemctl status strongswan --no-pager
+nft --version
+sudo nft list ruleset
 ```
 
 Check for:
@@ -192,6 +195,7 @@ Check for:
 - `muxingplus-ha` running
 - `conntrackd` running
 - `strongswan` running
+- `nftables` installed and able to load/list rulesets
 
 ## Step 9: Stop Here Before Customer Onboarding
 

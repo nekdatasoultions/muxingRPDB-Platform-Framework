@@ -22,6 +22,7 @@ DEFAULT_NONNAT_PARAMS = DEFAULT_PREPARED_DIR / "parameters.vpn-headend.non-nat.g
 VERIFY_TMP_DIR = REPO_ROOT / "build" / "verify-headend-bootstrap"
 SERVICE_PROBE_SCRIPT = r"""echo HOST=$(hostname)
 if command -v swanctl >/dev/null 2>&1 || test -x /opt/strongswan/sbin/swanctl; then echo SWANCTL_PRESENT=true; else echo SWANCTL_PRESENT=false; fi
+if command -v nft >/dev/null 2>&1; then echo NFT_PRESENT=true; nft --version 2>/dev/null | head -n1 | sed 's/^/NFT_VERSION=/'; else echo NFT_PRESENT=false; fi
 for s in strongswan conntrackd muxingplus-ha; do
   enabled=$(systemctl is-enabled "$s" 2>/dev/null || true)
   active=$(systemctl is-active "$s" 2>/dev/null || true)
@@ -304,12 +305,18 @@ def _parse_ssm_plugin_output(output: str) -> Dict[str, Any]:
     services: Dict[str, Dict[str, str]] = {}
     mounts: Dict[str, bool] = {}
     swanctl_present = False
+    nft_present = False
+    nft_version = ""
     host = ""
     for line in output.splitlines():
         if line.startswith("HOST="):
             host = line.partition("=")[2].strip()
         elif line.startswith("SWANCTL_PRESENT="):
             swanctl_present = line.partition("=")[2].strip().lower() == "true"
+        elif line.startswith("NFT_PRESENT="):
+            nft_present = line.partition("=")[2].strip().lower() == "true"
+        elif line.startswith("NFT_VERSION="):
+            nft_version = line.partition("=")[2].strip()
         elif line.startswith("SERVICE:"):
             _, service_name, key_value = line.split(":", 2)
             key, _, value = key_value.partition("=")
@@ -325,6 +332,7 @@ def _parse_ssm_plugin_output(output: str) -> Dict[str, Any]:
     checks = {
         "host": host,
         "swanctl_present": swanctl_present,
+        "nft_present": nft_present,
         "strongswan_service_known": strongswan.get("active") not in {None, "unknown"},
         "strongswan_not_failed": strongswan.get("failed") not in {"failed", "unknown"},
         "conntrackd_active": conntrackd.get("active") == "active",
@@ -337,6 +345,7 @@ def _parse_ssm_plugin_output(output: str) -> Dict[str, Any]:
     return {
         "services": services,
         "mounts": mounts,
+        "nft_version": nft_version,
         "checks": checks,
     }
 

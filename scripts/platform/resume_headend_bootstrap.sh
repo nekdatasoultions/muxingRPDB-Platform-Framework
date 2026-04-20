@@ -218,7 +218,7 @@ case "$IPSEC_BACKEND" in
     ;;
 esac
 
-dnf install -y amazon-efs-utils unzip jq awscli conntrack-tools
+dnf install -y amazon-efs-utils unzip jq awscli conntrack-tools nftables
 if [[ "$IPSEC_BACKEND" == "libreswan" ]]; then
   dnf install -y libreswan
 fi

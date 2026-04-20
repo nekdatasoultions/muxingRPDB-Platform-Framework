@@ -239,6 +239,7 @@ def main() -> int:
         str(REPO_ROOT / "scripts" / "deployment" / "run_double_verification.py"),
         str(REPO_ROOT / "scripts" / "platform" / "prepare_empty_platform_params.py"),
         str(REPO_ROOT / "scripts" / "platform" / "deploy_empty_platform.py"),
+        str(REPO_ROOT / "scripts" / "platform" / "verify_headend_bootstrap.py"),
         str(REPO_ROOT / "scripts" / "platform" / "verify_empty_platform_readiness.py"),
     ]
     _run(["python", "-m", "py_compile", *compile_targets])
@@ -940,6 +941,40 @@ def main() -> int:
             "customer_sot_table": (
                 ((empty_platform_readiness.get("checks") or {}).get("database") or {}).get("customer_sot") or {}
             ).get("table_name"),
+        },
+    )
+
+    vpn_headend_template = (REPO_ROOT / "infra" / "cfn" / "vpn-headend-unit.yaml").read_text(encoding="utf-8")
+    resume_headend_bootstrap = (REPO_ROOT / "scripts" / "platform" / "resume_headend_bootstrap.sh").read_text(
+        encoding="utf-8"
+    )
+    headend_bootstrap_probe = (REPO_ROOT / "scripts" / "platform" / "verify_headend_bootstrap.py").read_text(
+        encoding="utf-8"
+    )
+    headend_install_lines = [
+        line.strip()
+        for line in vpn_headend_template.splitlines()
+        if "dnf install -y awscli unzip jq conntrack-tools" in line
+    ]
+    if len(headend_install_lines) != 2:
+        raise SystemExit("VPN head-end template must define exactly two base package install lines")
+    if any("nftables" not in line for line in headend_install_lines):
+        raise SystemExit("VPN head-end template must install nftables on both nodes")
+    if any("iptables" in line for line in headend_install_lines):
+        raise SystemExit("VPN head-end base package install must not include iptables packages")
+    if "dnf install -y amazon-efs-utils unzip jq awscli conntrack-tools nftables" not in resume_headend_bootstrap:
+        raise SystemExit("resume_headend_bootstrap.sh must install nftables")
+    for required_probe_token in ("NFT_PRESENT=true", "nft --version", '"nft_present": nft_present'):
+        if required_probe_token not in headend_bootstrap_probe:
+            raise SystemExit(f"head-end bootstrap verifier is missing nftables probe token: {required_probe_token}")
+    record_step(
+        "headend_nftables_bootstrap_contract",
+        {
+            "vpn_headend_template": str(REPO_ROOT / "infra" / "cfn" / "vpn-headend-unit.yaml"),
+            "install_line_count": len(headend_install_lines),
+            "resume_bootstrap_requires_nftables": True,
+            "readiness_probe_requires_nftables": True,
+            "iptables_base_packages": 0,
         },
     )
 

@@ -233,6 +233,8 @@ def _build_plan(args: argparse.Namespace) -> Dict[str, Any]:
                 "findmnt /LOG",
                 "findmnt /Application",
                 "findmnt /Shared",
+                "nft --version",
+                "sudo nft list ruleset",
                 "sudo systemctl status muxingplus-ha --no-pager",
                 "sudo systemctl status conntrackd --no-pager",
                 "sudo systemctl status strongswan --no-pager",

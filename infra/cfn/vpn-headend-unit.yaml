@@ -376,7 +376,7 @@ Resources:
           #!/bin/bash
           set -euo pipefail
           IPSEC_BACKEND="${IpsecBackend}"
-          dnf install -y awscli unzip jq conntrack-tools iptables iptables-services
+          dnf install -y awscli unzip jq conntrack-tools nftables
           if [[ "$IPSEC_BACKEND" != "strongswan" ]]; then
             dnf install -y libreswan
           fi
@@ -679,7 +679,7 @@ Resources:
           #!/bin/bash
           set -euo pipefail
           IPSEC_BACKEND="${IpsecBackend}"
-          dnf install -y awscli unzip jq conntrack-tools iptables iptables-services
+          dnf install -y awscli unzip jq conntrack-tools nftables
           if [[ "$IPSEC_BACKEND" != "strongswan" ]]; then
             dnf install -y libreswan
           fi
