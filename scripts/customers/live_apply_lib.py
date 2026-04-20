@@ -845,6 +845,48 @@ def _prepare_muxer_root(
     return {"root": muxer_root, "apply": apply_report, "validate": validate_report}
 
 
+def _prepare_muxer_runtime_root(journal: list[dict[str, Any]], *, apply_dir: Path) -> dict[str, Any]:
+    runtime_source = REPO_ROOT / "muxer" / "runtime-package" / "src"
+    if not runtime_source.is_dir():
+        raise RuntimeError(f"muxer runtime source is missing: {runtime_source}")
+
+    runtime_root = apply_dir / "pr"
+    if runtime_root.exists():
+        shutil.rmtree(runtime_root)
+    destination = runtime_root / "etc" / "muxer" / "src"
+    shutil.copytree(
+        runtime_source,
+        destination,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for script in ("muxctl.py", "mux_trace.py", "ike_nat_bridge.py"):
+        script_path = destination / script
+        if script_path.exists():
+            try:
+                script_path.chmod(script_path.stat().st_mode | 0o111)
+            except OSError:
+                pass
+
+    payload = {
+        "runtime_source": repo_relative(runtime_source),
+        "runtime_root": repo_relative(runtime_root),
+        "destination": repo_relative(destination),
+        "relative_paths": ["etc/muxer/src"],
+    }
+    _record_structured(
+        journal,
+        action="prepare_muxer_runtime_payload",
+        target="muxer-runtime",
+        payload=payload,
+    )
+    return {
+        **payload,
+        "root": runtime_root,
+        "destination_path": destination,
+        "relative_paths_obj": [Path("etc") / "muxer" / "src"],
+    }
+
+
 def _prepare_headend_root(
     journal: list[dict[str, Any]],
     *,
@@ -1131,6 +1173,61 @@ def _apply_remote_component(
     }
 
 
+def _sync_muxer_runtime(
+    journal: list[dict[str, Any]],
+    *,
+    context: Any,
+    target_name: str,
+    target_instance_id: str,
+    runtime_prepared: dict[str, Any],
+) -> dict[str, Any]:
+    copy_result = copy_paths_to_remote_root(
+        context=context,
+        target_instance_id=target_instance_id,
+        source_root=Path(runtime_prepared["root"]),
+        relative_paths=list(runtime_prepared["relative_paths_obj"]),
+        remote_name="rpdb-muxer-runtime",
+        via_bastion=False,
+    )
+    _record_remote_result(
+        journal,
+        action="copy_muxer_runtime_payload",
+        target=target_name,
+        result=copy_result,
+    )
+    if not copy_result.get("success"):
+        raise RuntimeError(f"copy_muxer_runtime_payload failed for {target_name}")
+
+    validation_script = " && ".join(
+        [
+            "python3 -m py_compile /etc/muxer/src/muxctl.py /etc/muxer/src/muxerlib/*.py",
+            "grep -q 'dnat to ip saddr map' /etc/muxer/src/muxerlib/nftables.py",
+            "grep -q 'snat to ip saddr . ip daddr map' /etc/muxer/src/muxerlib/nftables.py",
+            "! grep -q 'ipv4_addr : verdict' /etc/muxer/src/muxerlib/nftables.py",
+            "! grep -q 'vmap @udp500_dnat' /etc/muxer/src/muxerlib/nftables.py",
+        ]
+    )
+    validate_result = run_remote_command(
+        context=context,
+        target_instance_id=target_instance_id,
+        via_bastion=False,
+        remote_command=_sudo_shell(validation_script),
+    )
+    _record_remote_result(
+        journal,
+        action="validate_muxer_runtime_payload",
+        target=target_name,
+        result=validate_result,
+    )
+    if not validate_result.get("success"):
+        raise RuntimeError(f"validate_muxer_runtime_payload failed for {target_name}")
+
+    return {
+        "copy": copy_result,
+        "validate": validate_result,
+    }
+
+
 def _rollback_ssh_live(
     *,
     context: Any | None,
@@ -1229,6 +1326,10 @@ def execute_ssh_live_apply(
             journal,
             customer_name=customer_name,
             bundle_dir=bundle_dir,
+            apply_dir=apply_dir,
+        )
+        muxer_runtime_prepared = _prepare_muxer_runtime_root(
+            journal,
             apply_dir=apply_dir,
         )
         headend_prepared = _prepare_headend_root(
@@ -1335,6 +1436,14 @@ def execute_ssh_live_apply(
 
         muxer_root = Path(muxer_prepared["root"]).resolve()
         headend_root = Path(headend_prepared["root"]).resolve()
+
+        muxer_runtime_remote = _sync_muxer_runtime(
+            journal,
+            context=context,
+            target_name=str(muxer_target.get("name") or "muxer"),
+            target_instance_id=muxer_instance_id,
+            runtime_prepared=muxer_runtime_prepared,
+        )
 
         muxer_customer_root = Path(muxer_prepared["apply"]["state_json"]).resolve().parent
         muxer_module_root = Path(muxer_prepared["apply"]["customer_module"]).resolve().parent
@@ -1449,6 +1558,7 @@ def execute_ssh_live_apply(
                 "backend": backend_validation,
                 "prepared_backend": backend_prepared["validate"],
                 "prepared_muxer": muxer_prepared["validate"],
+                "muxer_runtime": muxer_runtime_remote["validate"],
                 "prepared_headend": headend_prepared["validate"],
                 "headend_secret": headend_secret,
                 "muxer": muxer_remote["validate"],
@@ -1457,6 +1567,7 @@ def execute_ssh_live_apply(
             },
             "applies": {
                 "backend": backend_apply,
+                "muxer_runtime": muxer_runtime_remote["copy"],
                 "muxer": muxer_remote["apply"],
                 "headend_active": active_remote["apply"],
                 "headend_standby": standby_remote["apply"],

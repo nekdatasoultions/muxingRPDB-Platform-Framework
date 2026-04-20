@@ -2567,6 +2567,21 @@ print(
         raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
     if 'Path("etc") / "muxer" / "config" / "customer-modules"' not in muxer_customer_lib_text:
         raise SystemExit("muxer customer modules must install under the runtime config/customer-modules inventory")
+    live_apply_lib_text = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(encoding="utf-8")
+    for required_live_runtime_token in (
+        "prepare_muxer_runtime_payload",
+        "copy_muxer_runtime_payload",
+        "validate_muxer_runtime_payload",
+        '"runtime-package"',
+        "/etc/muxer/src/muxerlib/nftables.py",
+        "dnat to ip saddr map",
+        "snat to ip saddr . ip daddr map",
+        "ipv4_addr : verdict",
+    ):
+        if required_live_runtime_token not in live_apply_lib_text:
+            raise SystemExit(
+                f"SSH live apply must sync and validate muxer runtime before customer apply: {required_live_runtime_token}"
+            )
     runtime_nftables_text = (RUNTIME_ROOT / "src" / "muxerlib" / "nftables.py").read_text(encoding="utf-8")
     if 'sh(["nft", "delete", "table", "inet"' not in runtime_nftables_text:
         raise SystemExit("runtime nftables apply must replace the shared classifier table before loading")
@@ -2647,6 +2662,7 @@ print(
             "muxer_remove_invokes_runtime": True,
             "module_root_matches_runtime_inventory": True,
             "shared_nftables_tables_replaced": True,
+            "ssh_live_apply_syncs_muxer_runtime": True,
             "nft_nat_render_contract": nft_nat_render_contract,
         },
     )
