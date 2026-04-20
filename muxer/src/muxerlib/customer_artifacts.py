@@ -763,7 +763,24 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     ipsec = module.get("ipsec") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
     customer_name = str(customer.get("name") or "")
+    peer_public_ip = str(peer.get("public_ip") or "").strip()
+    peer_public_cidr = f"{peer_public_ip}/32" if peer_public_ip and "/" not in peer_public_ip else peer_public_ip
     post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
+    route_commands = [
+        "# Customer-scoped head-end routes",
+        *[
+            f"ip route replace {subnet} dev ${'{HEADEND_CLEAR_IFACE}'}"
+            for subnet in (selectors.get("local_subnets") or [])
+        ],
+    ]
+    if peer_public_cidr:
+        route_commands.extend(
+            [
+                "# Return IPsec transport traffic through the muxer edge",
+                f"ip route replace {peer_public_cidr} via ${'{MUXER_PUBLIC_PRIVATE_IP}'} "
+                f"dev ${'{HEADEND_PUBLIC_IFACE}'} onlink",
+            ]
+        )
 
     return {
         "ipsec/ipsec-intent.json": _render_ipsec_intent(customer, peer, selectors, protocols, ipsec),
@@ -788,17 +805,15 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "vti_routing": ipsec.get("vti_routing"),
                 "vti_shared": ipsec.get("vti_shared"),
             },
+            "edge_return_path": {
+                "enabled": bool(peer_public_cidr),
+                "peer_public_cidr": peer_public_cidr or None,
+                "next_hop": _placeholder("MUXER_PUBLIC_PRIVATE_IP") if peer_public_cidr else None,
+                "interface": _placeholder("HEADEND_PUBLIC_IFACE") if peer_public_cidr else None,
+                "purpose": "force head-end IPsec transport replies back through the muxer edge",
+            },
         },
-        "routing/ip-route.commands.txt": "\n".join(
-            [
-                "# Customer-scoped head-end routes",
-                *[
-                    f"ip route replace {subnet} dev ${'{HEADEND_CLEAR_IFACE}'}"
-                    for subnet in (selectors.get("local_subnets") or [])
-                ],
-            ]
-        )
-        + "\n",
+        "routing/ip-route.commands.txt": "\n".join(route_commands) + "\n",
         "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(customer_name, post_ipsec_nat),
         "post-ipsec-nat/nftables.apply.nft": post_ipsec_nftables["apply"],
         "post-ipsec-nat/nftables.remove.nft": post_ipsec_nftables["remove"],

@@ -103,6 +103,30 @@ def _resolve_repo_path(path_like: str) -> Path:
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
 
+def _assert_headend_edge_return_route(
+    package_dir: Path,
+    *,
+    customer_name: str,
+    peer_public_ip: str,
+    muxer_public_private_ip: str,
+    headend_public_iface: str,
+) -> str:
+    peer_public_cidr = peer_public_ip if "/" in peer_public_ip else f"{peer_public_ip}/32"
+    expected_route = (
+        f"ip route replace {peer_public_cidr} via {muxer_public_private_ip} "
+        f"dev {headend_public_iface} onlink"
+    )
+    route_path = package_dir / "bundle" / "headend" / "routing" / "ip-route.commands.txt"
+    if not route_path.exists():
+        raise SystemExit(f"{customer_name} head-end route artifact is missing: {route_path}")
+    route_text = route_path.read_text(encoding="utf-8")
+    if expected_route not in route_text:
+        raise SystemExit(
+            f"{customer_name} head-end route artifact is missing muxer edge return route: {expected_route}"
+        )
+    return expected_route
+
+
 def _build_staged_live_environment(environment_path: Path, *, name: str, root: Path) -> dict:
     document = yaml.safe_load(
         (
@@ -683,6 +707,13 @@ def main() -> int:
         raise SystemExit("Customer 4 NAT-T dry-run did not select NAT head end")
     if ((customer4_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 4 NAT-T dry-run gate did not report dry_run_ready")
+    customer4_edge_return_route = _assert_headend_edge_return_route(
+        _resolve_repo_path(str((customer4_deploy.get("package") or {}).get("package_dir") or "")),
+        customer_name="vpn-customer-stage1-15-cust-0004",
+        peer_public_ip="3.237.201.84",
+        muxer_public_private_ip="172.31.33.150",
+        headend_public_iface="ens34",
+    )
 
     blocked_environment = yaml.safe_load(
         (MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml").read_text(
@@ -802,6 +833,7 @@ def main() -> int:
             "customer4_status": customer4_deploy["status"],
             "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
             "customer4_gate": customer4_deploy["dry_run_gate"]["status"],
+            "customer4_edge_return_route": customer4_edge_return_route,
             "synthetic_blocked_status": blocked_report["status"],
             "missing_backup_status": missing_backup_report["status"],
             "missing_backup_gate": missing_backup_report["dry_run_gate"]["status"],

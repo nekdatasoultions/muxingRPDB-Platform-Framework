@@ -145,6 +145,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     nft_apply_text = bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]
     nft_remove_text = bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]
     ipsec_intent = bundle.json_payloads["ipsec/ipsec-intent.json"]
+    routing_intent = bundle.json_payloads["routing/routing-intent.json"]
     nat_intent = bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"]
     activation_manifest = bundle.json_payloads["post-ipsec-nat/activation-manifest.json"]
     nft_state = bundle.json_payloads["post-ipsec-nat/nftables-state.json"]
@@ -197,6 +198,24 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
 
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")
+    peer_public_ip = str(ipsec_intent.get("peer_public_ip") or "").strip()
+    if peer_public_ip:
+        peer_public_cidr = peer_public_ip if "/" in peer_public_ip else f"{peer_public_ip}/32"
+        return_route_lines = [
+            line
+            for line in route_lines
+            if line.startswith(f"ip route replace {peer_public_cidr} via ")
+            and " dev " in line
+            and line.endswith(" onlink")
+        ]
+        edge_return_path = routing_intent.get("edge_return_path") or {}
+        report["details"]["edge_return_route"] = return_route_lines[0] if return_route_lines else None
+        if not edge_return_path.get("enabled"):
+            report["errors"].append("routing-intent.json must mark the muxer edge return path as enabled")
+        if not return_route_lines:
+            report["errors"].append(
+                f"routing/ip-route.commands.txt missing muxer edge return route for peer {peer_public_cidr}"
+            )
 
     swanctl_expectations = {
         "swanctl_version": f"version = {ipsec_intent.get('swanctl_version')}",
