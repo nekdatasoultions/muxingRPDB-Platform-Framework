@@ -148,7 +148,7 @@ Muxer must account for:
 
 - RPDB muxer runtime package
 - Python runtime and dependencies
-- nftables or iptables support used by the runtime
+- nftables support used by the runtime
 - routing tooling: `ip`, `ip rule`, `ip route`
 - systemd service wrapper for muxer runtime
 - NAT-T watcher service or scheduled runner

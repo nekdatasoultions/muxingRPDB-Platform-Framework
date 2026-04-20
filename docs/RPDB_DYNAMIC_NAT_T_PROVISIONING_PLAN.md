@@ -87,7 +87,7 @@ The helper must not:
 
 - write to live DynamoDB
 - touch live nodes
-- apply iptables/nftables
+- apply live nftables rulesets
 - modify the source customer file in place
 
 Validation:

@@ -35,7 +35,6 @@ Each snapshot should include:
 - `ip rule`
 - `ip route show table all`
 - `ip -d link show`
-- `iptables-save`
 - `nft list ruleset`
 - `conntrack` stats
 - `ip xfrm state`

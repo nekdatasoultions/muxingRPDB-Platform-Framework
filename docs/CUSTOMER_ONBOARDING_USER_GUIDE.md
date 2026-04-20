@@ -641,7 +641,7 @@ Do not assume `local_subnets` means muxer-side routing. These are VPN selectors
 for the head-end/customer relationship.
 
 Do not apply generated artifacts to `/etc`, `/usr/local/sbin`, live DynamoDB, or
-live iptables during repo-only onboarding.
+live nftables rulesets during repo-only onboarding.
 
 Do not proceed if double verification fails.
 

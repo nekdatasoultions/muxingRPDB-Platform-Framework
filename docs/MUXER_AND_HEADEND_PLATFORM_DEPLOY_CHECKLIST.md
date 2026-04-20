@@ -156,7 +156,7 @@ sudo systemctl status muxer.service --no-pager
 sudo ip addr
 sudo ip rule
 sudo ip route show table all
-sudo iptables-save
+sudo nft list ruleset
 ```
 
 Check for:
@@ -165,7 +165,7 @@ Check for:
 - expected interfaces present
 - RPDB rules present
 - routing tables present
-- iptables rendering cleanly
+- nftables ruleset rendering cleanly
 
 ## Step 8: Validate Each VPN Head-End Node
 

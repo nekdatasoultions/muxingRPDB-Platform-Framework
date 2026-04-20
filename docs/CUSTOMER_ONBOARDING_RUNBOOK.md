@@ -21,7 +21,7 @@ The process is intentionally customer-scoped:
 ## Hard Boundary
 
 Do not apply anything to live muxer, VPN head-end, customer-side devices, route
-tables, iptables/nftables, DynamoDB production tables, or Elastic IPs during the
+tables, nftables rulesets, DynamoDB production tables, or Elastic IPs during the
 repo-only onboarding flow.
 
 Live-node work starts only after:

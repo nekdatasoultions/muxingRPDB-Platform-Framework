@@ -143,7 +143,7 @@ Before a real customer cutover:
 - Choose the pilot customer explicitly.
 - Confirm customer 15 remains reserved for the demo flow unless deliberately
   selected.
-- Capture backups of current muxer, VPN head-end, route, iptables/nftables, and
+- Capture backups of current muxer, VPN head-end, route, nftables ruleset, and
   customer-side state.
 - Build the customer YAML/request from verified live facts.
 - Run provisioning and allocation reservation dry-run.

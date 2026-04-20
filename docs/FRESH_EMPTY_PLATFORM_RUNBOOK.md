@@ -156,7 +156,7 @@ sudo systemctl status muxer.service --no-pager
 sudo ip addr
 sudo ip rule
 sudo ip route show table all
-sudo iptables-save
+sudo nft list ruleset
 ```
 
 ### Each VPN head-end node

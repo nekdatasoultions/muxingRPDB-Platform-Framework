@@ -235,7 +235,9 @@ build/example-nat-0001/
       ip-link.command.txt
     firewall/
       firewall-intent.json
-      iptables-snippet.txt
+      nftables.apply.nft
+      nftables.remove.nft
+      nftables-state.json
   headend/
     ipsec/
       ipsec-intent.json
