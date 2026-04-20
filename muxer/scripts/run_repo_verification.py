@@ -1806,7 +1806,7 @@ def main() -> int:
         raise SystemExit("Scale decision manifest translation strategy is missing or incorrect")
     if bridge_decision != "nftables_selector_sets_plus_manifested_bridge_worker":
         raise SystemExit("Scale decision manifest NFQUEUE bridge strategy is missing or incorrect")
-    if headend_decision != "batched_iptables_restore_customer_chains":
+    if headend_decision != "nftables_nat_artifacts":
         raise SystemExit("Scale decision manifest head-end NAT strategy is missing or incorrect")
 
     translation_baseline = (scale_decision_manifest.get("translation") or {}).get("baseline_mapping") or {}

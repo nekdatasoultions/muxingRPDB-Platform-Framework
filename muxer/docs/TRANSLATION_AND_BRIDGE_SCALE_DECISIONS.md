@@ -42,21 +42,27 @@ path, head-end activation shape, shell fan-out, and explicit threshold gates.
 
 ## Decision Summary
 
-The chosen strategies are:
+The corrected chosen strategies are:
 
 - muxer translation: move to batched `nftables` NAT maps
 - NFQUEUE bridge: move to shared queue hooks plus a manifested bridge worker
-- head-end post-IPsec NAT: move to batched `iptables-restore` customer chains
+- head-end post-IPsec NAT: move to batched `nftables` NAT artifacts
 
-This is a deliberate mixed strategy.
+This is an `nftables`-first strategy.
 
-We are not forcing every remaining layer into `nftables` just for symmetry.
-Instead we are choosing the smallest honest backend for each problem:
+Earlier planning allowed `iptables-restore` as the head-end default because it
+would have reduced command fan-out while preserving current `NETMAP` and
+explicit host-map semantics. That was only a transitional compatibility idea,
+not the final RPDB scale direction.
+
+The corrected rule is:
 
 - `nftables` where the muxer benefits from shared maps and batch apply
 - a worker-manifest model where userspace bridging is the real stateful object
-- `iptables-restore` where the head-end still needs `NETMAP` and explicit host
-  mapping semantics, but the shell fan-out and per-command growth must go away
+- `nftables` for head-end post-IPsec NAT unless repo tests prove a required
+  behavior cannot be represented safely
+- `iptables` only as a documented fallback exception, never as the default
+  scale path
 
 ## 1. Muxer Translation Decision
 
@@ -226,29 +232,29 @@ That is not acceptable as the long-term activation shape.
 
 ### Chosen Strategy
 
-Keep the head-end NAT semantic backend compatible with `iptables`, but switch
-the activation shape to batched `iptables-restore` customer-owned chains.
+Move the head-end NAT semantic backend to generated `nftables` artifacts.
 
-Phase 3 and Phase 4 should treat the head-end bundle as:
+The next implementation phase should treat the head-end bundle as:
 
-- one generated restore file per customer chain namespace
-- one generated remove file without that customer chain
-- customer-owned include points that keep unrelated customers untouched
+- one generated `nftables` apply batch for the customer NAT state
+- one generated `nftables` remove batch for the customer NAT state
+- structured state metadata for table, chain, set, and map names
+- customer-owned state objects that keep unrelated customers untouched
 
 ### Why This Is The Right Choice
 
-This layer already relies on semantics like `NETMAP` and explicit host mapping
-that are well represented in the current head-end artifact model.
+This layer relies on semantics like one-to-one netmap-style translation and
+explicit host mapping.
 
 The biggest current problem is not the semantic expression itself. The biggest
 problem is line-by-line shell growth.
 
-A batched `iptables-restore` path gives us:
+A batched `nftables` path gives us:
 
-- atomic-ish customer chain activation at the head-end layer
-- much lower shell fan-out than one command per rule
-- a safe compatibility bridge before any future `nftables` migration on the
-  head-end
+- a real path away from `iptables` on the scale-critical head-end NAT layer
+- table, chain, set, and map objects that can be rendered and reviewed
+- batch application through `nft -f`
+- a cleaner route to customer-scoped apply/remove semantics
 
 ### Behavior That Must Stay The Same
 
@@ -259,10 +265,13 @@ Implementation must preserve:
 - customer-scoped install, validate, and remove
 - route and mark carry-through already modeled in the bundle
 
+If any of those semantics cannot be represented in `nftables`, the work must
+stop and write a problem statement before accepting an `iptables` fallback.
+
 ### Repo-Only Boundary
 
-Until the bundled head-end activation changes to the batched path, head-end NAT
-is still a measured open scale gap.
+Until the bundled head-end activation changes to the `nftables` path, head-end
+NAT is still a measured open scale gap.
 
 ## Implementation Order
 

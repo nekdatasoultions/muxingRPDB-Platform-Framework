@@ -62,14 +62,18 @@ nfqueue_bridge:
     current_natd_bridge_20000_legacy_bridge_rules: 0
 headend_post_ipsec_nat:
   scope: headend_post_ipsec_nat
-  decision: batched_iptables_restore_customer_chains
-  activation: customer_owned_chain_namespace_plus_atomic_restore_file
+  decision: nftables_nat_artifacts
+  activation: nft_batch_apply_remove
   inventory_source: bundled_customer_artifacts
-  customer_scoped_remove: restore_without_customer_chain
+  customer_scoped_remove: nft_remove_selected_customer_state
   preserved_behaviors:
     - netmap_one_to_one_translation
     - explicit_host_map_translation
     - route_and_mark_carry_through
+  fallback_policy:
+    iptables_allowed: false_by_default
+    requires_repo_proof: true
+    requires_problem_statement: true
   exclusions:
     - customers_without_post_ipsec_nat
   baseline_mapping:

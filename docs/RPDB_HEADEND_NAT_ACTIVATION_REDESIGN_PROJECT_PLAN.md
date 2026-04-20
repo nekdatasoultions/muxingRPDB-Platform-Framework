@@ -1,9 +1,17 @@
-# RPDB Head-End NAT Activation Redesign Project Plan
+# RPDB Head-End NAT nftables Redesign Project Plan
 
 ## Purpose
 
-This plan is the next engineering block after the repo-only scale execution
-plan.
+This plan corrects the previous drift where the head-end post-IPsec NAT plan
+defaulted back to `iptables-restore`.
+
+The corrected direction is:
+
+- `nftables` is the primary backend for head-end post-IPsec NAT
+- `iptables` is not the default scale path
+- `iptables` can only remain as a documented fallback if a required behavior
+  cannot be represented safely in `nftables` and that limitation is proven in
+  repo tests
 
 The current explicit scale gate is honest and repeatable:
 
@@ -16,9 +24,9 @@ The current explicit scale gate is honest and repeatable:
   - `headend_rollback_commands`
   - `headend_max_apply_per_customer`
 
-The goal of this plan is to redesign or batch the head-end post-IPsec NAT
-activation backend so `nat_t_netmap` can pass the explicit scale gate without
-weakening the customer behavior contract.
+The goal of this project is to make the translated NAT-T head-end activation
+path scale through batched `nftables` artifacts, while preserving customer NAT
+semantics.
 
 ## Guardrails
 
@@ -30,8 +38,9 @@ weakening the customer behavior contract.
 - Do not apply a customer.
 - Do not claim scale readiness until the explicit scale report turns green for
   the accepted target state.
+- Do not reintroduce `iptables` as the default implementation path.
 
-## Current Problem Statement
+## Problem Statement
 
 The repo currently models translated NAT-T head-end activation as linear command
 growth.
@@ -48,43 +57,67 @@ The current threshold policy expects:
 - rollback commands at or below `2 x customer_count`
 - max apply commands per customer equal to `2`
 
-The core issue is not the customer NAT intent. The core issue is activation
-shape: the head-end bundle still expands one customer into too many individual
-apply and rollback commands.
+The issue is not the customer NAT intent. The issue is activation shape and
+backend choice: the head-end NAT path still behaves like rule-by-rule
+`iptables` activation instead of a batched `nftables` state update.
+
+## Required Technology Direction
+
+The primary technologies for this fix are:
+
+- Linux `nftables`
+- `nft -f` batch files
+- `nftables` tables, chains, sets, and maps
+- generated repo artifacts that are reviewable before deployment
+- repo-only staged apply/remove validation
+- the existing scale harness and explicit scale report
+
+The allowed fallback technology is:
+
+- `iptables` only as a documented exception path
+
+Fallback is allowed only if:
+
+- the required NAT behavior cannot be represented in `nftables`
+- the limitation is proven with a repo test
+- the customer behavior impact is documented
+- the explicit scale report still has an accepted target state
 
 ## Target End State
 
 The target end state is:
 
 - customer YAML still describes NAT intent normally
-- customer-scoped head-end artifacts still preserve:
+- customer-scoped head-end artifacts preserve:
   - one-to-one netmap behavior
   - explicit host-map behavior
   - route and mark carry-through
   - customer-scoped install, validate, and remove
-- head-end NAT activation is batched through generated restore artifacts instead
-  of line-by-line command expansion
+- head-end NAT activation is represented by generated `nftables` artifacts
+- apply and rollback use batched `nft -f` semantics in repo-modeled form
 - explicit scale gate no longer fails `nat_t_netmap`
-- full repo verification passes
+- full repo verification passes twice
 - work stops before deployment
 
-## Phase 0. Preserve Baseline
+## Phase 0. Preserve And Correct The Baseline
 
 Goal:
 
-- keep the current verified state recoverable before changing the head-end NAT
-  backend
+- keep the current verified state recoverable while correcting the head-end NAT
+  direction
 
 Work:
 
-- commit the current repo-only scale execution work
-- confirm the repo baseline records the current `nat_t_netmap` failure
+- confirm the current baseline commit exists
+- update docs that still say the default is `iptables-restore`
 - keep generated render output out of source control
+- preserve the current failing scale evidence as the reason for this work
 
 Gate:
 
-- current work is committed
-- explicit scale report still records the blocker honestly
+- docs state `nftables` is the primary backend
+- docs state `iptables` is fallback only
+- explicit scale report still records the current blocker honestly
 - no AWS, nodes, customers, or `MUXER3` are touched
 
 ## Phase 1. Inventory Current Head-End NAT Artifact Shape
@@ -118,30 +151,58 @@ Gate:
 - repo doc or code comments identify the current command source precisely
 - no implementation starts until the current shape is understood
 
-## Phase 2. Define The Batched Restore Contract
+## Phase 2. Define The nftables NAT Contract
 
 Goal:
 
-- define a concrete restore-file contract that can replace per-command growth
+- define a concrete `nftables` contract that replaces per-command growth
 
 Work:
 
-- define generated files for apply and rollback, for example:
-  - `post-ipsec-nat/iptables-restore.apply`
-  - `post-ipsec-nat/iptables-restore.remove`
+- define generated files for apply and remove, for example:
+  - `post-ipsec-nat/nftables.apply.nft`
+  - `post-ipsec-nat/nftables.remove.nft`
+  - `post-ipsec-nat/nftables-state.json`
   - `post-ipsec-nat/activation-manifest.json`
-- define customer-owned chain naming
-- define include or jump points that keep unrelated customers untouched
-- define how rollback removes only the selected customer chain
-- define validation checks for generated restore files
+- define table and chain naming
+- define customer-owned set and map names
+- define how one-to-one netmap intent is represented in `nftables`
+- define how explicit host-map intent is represented in `nftables`
+- define how customer-scoped remove deletes only the selected customer state
+- define validation checks for generated `nftables` files
 
 Gate:
 
-- the contract is specific enough to implement without guessing
+- the `nftables` contract is specific enough to implement without guessing
 - netmap and explicit host-map behavior are both represented
 - unrelated customers remain out of scope for one-customer remove
+- no default `iptables` activation path is accepted
 
-## Phase 3. Implement Batched Artifact Rendering
+## Phase 3. Prove nftables Semantic Compatibility Repo-Only
+
+Goal:
+
+- prove that `nftables` can represent the required NAT semantics before changing
+  the artifact generator
+
+Work:
+
+- add repo-only fixtures for:
+  - one-to-one subnet translation
+  - single host explicit mapping
+  - multiple host explicit mapping
+  - route and mark carry-through metadata
+- render expected `nftables` state for each fixture
+- validate that the rendered state preserves customer intent
+- if a semantic cannot be represented, write a problem statement before any
+  fallback is allowed
+
+Gate:
+
+- all required NAT semantics have passing repo fixtures
+- or a documented exception exists with evidence and a new approval gate
+
+## Phase 4. Implement nftables Artifact Rendering
 
 Goal:
 
@@ -150,31 +211,39 @@ Goal:
 
 Work:
 
-- add restore-file rendering for `netmap`
-- add restore-file rendering for `explicit_host_map`
-- keep the existing snippet as review/reference only if needed
-- add a structured activation manifest with command counts and chain metadata
-- update artifact validation to require the new restore artifacts when
+- add `nftables` rendering for `netmap`
+- add `nftables` rendering for `explicit_host_map`
+- keep the old `iptables` snippet only as a compatibility/reference artifact
+  if needed
+- add a structured activation manifest with:
+  - backend type
+  - table name
+  - chain names
+  - set names
+  - map names
+  - estimated activation units
+- update artifact validation to require the new `nftables` artifacts when
   post-IPsec NAT is enabled
 
 Gate:
 
 - NAT and non-NAT customer artifact validation passes
-- `nat_t_netmap` artifacts include restore files and activation manifest
-- disabled NAT customers do not get unnecessary restore artifacts
+- `nat_t_netmap` artifacts include `nftables` files and activation manifest
+- disabled NAT customers do not get unnecessary `nftables` NAT artifacts
+- old `iptables` snippets are not counted as the primary activation backend
 
-## Phase 4. Implement Repo-Only Apply/Remove Semantics
+## Phase 5. Implement Repo-Only Apply/Remove Semantics
 
 Goal:
 
-- make staged head-end apply/remove consume the batched restore contract instead
-  of expanding per-rule shell commands
+- make staged head-end apply/remove consume the `nftables` contract instead of
+  expanding per-rule shell commands
 
 Work:
 
-- update staged head-end apply helper to treat restore files as the activation
-  unit
-- update staged remove helper to use the remove restore file
+- update staged head-end apply helper to treat `nftables` files as the
+  activation unit
+- update staged remove helper to use the generated remove batch
 - preserve validation and rollback journaling
 - keep live execution disabled unless explicitly approved in later deployment
   work
@@ -185,18 +254,20 @@ Gate:
 - staged remove removes the selected customer artifacts only
 - rollback artifacts remain reviewable
 - unrelated staged customers remain untouched
+- repo-modeled apply/remove does not default back to `iptables`
 
-## Phase 5. Update The Scale Harness
+## Phase 6. Update The Scale Harness
 
 Goal:
 
-- make the scale harness measure the new batched activation model truthfully
+- make the scale harness measure the new batched `nftables` activation model
+  truthfully
 
 Work:
 
-- update `derive_post_ipsec_nat` measurement so batched restore activation is
+- update `derive_post_ipsec_nat` measurement so `nftables` batch activation is
   counted as the new activation unit
-- preserve legacy command counts if useful as comparison fields
+- preserve legacy command counts as comparison fields if useful
 - keep max per-customer apply and rollback counts visible
 - update `generate_scale_report.py` only if the threshold model needs a new
   metric name
@@ -207,7 +278,7 @@ Gate:
 - the report still fails if the old per-command growth returns
 - the threshold manifest remains explicit
 
-## Phase 6. Run The Double Verification Loop
+## Phase 7. Run The Double Verification Loop
 
 Goal:
 
@@ -230,7 +301,7 @@ Gate:
 - explicit report is green for the accepted target state
 - full repo verification passes twice
 
-## Phase 7. Update Truthfulness Docs
+## Phase 8. Update Truthfulness Docs
 
 Goal:
 
@@ -242,6 +313,7 @@ Work:
 - update the pre-deploy review package
 - update the runtime completion plan
 - update the scale gap audit
+- update the translation and bridge decision record
 
 Gate:
 
@@ -254,7 +326,9 @@ Gate:
 This project is complete when:
 
 - current baseline is committed
-- batched head-end NAT activation is implemented repo-only
+- head-end post-IPsec NAT activation is implemented repo-only through
+  `nftables`
+- `iptables` is not the default implementation path
 - `nat_t_netmap` no longer fails the explicit scale gate for the accepted target
   state
 - full repo verification passes twice
