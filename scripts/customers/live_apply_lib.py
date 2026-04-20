@@ -1200,6 +1200,8 @@ def _sync_muxer_runtime(
 
     validation_script = " && ".join(
         [
+            "chmod +x /etc/muxer/src/muxctl.py /etc/muxer/src/mux_trace.py /etc/muxer/src/ike_nat_bridge.py 2>/dev/null || true",
+            "test -x /etc/muxer/src/muxctl.py",
             "python3 -m py_compile /etc/muxer/src/muxctl.py /etc/muxer/src/muxerlib/*.py",
             "grep -q 'dnat to ip saddr map' /etc/muxer/src/muxerlib/nftables.py",
             "grep -q 'snat to ip saddr . ip daddr map' /etc/muxer/src/muxerlib/nftables.py",

@@ -2559,11 +2559,11 @@ print(
     muxer_customer_lib_text = (REPO_ROOT / "scripts" / "deployment" / "muxer_customer_lib.py").read_text(
         encoding="utf-8"
     )
-    if "/etc/muxer/src/muxctl.py flush" not in muxer_customer_lib_text:
+    if "python3 /etc/muxer/src/muxctl.py flush" not in muxer_customer_lib_text:
         raise SystemExit("muxer customer apply must flush shared nftables state before runtime apply")
-    if "/etc/muxer/src/muxctl.py apply-customer" not in muxer_customer_lib_text:
+    if "python3 /etc/muxer/src/muxctl.py apply-customer" not in muxer_customer_lib_text:
         raise SystemExit("muxer customer apply must invoke the live muxer runtime customer apply path")
-    if "/etc/muxer/src/muxctl.py remove-customer" not in muxer_customer_lib_text:
+    if "python3 /etc/muxer/src/muxctl.py remove-customer" not in muxer_customer_lib_text:
         raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
     if 'Path("etc") / "muxer" / "config" / "customer-modules"' not in muxer_customer_lib_text:
         raise SystemExit("muxer customer modules must install under the runtime config/customer-modules inventory")
@@ -2574,6 +2574,7 @@ print(
         "validate_muxer_runtime_payload",
         '"runtime-package"',
         "/etc/muxer/src/muxerlib/nftables.py",
+        "test -x /etc/muxer/src/muxctl.py",
         "dnat to ip saddr map",
         "snat to ip saddr . ip daddr map",
         "ipv4_addr : verdict",
