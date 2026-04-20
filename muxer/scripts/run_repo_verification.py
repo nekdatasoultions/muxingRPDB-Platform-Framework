@@ -205,6 +205,8 @@ def main() -> int:
         str(REPO_ROOT / "scripts" / "deployment" / "remove_muxer_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "validate_muxer_customer.py"),
         str(REPO_ROOT / "scripts" / "deployment" / "run_double_verification.py"),
+        str(REPO_ROOT / "scripts" / "platform" / "prepare_empty_platform_params.py"),
+        str(REPO_ROOT / "scripts" / "platform" / "deploy_empty_platform.py"),
         str(REPO_ROOT / "scripts" / "platform" / "verify_empty_platform_readiness.py"),
     ]
     _run(["python", "-m", "py_compile", *compile_targets])

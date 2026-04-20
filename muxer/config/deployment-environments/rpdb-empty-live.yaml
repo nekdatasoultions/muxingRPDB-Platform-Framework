@@ -22,8 +22,8 @@ targets:
     rpdb_managed: true
     selector:
       type: instance_id
-      value: i-0744c6c5d61e62744
-      private_ip: 172.31.135.175
+      value: i-0c8c34de42777c769
+      private_ip: 172.31.33.150
     access:
       method: ssh
   headends:
@@ -34,8 +34,8 @@ targets:
         rpdb_managed: true
         selector:
           type: instance_id
-          value: i-03bf282fbfb4698fa
-          private_ip: 172.31.40.230
+          value: i-0a5f8a1e1b0fed116
+          private_ip: 172.31.40.222
         access:
           method: ssh
       standby:
@@ -44,8 +44,8 @@ targets:
         rpdb_managed: true
         selector:
           type: instance_id
-          value: i-0d542d739bb2a35ef
-          private_ip: 172.31.141.230
+          value: i-026dcd8f4b658772b
+          private_ip: 172.31.141.222
         access:
           method: ssh
     non_nat:
@@ -55,8 +55,8 @@ targets:
         rpdb_managed: true
         selector:
           type: instance_id
-          value: i-0c08e18b0388f94a1
-          private_ip: 172.31.40.231
+          value: i-05c6a9f56cd531322
+          private_ip: 172.31.40.223
         access:
           method: ssh
       standby:
@@ -65,8 +65,8 @@ targets:
         rpdb_managed: true
         selector:
           type: instance_id
-          value: i-09298c582c81a7a82
-          private_ip: 172.31.141.231
+          value: i-0eb58b43b6886ea0c
+          private_ip: 172.31.141.223
         access:
           method: ssh
 

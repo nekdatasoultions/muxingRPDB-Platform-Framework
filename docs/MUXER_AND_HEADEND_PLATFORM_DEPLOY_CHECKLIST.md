@@ -49,7 +49,7 @@ This produces a fresh RPDB-empty parameter set derived from the imported shape
 without inheriting production EIP behavior.
 
 ```powershell
-python scripts\platform\prepare_empty_platform_params.py
+python scripts\platform\prepare_empty_platform_params.py --auto-select-private-ips-from-aws
 ```
 
 Expected output root:
@@ -61,6 +61,10 @@ Generated files to use:
 - `build\empty-platform\current-prod-shape-rpdb-empty\parameters.single-muxer.us-east-1.json`
 - `build\empty-platform\current-prod-shape-rpdb-empty\parameters.vpn-headend.nat.graviton-efs.us-east-1.json`
 - `build\empty-platform\current-prod-shape-rpdb-empty\parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json`
+
+Confirm `preparation-summary.json` lists `selected_private_ips` entries for the
+muxer, NAT head-end pair, and non-NAT head-end pair. This proves the fresh stack
+is not trying to reuse static private IPs already held by another stack.
 
 ## Step 3: Review The Deploy Plan
 

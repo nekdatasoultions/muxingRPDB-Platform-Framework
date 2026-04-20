@@ -32,9 +32,9 @@ The imported current-state parameter files keep the same shape we use today:
 
 Source parameter files:
 
-- [parameters.single-muxer.us-east-1.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn/parameters.single-muxer.us-east-1.json)
-- [parameters.vpn-headend.nat.graviton-efs.us-east-1.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn/parameters.vpn-headend.nat.graviton-efs.us-east-1.json)
-- [parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json](/E:/Code1/muxingRPDB%20Platform%20Framework-main/infra/cfn/parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json)
+- [parameters.single-muxer.us-east-1.json](../infra/cfn/parameters.single-muxer.us-east-1.json)
+- [parameters.vpn-headend.nat.graviton-efs.us-east-1.json](../infra/cfn/parameters.vpn-headend.nat.graviton-efs.us-east-1.json)
+- [parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json](../infra/cfn/parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json)
 
 ## Important Pause: EIP Review
 
@@ -57,8 +57,8 @@ The wrapper script enforces this by refusing `--execute` unless you also pass
 
 Use:
 
-- [deploy_empty_platform.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/deploy_empty_platform.py)
-- [prepare_empty_platform_params.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/prepare_empty_platform_params.py)
+- [deploy_empty_platform.py](../scripts/platform/deploy_empty_platform.py)
+- [prepare_empty_platform_params.py](../scripts/platform/prepare_empty_platform_params.py)
 
 ## Recommended First True Empty Platform Preparation
 
@@ -66,7 +66,7 @@ Before the first real empty-platform deploy, prepare a safe parameter set from
 the imported production shape:
 
 ```powershell
-python scripts\platform\prepare_empty_platform_params.py
+python scripts\platform\prepare_empty_platform_params.py --auto-select-private-ips-from-aws
 ```
 
 That writes a generated parameter set under:
@@ -78,6 +78,8 @@ Safety changes in that generated set:
 - clears all imported `EipAllocationId` values
 - suffixes the muxer/head-end cluster names with `-rpdb-empty`
 - suffixes the customer SoT table name with `-rpdb-empty`
+- replaces imported static private IPs with currently unused private IPs from
+  the same subnets
 - pins `StrongswanArchiveUri` to the RPDB rehearsal S3 prefix so head-end
   bootstrap does not depend on a live upstream download
 

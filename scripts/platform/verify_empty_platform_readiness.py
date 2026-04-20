@@ -124,8 +124,11 @@ def main() -> int:
     }
 
     if args.prepare_params:
+        prepare_command = [sys.executable, "scripts/platform/prepare_empty_platform_params.py"]
+        if args.check_aws or args.verify_headends:
+            prepare_command.append("--auto-select-private-ips-from-aws")
         code, payload, stdout, stderr = _run_json(
-            [sys.executable, "scripts/platform/prepare_empty_platform_params.py"]
+            prepare_command
         )
         if code != 0 or payload is None:
             report["errors"].append(

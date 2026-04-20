@@ -277,29 +277,29 @@ def main() -> int:
         used_by_subnet = _describe_used_ips(subnet_ids, region=args.region)
 
         replacements = [
-            (muxer_payload, "TransportEniAIp", muxer_map["TransportSubnetAId"]),
-            (muxer_payload, "TransportEniBIp", muxer_map["TransportSubnetBId"]),
-            (nat_payload, "NodeAPrivateIp", nat_map["SubnetAId"]),
-            (nat_payload, "NodeBPrivateIp", nat_map["SubnetBId"]),
-            (nat_payload, "NodeAHaSyncIp", nat_map["HaSyncSubnetAId"]),
-            (nat_payload, "NodeBHaSyncIp", nat_map["HaSyncSubnetBId"]),
-            (nat_payload, "NodeACoreIp", nat_map["CoreSubnetAId"]),
-            (nat_payload, "NodeBCoreIp", nat_map["CoreSubnetBId"]),
-            (nonnat_payload, "NodeAPrivateIp", nonnat_map["SubnetAId"]),
-            (nonnat_payload, "NodeBPrivateIp", nonnat_map["SubnetBId"]),
-            (nonnat_payload, "NodeAHaSyncIp", nonnat_map["HaSyncSubnetAId"]),
-            (nonnat_payload, "NodeBHaSyncIp", nonnat_map["HaSyncSubnetBId"]),
-            (nonnat_payload, "NodeACoreIp", nonnat_map["CoreSubnetAId"]),
-            (nonnat_payload, "NodeBCoreIp", nonnat_map["CoreSubnetBId"]),
+            (muxer_payload, "muxer.TransportEniAIp", "TransportEniAIp", muxer_map["TransportSubnetAId"]),
+            (muxer_payload, "muxer.TransportEniBIp", "TransportEniBIp", muxer_map["TransportSubnetBId"]),
+            (nat_payload, "nat.NodeAPrivateIp", "NodeAPrivateIp", nat_map["SubnetAId"]),
+            (nat_payload, "nat.NodeBPrivateIp", "NodeBPrivateIp", nat_map["SubnetBId"]),
+            (nat_payload, "nat.NodeAHaSyncIp", "NodeAHaSyncIp", nat_map["HaSyncSubnetAId"]),
+            (nat_payload, "nat.NodeBHaSyncIp", "NodeBHaSyncIp", nat_map["HaSyncSubnetBId"]),
+            (nat_payload, "nat.NodeACoreIp", "NodeACoreIp", nat_map["CoreSubnetAId"]),
+            (nat_payload, "nat.NodeBCoreIp", "NodeBCoreIp", nat_map["CoreSubnetBId"]),
+            (nonnat_payload, "non_nat.NodeAPrivateIp", "NodeAPrivateIp", nonnat_map["SubnetAId"]),
+            (nonnat_payload, "non_nat.NodeBPrivateIp", "NodeBPrivateIp", nonnat_map["SubnetBId"]),
+            (nonnat_payload, "non_nat.NodeAHaSyncIp", "NodeAHaSyncIp", nonnat_map["HaSyncSubnetAId"]),
+            (nonnat_payload, "non_nat.NodeBHaSyncIp", "NodeBHaSyncIp", nonnat_map["HaSyncSubnetBId"]),
+            (nonnat_payload, "non_nat.NodeACoreIp", "NodeACoreIp", nonnat_map["CoreSubnetAId"]),
+            (nonnat_payload, "non_nat.NodeBCoreIp", "NodeBCoreIp", nonnat_map["CoreSubnetBId"]),
         ]
 
-        for payload, key, subnet_id in replacements:
+        for payload, summary_key, parameter_key, subnet_id in replacements:
             for item in payload:
-                if item.get("ParameterKey") == key:
+                if item.get("ParameterKey") == parameter_key:
                     original = str(item.get("ParameterValue") or "").strip()
                     replacement = _pick_next_free_ip(original, subnet_id, subnet_networks, used_by_subnet)
                     item["ParameterValue"] = replacement
-                    selected_private_ips[key] = replacement
+                    selected_private_ips[summary_key] = replacement
                     break
 
     nat_map = _parameter_map(nat_payload)
