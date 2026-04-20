@@ -71,8 +71,8 @@ ipsec:
   lifetime: 28800s
   auto: route
 
-# iptables policy
-iptables:
+# RPDB firewall policy. Runtime activation must use nftables/RPDB only.
+firewall_policy:
   chains:
     mangle_chain: MUXER_MANGLE
     mangle_postrouting_chain: MUXER_MANGLE_POST
@@ -81,7 +81,7 @@ iptables:
     nat_prerouting_chain: MUXER_NAT_PRE
     nat_postrouting_chain: MUXER_NAT_POST
   default_drop_ipsec_to_public_ip: true   # drop non-allowed peers to public/private target on 500/4500/ESP
-  use_nat_rewrite: true                   # enable DNAT/SNAT rewrite in pass-through (required for identity masking)
+  use_nat_rewrite: true                   # enable nftables DNAT/SNAT rewrite in pass-through
 
 # Pass-through classification backend selection.
 nftables:

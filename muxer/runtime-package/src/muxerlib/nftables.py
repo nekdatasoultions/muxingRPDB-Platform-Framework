@@ -15,41 +15,39 @@ DEFAULT_PASS_THROUGH_NAT_TABLE = "muxer_passthrough_nat"
 DEFAULT_PASS_THROUGH_STATE_ROOT = Path("/var/lib/rpdb-muxer/nftables")
 
 
-def _normalize_backend(value: Any, *, default: str = "legacy_iptables") -> str:
+def _normalize_backend(value: Any, *, default: str = "nftables") -> str:
     raw = str(value or default).strip().lower()
     aliases = {
-        "legacy": "legacy_iptables",
-        "legacy_iptables": "legacy_iptables",
-        "iptables": "legacy_iptables",
-        "iptables_legacy": "legacy_iptables",
         "nft": "nftables",
         "nftables": "nftables",
     }
-    return aliases.get(raw, default)
+    if raw not in aliases:
+        raise ValueError(f"unsupported RPDB firewall backend: {raw}")
+    return aliases[raw]
 
 
-def normalize_passthrough_classification_backend(value: Any, *, default: str = "legacy_iptables") -> str:
+def normalize_passthrough_classification_backend(value: Any, *, default: str = "nftables") -> str:
     return _normalize_backend(value, default=default)
 
 
-def normalize_passthrough_translation_backend(value: Any, *, default: str = "legacy_iptables") -> str:
+def normalize_passthrough_translation_backend(value: Any, *, default: str = "nftables") -> str:
     return _normalize_backend(value, default=default)
 
 
-def normalize_passthrough_bridge_backend(value: Any, *, default: str = "legacy_iptables") -> str:
+def normalize_passthrough_bridge_backend(value: Any, *, default: str = "nftables") -> str:
     return _normalize_backend(value, default=default)
 
 
 def passthrough_nft_settings(global_cfg: Dict[str, Any]) -> Dict[str, Any]:
     nft_cfg = (global_cfg.get("nftables") or {}).get("pass_through", {}) or {}
     classification_backend = normalize_passthrough_classification_backend(
-        nft_cfg.get("classification_backend", "legacy_iptables")
+        nft_cfg.get("classification_backend", "nftables")
     )
     translation_backend = normalize_passthrough_translation_backend(
-        nft_cfg.get("translation_backend", "legacy_iptables")
+        nft_cfg.get("translation_backend", "nftables")
     )
     bridge_backend = normalize_passthrough_bridge_backend(
-        nft_cfg.get("bridge_backend", "legacy_iptables")
+        nft_cfg.get("bridge_backend", "nftables")
     )
     table_name = str(nft_cfg.get("table_name") or DEFAULT_PASS_THROUGH_TABLE).strip() or DEFAULT_PASS_THROUGH_TABLE
     nat_table_name = str(nft_cfg.get("nat_table_name") or f"{table_name}_nat").strip() or DEFAULT_PASS_THROUGH_NAT_TABLE
@@ -105,12 +103,12 @@ def build_passthrough_nft_model(
 ) -> Dict[str, Any]:
     settings = passthrough_nft_settings(global_cfg)
     interfaces = global_cfg.get("interfaces", {}) or {}
-    iptables_cfg = global_cfg.get("iptables", {}) or {}
+    firewall_policy = global_cfg.get("firewall_policy", {}) or {}
     public_ip = str(global_cfg["public_ip"]).strip()
     public_priv_ip = str(interfaces.get("public_private_ip") or public_ip).strip()
     pub_if = str(interfaces.get("public_if") or "").strip()
-    default_drop = bool(iptables_cfg.get("default_drop_ipsec_to_public_ip", True))
-    nat_rewrite = bool(iptables_cfg.get("use_nat_rewrite", True))
+    default_drop = bool(firewall_policy.get("default_drop_ipsec_to_public_ip", True))
+    nat_rewrite = bool(firewall_policy.get("use_nat_rewrite", True))
     base_mark = norm_int((global_cfg.get("allocation") or {}).get("base_mark", "0x2000"))
     backend_ul_default = str(global_cfg.get("backend_underlay_ip") or "").strip()
     nfqueue_enabled, nfqueue_queue_in, nfqueue_queue_out, nfqueue_queue_bypass = nfqueue_bridge_settings(global_cfg)
@@ -150,8 +148,8 @@ def build_passthrough_nft_model(
     bridge_manifest_natd_in: List[Dict[str, Any]] = []
     bridge_manifest_natd_out: List[Dict[str, Any]] = []
 
-    legacy_translation_customers: List[Dict[str, Any]] = []
-    legacy_bridge_customers: List[Dict[str, Any]] = []
+    deferred_translation_customers: List[Dict[str, Any]] = []
+    deferred_bridge_customers: List[Dict[str, Any]] = []
 
     customer_count = 0
     translation_enabled = settings["translation_backend"] == "nftables" and nat_rewrite and public_priv_ip != public_ip
@@ -209,7 +207,7 @@ def build_passthrough_nft_model(
                 for egress_source in headend_egress_sources:
                     esp_snat[_translation_key(egress_source, peer)] = f"snat to {public_priv_ip}"
         else:
-            legacy_translation_customers.append(
+            deferred_translation_customers.append(
                 {
                     "customer_name": str(module["name"]),
                     "peer_ip": peer,
@@ -273,7 +271,7 @@ def build_passthrough_nft_model(
             bridge_handled = True
 
         if (force_4500_to_500 or natd_rewrite_enabled) and not bridge_handled:
-            legacy_bridge_customers.append(
+            deferred_bridge_customers.append(
                 {
                     "customer_name": str(module["name"]),
                     "peer_ip": peer,
@@ -297,8 +295,8 @@ def build_passthrough_nft_model(
     )
     if bridge_selector_entry_count:
         notes.append("NFQUEUE bridge selectors now use shared nftables set-based hooks plus a manifest artifact.")
-    elif legacy_bridge_customers:
-        notes.append("NFQUEUE bridge stages remain on the legacy per-customer path.")
+    elif deferred_bridge_customers:
+        notes.append("NFQUEUE bridge stages were not rendered into the shared nftables model.")
     else:
         notes.append("No customers in this render require the legacy NFQUEUE bridge path.")
     notes.append("Termination-mode customers are intentionally out of scope for this renderer.")
@@ -392,12 +390,12 @@ def build_passthrough_nft_model(
             "peer_mark_udp4500": _sorted_map_items(peer_mark_udp4500),
             "peer_mark_esp": _sorted_map_items(peer_mark_esp),
         },
-        "legacy_translation_customers": sorted(
-            legacy_translation_customers,
+        "deferred_translation_customers": sorted(
+            deferred_translation_customers,
             key=lambda item: item["customer_name"],
         ),
-        "legacy_bridge_customers": sorted(
-            legacy_bridge_customers,
+        "deferred_bridge_customers": sorted(
+            deferred_bridge_customers,
             key=lambda item: item["customer_name"],
         ),
     }
@@ -442,9 +440,9 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
     maps = model["maps"]
     public_if = interfaces["public_if"]
     render_mode = str(model.get("render_mode") or "nftables-batch-preview")
-    classification_backend = str(model.get("classification_backend") or "legacy_iptables")
-    translation_backend = str(model.get("translation_backend") or "legacy_iptables")
-    bridge_backend = str(model.get("bridge_backend") or "legacy_iptables")
+    classification_backend = str(model.get("classification_backend") or "nftables")
+    translation_backend = str(model.get("translation_backend") or "nftables")
+    bridge_backend = str(model.get("bridge_backend") or "nftables")
 
     if render_mode == "nftables-live-pass-through":
         header = [
@@ -669,10 +667,10 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
             lines.append("  }")
             lines.append("}")
 
-    if model.get("legacy_translation_customers"):
+    if model.get("deferred_translation_customers"):
         lines.append("")
-        lines.append("# Remaining legacy per-customer translation customers")
-        for entry in model["legacy_translation_customers"]:
+        lines.append("# Translation customers not rendered into the shared nftables model")
+        for entry in model["deferred_translation_customers"]:
             lines.append(
                 "# "
                 f"{entry['customer_name']}: peer={entry['peer_ip']} "
@@ -680,10 +678,10 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
                 f"force4500to500={entry['force_rewrite_4500_to_500']}"
             )
 
-    if model.get("legacy_bridge_customers"):
+    if model.get("deferred_bridge_customers"):
         lines.append("")
-        lines.append("# Remaining legacy bridge customers")
-        for entry in model["legacy_bridge_customers"]:
+        lines.append("# Bridge customers not rendered into the shared nftables model")
+        for entry in model["deferred_bridge_customers"]:
             lines.append(
                 "# "
                 f"{entry['customer_name']}: peer={entry['peer_ip']} "

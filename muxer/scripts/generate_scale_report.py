@@ -59,8 +59,8 @@ def _check_exact(name: str, actual: int | float, expected: int | float) -> dict[
 
 def _evaluate_scenario(profile: str, count: int, scenario: dict[str, Any], profile_thresholds: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
-    legacy_rules = int(((scenario.get("muxer_legacy_runtime") or {}).get("total_rules")) or 0)
-    bridge_rules = int(((scenario.get("muxer_legacy_runtime") or {}).get("bridge_total_rules")) or 0)
+    blocked_rules = int(((scenario.get("muxer_blocked_rule_model") or {}).get("total_rules")) or 0)
+    bridge_rules = int(((scenario.get("muxer_blocked_rule_model") or {}).get("bridge_total_rules")) or 0)
     headend = scenario.get("headend_post_ipsec_nat_runtime") or {}
     apply_commands = int(headend.get("apply_command_count") or 0)
     rollback_commands = int(headend.get("rollback_command_count") or 0)
@@ -70,7 +70,7 @@ def _evaluate_scenario(profile: str, count: int, scenario: dict[str, Any], profi
     memory = scenario.get("memory_bytes") or {}
     count_key = str(count)
 
-    checks.append(_check_exact("legacy_rules", legacy_rules, int(profile_thresholds.get("max_legacy_rules") or 0)))
+    checks.append(_check_exact("blocked_rules", blocked_rules, int(profile_thresholds.get("max_blocked_rules") or 0)))
     checks.append(_check_exact("bridge_rules", bridge_rules, int(profile_thresholds.get("max_bridge_rules") or 0)))
 
     if "max_headend_apply_commands" in profile_thresholds:
@@ -133,7 +133,7 @@ def _evaluate_scenario(profile: str, count: int, scenario: dict[str, Any], profi
         "failed_checks": [check["name"] for check in failures],
         "checks": checks,
         "scenario_metrics": {
-            "legacy_rules": legacy_rules,
+            "blocked_rules": blocked_rules,
             "bridge_rules": bridge_rules,
             "headend_apply_commands": apply_commands,
             "headend_rollback_commands": rollback_commands,

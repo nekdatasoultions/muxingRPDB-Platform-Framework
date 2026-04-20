@@ -222,9 +222,9 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
     headend_apply_command_count = 0
     headend_rollback_command_count = 0
     max_headend_apply_commands_per_customer = 0
-    legacy_headend_apply_command_count = 0
-    legacy_headend_rollback_command_count = 0
-    max_legacy_headend_apply_commands_per_customer = 0
+    blocked_headend_apply_command_count = 0
+    blocked_headend_rollback_command_count = 0
+    max_blocked_headend_apply_commands_per_customer = 0
 
     derive_started = _start_measurement()
     for module in modules:
@@ -248,16 +248,16 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
 
         apply_commands = list(post_ipsec_nat.get("apply_commands") or [])
         rollback_commands = list(post_ipsec_nat.get("rollback_commands") or [])
-        legacy_apply_commands = list(post_ipsec_nat.get("legacy_apply_commands") or [])
-        legacy_rollback_commands = list(post_ipsec_nat.get("legacy_rollback_commands") or [])
+        blocked_apply_commands = list(post_ipsec_nat.get("blocked_apply_commands") or [])
+        blocked_rollback_commands = list(post_ipsec_nat.get("blocked_rollback_commands") or [])
         headend_apply_command_count += len(apply_commands)
         headend_rollback_command_count += len(rollback_commands)
         max_headend_apply_commands_per_customer = max(max_headend_apply_commands_per_customer, len(apply_commands))
-        legacy_headend_apply_command_count += len(legacy_apply_commands)
-        legacy_headend_rollback_command_count += len(legacy_rollback_commands)
-        max_legacy_headend_apply_commands_per_customer = max(
-            max_legacy_headend_apply_commands_per_customer,
-            len(legacy_apply_commands),
+        blocked_headend_apply_command_count += len(blocked_apply_commands)
+        blocked_headend_rollback_command_count += len(blocked_rollback_commands)
+        max_blocked_headend_apply_commands_per_customer = max(
+            max_blocked_headend_apply_commands_per_customer,
+            len(blocked_apply_commands),
         )
 
         _ = transport["table_id"]
@@ -288,7 +288,7 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
 
     return {
         "customer_mix": _count_protocol_customers(modules),
-        "muxer_legacy_runtime": {
+        "muxer_blocked_rule_model": {
             **muxer_counts,
             "total_rules": muxer_total_rules,
             "bridge_total_rules": bridge_total_rules,
@@ -304,9 +304,9 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
             "apply_command_count": headend_apply_command_count,
             "rollback_command_count": headend_rollback_command_count,
             "max_apply_commands_per_customer": max_headend_apply_commands_per_customer,
-            "legacy_apply_command_count": legacy_headend_apply_command_count,
-            "legacy_rollback_command_count": legacy_headend_rollback_command_count,
-            "legacy_max_apply_commands_per_customer": max_legacy_headend_apply_commands_per_customer,
+            "blocked_apply_command_count": blocked_headend_apply_command_count,
+            "blocked_rollback_command_count": blocked_headend_rollback_command_count,
+            "blocked_max_apply_commands_per_customer": max_blocked_headend_apply_commands_per_customer,
         },
         "nftables_preview": {
             "render_mode": nft_model.get("render_mode"),
@@ -315,13 +315,13 @@ def _summarize_profile(modules: List[Dict[str, Any]], muxer_doc: Dict[str, Any])
             "map_count": len([value for value in nft_maps.values() if value]),
             "set_entry_count": nft_set_entry_count,
             "map_entry_count": nft_map_entry_count,
-            "legacy_translation_customer_count": len(nft_model.get("legacy_translation_customers") or []),
+            "deferred_translation_customer_count": len(nft_model.get("deferred_translation_customers") or []),
             "bridge_backend": bridge.get("backend"),
             "bridge_enabled": bool(bridge.get("enabled")),
             "bridge_set_entry_count": bridge_set_entry_count,
             "bridge_manifest_entry_count": bridge_manifest_entry_count,
             "bridge_queue_hook_count": bridge_queue_hook_count,
-            "legacy_bridge_customer_count": len(nft_model.get("legacy_bridge_customers") or []),
+            "deferred_bridge_customer_count": len(nft_model.get("deferred_bridge_customers") or []),
             "script_line_count": len(nft_script.splitlines()),
         },
         "timing_ms": {

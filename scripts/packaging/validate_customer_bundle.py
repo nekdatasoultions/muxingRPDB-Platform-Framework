@@ -29,6 +29,20 @@ REQUIRED_CUSTOMER_FILES = [
     "customer/customer-ddb-item.json",
 ]
 
+REQUIRED_MUXER_FILES = [
+    "muxer/customer/customer-summary.json",
+    "muxer/firewall/firewall-intent.json",
+    "muxer/firewall/nftables.apply.nft",
+    "muxer/firewall/nftables.remove.nft",
+    "muxer/firewall/nftables-state.json",
+    "muxer/firewall/activation-manifest.json",
+    "muxer/routing/ip-rule.command.txt",
+    "muxer/routing/ip-route-default.command.txt",
+    "muxer/routing/rpdb-routing.json",
+    "muxer/tunnel/ip-link.command.txt",
+    "muxer/tunnel/tunnel-intent.json",
+]
+
 REQUIRED_HEADEND_FILES = [
     "headend/ipsec/ipsec-intent.json",
     "headend/ipsec/swanctl-connection.conf",
@@ -48,7 +62,16 @@ HEADEND_TEXT_FILES = [
     "headend/post-ipsec-nat/nftables.remove.nft",
 ]
 
+MUXER_TEXT_FILES = [
+    "muxer/firewall/nftables.apply.nft",
+    "muxer/firewall/nftables.remove.nft",
+    "muxer/routing/ip-rule.command.txt",
+    "muxer/routing/ip-route-default.command.txt",
+    "muxer/tunnel/ip-link.command.txt",
+]
+
 BANNED_GENERATED_RUNTIME_TOKENS = [
+    "iptables",
     "iptables-restore",
 ]
 
@@ -87,19 +110,24 @@ def main() -> int:
             if not (bundle_dir / name).exists():
                 report["errors"].append(f"missing required file: {name}")
 
+        for name in REQUIRED_MUXER_FILES:
+            path = bundle_dir / name
+            if not path.exists():
+                report["errors"].append(f"missing required file: {name}")
+
         for name in REQUIRED_HEADEND_FILES:
             path = bundle_dir / name
             if not path.exists():
                 report["errors"].append(f"missing required file: {name}")
 
-        for name in HEADEND_TEXT_FILES:
+        for name in MUXER_TEXT_FILES + HEADEND_TEXT_FILES:
             path = bundle_dir / name
             if not path.exists():
                 continue
             unresolved = sorted(set(PLACEHOLDER_RE.findall(path.read_text(encoding="utf-8"))))
             if unresolved:
                 report["errors"].append(
-                    f"headend bundle file has unresolved placeholders: {name} -> {', '.join(unresolved)}"
+                    f"bundle file has unresolved placeholders: {name} -> {', '.join(unresolved)}"
                 )
 
         for path in sorted(bundle_dir.rglob("*")):

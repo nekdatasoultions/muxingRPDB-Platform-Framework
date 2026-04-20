@@ -28,13 +28,9 @@ translation:
   exclusions:
     - termination_mode
   baseline_mapping:
-    source_summary_step: synthetic_scale_backend_comparison
-    source_backend_profile: phase2_compatibility_baseline
-    strict_non_nat_20000_legacy_rules: 160000
-    nat_t_20000_legacy_rules: 300000
-    current_repo_only_summary_step: synthetic_scale_baseline
-    current_strict_non_nat_20000_legacy_rules: 0
-    current_nat_t_20000_legacy_rules: 0
+    source_summary_step: synthetic_scale_baseline
+    strict_non_nat_20000_blocked_rules: 0
+    nat_t_20000_blocked_rules: 0
 nfqueue_bridge:
   scope: muxer_force4500_and_natd_bridge
   decision: nftables_selector_sets_plus_manifested_bridge_worker
@@ -53,13 +49,9 @@ nfqueue_bridge:
   exclusions:
     - bridge_disabled_customers
   baseline_mapping:
-    source_summary_step: synthetic_scale_backend_comparison
-    source_backend_profile: phase2_compatibility_baseline
-    force4500_bridge_20000_legacy_bridge_rules: 120000
-    natd_bridge_20000_legacy_bridge_rules: 60000
-    current_repo_only_summary_step: synthetic_scale_baseline
-    current_force4500_bridge_20000_legacy_bridge_rules: 0
-    current_natd_bridge_20000_legacy_bridge_rules: 0
+    source_summary_step: synthetic_scale_baseline
+    force4500_bridge_20000_blocked_bridge_rules: 0
+    natd_bridge_20000_blocked_bridge_rules: 0
 headend_post_ipsec_nat:
   scope: headend_post_ipsec_nat
   decision: nftables_nat_artifacts
@@ -71,12 +63,12 @@ headend_post_ipsec_nat:
     - explicit_host_map_translation
     - route_and_mark_carry_through
   prohibited_paths:
-    - iptables_restore
     - muxer3_runtime_or_deploy_fallback
-    - legacy_headend_iptables_activation
+    - non_nft_firewall_activation
+    - non_nft_restore_activation
   fallback_policy:
-    iptables_allowed: false
-    iptables_restore_allowed: false
+    non_nft_firewall_allowed: false
+    non_nft_restore_allowed: false
     muxer3_allowed: false
     requires_stop_and_redesign: true
   exclusions:
@@ -84,8 +76,8 @@ headend_post_ipsec_nat:
   baseline_mapping:
     source_summary_step: synthetic_scale_baseline
     nat_t_netmap_20000_headend_apply_commands: 40000
-    legacy_nat_t_netmap_20000_headend_apply_commands: 80000
-    legacy_nat_t_netmap_20000_headend_rollback_commands: 60000
+    nat_t_netmap_20000_blocked_headend_apply_commands: 0
+    nat_t_netmap_20000_blocked_headend_rollback_commands: 0
 success_criteria:
   - translation_and_bridge_decisions_are_specific_enough_to_implement_without_guessing
   - decisions_reference_current_scale_baseline_numbers

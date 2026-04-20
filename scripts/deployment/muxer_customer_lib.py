@@ -15,7 +15,10 @@ PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
 MUXER_REQUIRED_FILES = (
     "customer/customer-summary.json",
     "firewall/firewall-intent.json",
-    "firewall/iptables-snippet.txt",
+    "firewall/nftables.apply.nft",
+    "firewall/nftables.remove.nft",
+    "firewall/nftables-state.json",
+    "firewall/activation-manifest.json",
     "routing/ip-rule.command.txt",
     "routing/ip-route-default.command.txt",
     "routing/rpdb-routing.json",
@@ -162,15 +165,26 @@ def validate_muxer_bundle(bundle_dir: Path) -> dict[str, Any]:
     rule_lines = _executable_lines(bundle.text_payloads["routing/ip-rule.command.txt"])
     route_lines = _executable_lines(bundle.text_payloads["routing/ip-route-default.command.txt"])
     tunnel_lines = _executable_lines(bundle.text_payloads["tunnel/ip-link.command.txt"])
-    firewall_lines = _executable_lines(bundle.text_payloads["firewall/iptables-snippet.txt"])
+    firewall_apply_text = bundle.text_payloads["firewall/nftables.apply.nft"]
+    firewall_remove_text = bundle.text_payloads["firewall/nftables.remove.nft"]
+    firewall_manifest = bundle.json_payloads["firewall/activation-manifest.json"]
+    firewall_state = bundle.json_payloads["firewall/nftables-state.json"]
     report["details"]["rule_command_count"] = len(rule_lines)
     report["details"]["route_command_count"] = len(route_lines)
     report["details"]["tunnel_command_count"] = len(tunnel_lines)
-    report["details"]["firewall_command_count"] = len(firewall_lines)
+    report["details"]["firewall_activation_backend"] = firewall_manifest.get("backend")
+    report["details"]["firewall_command_count"] = int(firewall_manifest.get("apply_command_count") or 0)
+    report["details"]["firewall_rollback_command_count"] = int(firewall_manifest.get("rollback_command_count") or 0)
+    report["details"]["firewall_rule_count"] = int(firewall_manifest.get("rule_count") or 0)
     report["details"]["transport_interface"] = (
         bundle.customer_module.get("transport") or {}
     ).get("interface")
     report["details"]["fwmark"] = (bundle.customer_module.get("transport") or {}).get("mark")
+    nft_payload = "\n".join([firewall_apply_text, firewall_remove_text, json.dumps(firewall_manifest), json.dumps(firewall_state)])
+    if "iptables" in nft_payload:
+        report["errors"].append("muxer firewall nftables artifacts must not contain iptables commands")
+    if firewall_manifest.get("backend") != "nftables" or firewall_state.get("backend") != "nftables":
+        report["errors"].append("muxer firewall activation backend must be nftables")
 
     if not rule_lines:
         report["warnings"].append("routing/ip-rule.command.txt contains no executable commands")
@@ -178,8 +192,8 @@ def validate_muxer_bundle(bundle_dir: Path) -> dict[str, Any]:
         report["warnings"].append("routing/ip-route-default.command.txt contains no executable commands")
     if not tunnel_lines:
         report["warnings"].append("tunnel/ip-link.command.txt contains no executable commands")
-    if not firewall_lines:
-        report["warnings"].append("firewall/iptables-snippet.txt contains no executable commands")
+    if "table ip " not in firewall_apply_text:
+        report["warnings"].append("firewall/nftables.apply.nft contains no nftables table")
 
     report["valid"] = not report["errors"]
     return report
@@ -197,7 +211,10 @@ def build_install_layout(muxer_root: Path, customer_name: str) -> dict[str, Path
         "customer_module": module_root / "customer-module.json",
         "customer_summary": customer_root / "customer" / "customer-summary.json",
         "firewall_intent": customer_root / "firewall" / "firewall-intent.json",
-        "firewall_snippet": customer_root / "firewall" / "iptables-snippet.txt",
+        "firewall_apply_nft": customer_root / "firewall" / "nftables.apply.nft",
+        "firewall_remove_nft": customer_root / "firewall" / "nftables.remove.nft",
+        "firewall_state": customer_root / "firewall" / "nftables-state.json",
+        "firewall_activation_manifest": customer_root / "firewall" / "activation-manifest.json",
         "rule_commands": customer_root / "routing" / "ip-rule.command.txt",
         "route_commands": customer_root / "routing" / "ip-route-default.command.txt",
         "routing_intent": customer_root / "routing" / "rpdb-routing.json",
@@ -213,18 +230,6 @@ def build_install_layout(muxer_root: Path, customer_name: str) -> dict[str, Path
         "master_remove_script": customer_root / "remove-muxer-customer.sh",
         "state_json": customer_root / "install-state.json",
     }
-
-
-def _derive_iptables_remove_lines(text: str) -> list[str]:
-    removals: list[str] = []
-    for line in _executable_lines(text):
-        if " -A " in line:
-            removals.append(line.replace(" -A ", " -D ", 1) + " || true")
-        elif " -I " in line:
-            removals.append(line.replace(" -I ", " -D ", 1) + " || true")
-        else:
-            removals.append(f"# manual firewall cleanup required: {line}")
-    return removals
 
 
 def _derive_routing_remove_lines(rule_text: str, route_text: str) -> list[str]:
@@ -315,7 +320,10 @@ def install_muxer_bundle(bundle_dir: Path, muxer_root: Path) -> dict[str, Any]:
     _write_json(layout["customer_module"], bundle.customer_module)
     _write_json(layout["customer_summary"], bundle.json_payloads["customer/customer-summary.json"])
     _write_json(layout["firewall_intent"], bundle.json_payloads["firewall/firewall-intent.json"])
-    _write_text(layout["firewall_snippet"], bundle.text_payloads["firewall/iptables-snippet.txt"])
+    _write_text(layout["firewall_apply_nft"], bundle.text_payloads["firewall/nftables.apply.nft"])
+    _write_text(layout["firewall_remove_nft"], bundle.text_payloads["firewall/nftables.remove.nft"])
+    _write_json(layout["firewall_state"], bundle.json_payloads["firewall/nftables-state.json"])
+    _write_json(layout["firewall_activation_manifest"], bundle.json_payloads["firewall/activation-manifest.json"])
     _write_text(layout["rule_commands"], bundle.text_payloads["routing/ip-rule.command.txt"])
     _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route-default.command.txt"])
     _write_json(layout["routing_intent"], bundle.json_payloads["routing/rpdb-routing.json"])
@@ -324,11 +332,16 @@ def install_muxer_bundle(bundle_dir: Path, muxer_root: Path) -> dict[str, Any]:
 
     _write_text(
         layout["firewall_apply_script"],
-        _render_shell_script(_executable_lines(bundle.text_payloads["firewall/iptables-snippet.txt"]) or ["true"]),
+        _render_shell_script(
+            [
+                f'nft -c -f "{layout["firewall_apply_nft"]}"',
+                f'nft -f "{layout["firewall_apply_nft"]}"',
+            ]
+        ),
     )
     _write_text(
         layout["firewall_remove_script"],
-        _render_shell_script(_derive_iptables_remove_lines(bundle.text_payloads["firewall/iptables-snippet.txt"]) or ["true"]),
+        _render_shell_script([f'nft -f "{layout["firewall_remove_nft"]}" || true']),
     )
     _write_text(
         layout["routing_apply_script"],
@@ -407,7 +420,10 @@ def validate_installed_muxer(bundle_dir: Path, muxer_root: Path) -> dict[str, An
         "customer_module",
         "customer_summary",
         "firewall_intent",
-        "firewall_snippet",
+        "firewall_apply_nft",
+        "firewall_remove_nft",
+        "firewall_state",
+        "firewall_activation_manifest",
         "rule_commands",
         "route_commands",
         "routing_intent",
@@ -444,7 +460,8 @@ def validate_installed_muxer(bundle_dir: Path, muxer_root: Path) -> dict[str, An
                 report["errors"].append(f"installed JSON does not match bundle: {layout[layout_key]}")
 
     text_checks = {
-        "firewall_snippet": "firewall/iptables-snippet.txt",
+        "firewall_apply_nft": "firewall/nftables.apply.nft",
+        "firewall_remove_nft": "firewall/nftables.remove.nft",
         "rule_commands": "routing/ip-rule.command.txt",
         "route_commands": "routing/ip-route-default.command.txt",
         "tunnel_commands": "tunnel/ip-link.command.txt",

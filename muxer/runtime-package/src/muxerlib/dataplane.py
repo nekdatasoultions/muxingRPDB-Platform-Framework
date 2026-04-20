@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derived muxer and head-end dataplane artifacts."""
+"""Derived RPDB dataplane artifacts for nftables-only runtime planning."""
 
 from __future__ import annotations
 
@@ -9,42 +9,23 @@ from typing import Any, Dict, List
 from .customers import (
     calc_overlay,
     customer_headend_egress_sources,
-    customer_natd_flags,
     customer_protocol_flags,
     customer_tunnel_settings,
 )
 from .nftables import (
-    normalize_passthrough_classification_backend,
     normalize_passthrough_bridge_backend,
+    normalize_passthrough_classification_backend,
     normalize_passthrough_translation_backend,
 )
 from .variables import strict_non_nat_customer
-
-
-def _iptables_cli(table: str | None, parts: List[str]) -> str:
-    cmd = ["iptables"]
-    if table:
-        cmd.extend(["-t", table])
-    cmd.extend(parts)
-    return " ".join(cmd)
-
-
-def _append_rule(rules: List[Dict[str, str]], purpose: str, table: str | None, parts: List[str]) -> None:
-    rules.append(
-        {
-            "purpose": purpose,
-            "cli": _iptables_cli(table, parts),
-        }
-    )
 
 
 def _normalize_networks(values: List[Any]) -> List[str]:
     normalized: List[str] = []
     for value in values or []:
         raw = str(value).strip()
-        if not raw:
-            continue
-        normalized.append(str(ipaddress.ip_network(raw, strict=False)))
+        if raw:
+            normalized.append(str(ipaddress.ip_network(raw, strict=False)))
     return normalized
 
 
@@ -58,18 +39,17 @@ def _normalize_host_ip(value: Any) -> str:
 
 
 def _first_host_ip(cidr: str) -> str:
-    net = ipaddress.ip_network(str(cidr), strict=False)
-    if net.num_addresses == 1:
-        return f"{net.network_address}/{net.max_prefixlen}"
-    return f"{next(net.hosts())}/{net.max_prefixlen}"
+    network = ipaddress.ip_network(str(cidr), strict=False)
+    if network.num_addresses == 1:
+        return f"{network.network_address}/{network.max_prefixlen}"
+    return f"{next(network.hosts())}/{network.max_prefixlen}"
 
 
 def _merge_overlay(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(base or {})
     for key, value in (override or {}).items():
-        if value is None:
-            continue
-        merged[key] = value
+        if value is not None:
+            merged[key] = value
     return merged
 
 
@@ -77,13 +57,9 @@ def _compat_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
     ipsec_cfg = module.get("ipsec", {}) or {}
     _udp500, udp4500, _esp50, _force = customer_protocol_flags(module)
     translated_subnets = _normalize_networks(ipsec_cfg.get("local_subnets") or [])
-    if not translated_subnets:
-        return {}
-
     mark_out = str(ipsec_cfg.get("mark_out") or "").strip()
-    if not udp4500 or not mark_out:
+    if not translated_subnets or not udp4500 or not mark_out:
         return {}
-
     return {
         "enabled": True,
         "mode": "snat_pool",
@@ -98,15 +74,11 @@ def _compat_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_post_ipsec_rule(
-    purpose: str,
-    add_cli: str,
-    del_cli: str,
-) -> Dict[str, str]:
+def _post_ipsec_rule(purpose: str, details: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "purpose": purpose,
-        "add_cli": add_cli,
-        "del_cli": del_cli,
+        "activation_backend": "nftables",
+        "details": details,
     }
 
 
@@ -148,16 +120,17 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
             "activation_backend": "nftables",
             "apply_commands": [],
             "rollback_commands": [],
-            "legacy_apply_commands": [],
-            "legacy_rollback_commands": [],
+            "blocked_apply_commands": [],
+            "blocked_rollback_commands": [],
         }
 
     mode = str(merged_cfg.get("mode") or "snat_pool").strip().lower()
     translated_subnets = _normalize_networks(merged_cfg.get("translated_subnets") or [])
-    if explicit_cfg:
-        raw_translated_source_ip = explicit_cfg.get("translated_source_ip")
-    else:
-        raw_translated_source_ip = merged_cfg.get("translated_source_ip")
+    raw_translated_source_ip = (
+        explicit_cfg.get("translated_source_ip")
+        if explicit_cfg
+        else merged_cfg.get("translated_source_ip")
+    )
     if raw_translated_source_ip is None:
         translated_source_default = "" if mode == "netmap" else ((translated_subnets and _first_host_ip(translated_subnets[0])) or "")
     else:
@@ -174,160 +147,131 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
     tcp_mss_clamp = merged_cfg.get("tcp_mss_clamp")
     tcp_mss_value = int(tcp_mss_clamp) if tcp_mss_clamp not in {None, ""} else None
 
-    local_identity_rules: List[Dict[str, str]] = []
-    output_mark_rules: List[Dict[str, str]] = []
-    prerouting_mark_rules: List[Dict[str, str]] = []
-    tcp_mss_rules: List[Dict[str, str]] = []
-    forward_tcp_mss_rules: List[Dict[str, str]] = []
-    core_reply_mark_rules: List[Dict[str, str]] = []
-    core_reply_tcp_mss_rules: List[Dict[str, str]] = []
-    netmap_prerouting_rules: List[Dict[str, str]] = []
-    netmap_postrouting_rules: List[Dict[str, str]] = []
-    route_rules: List[Dict[str, str]] = []
-    legacy_apply_commands: List[str] = []
-    legacy_rollback_commands: List[str] = []
+    local_identity_rules: List[Dict[str, Any]] = []
+    output_mark_rules: List[Dict[str, Any]] = []
+    prerouting_mark_rules: List[Dict[str, Any]] = []
+    tcp_mss_rules: List[Dict[str, Any]] = []
+    forward_tcp_mss_rules: List[Dict[str, Any]] = []
+    core_reply_mark_rules: List[Dict[str, Any]] = []
+    core_reply_tcp_mss_rules: List[Dict[str, Any]] = []
+    netmap_prerouting_rules: List[Dict[str, Any]] = []
+    netmap_postrouting_rules: List[Dict[str, Any]] = []
+    route_rules: List[Dict[str, Any]] = []
 
     if translated_source_ip:
         local_identity_rules.append(
-            _build_post_ipsec_rule(
-                "Assign translated source identity on the dedicated NAT pool interface or loopback fallback",
-                f'if ip link show "{interface}" >/dev/null 2>&1; then ip addr replace {translated_source_ip} dev "{interface}"; else ip addr replace {translated_source_ip} dev lo; fi',
-                f'ip addr del {translated_source_ip} dev "{interface}" 2>/dev/null || true; ip addr del {translated_source_ip} dev lo 2>/dev/null || true',
+            _post_ipsec_rule(
+                "Assign translated source identity before nftables post-IPsec NAT activation",
+                {
+                    "interface": interface,
+                    "translated_source_ip": translated_source_ip,
+                },
             )
         )
-
-    if mode != "netmap" and output_mark and translated_source_ip:
-        for remote_subnet in remote_subnets:
-            output_mark_rules.append(
-                _build_post_ipsec_rule(
-                    "Mark translated source traffic so replies leave via the correct customer IPsec context",
-                    f"iptables -t mangle -C OUTPUT -s {translated_source_ip} -d {remote_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || iptables -t mangle -I OUTPUT 1 -s {translated_source_ip} -d {remote_subnet} -j MARK --set-xmark {output_mark}",
-                    f"iptables -t mangle -D OUTPUT -s {translated_source_ip} -d {remote_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || true",
-                )
-            )
     if mode != "netmap" and output_mark:
         for translated_subnet in translated_subnets:
             for remote_subnet in remote_subnets:
-                prerouting_mark_rules.append(
-                    _build_post_ipsec_rule(
-                        "Mark forwarded translated traffic so replies leave via the correct customer IPsec context",
-                        f"iptables -t mangle -C PREROUTING -s {translated_subnet} -d {remote_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || iptables -t mangle -I PREROUTING 1 -s {translated_subnet} -d {remote_subnet} -j MARK --set-xmark {output_mark}",
-                        f"iptables -t mangle -D PREROUTING -s {translated_subnet} -d {remote_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || true",
+                output_mark_rules.append(
+                    _post_ipsec_rule(
+                        "Mark translated egress traffic with the customer IPsec mark",
+                        {
+                            "translated_subnet": translated_subnet,
+                            "remote_subnet": remote_subnet,
+                            "output_mark": output_mark,
+                        },
                     )
                 )
-
+                prerouting_mark_rules.append(
+                    _post_ipsec_rule(
+                        "Mark forwarded translated traffic with the customer IPsec mark",
+                        {
+                            "translated_subnet": translated_subnet,
+                            "remote_subnet": remote_subnet,
+                            "output_mark": output_mark,
+                        },
+                    )
+                )
     if mode != "netmap" and tcp_mss_value is not None:
         for translated_subnet in translated_subnets:
             for remote_subnet in remote_subnets:
                 tcp_mss_rules.append(
-                    _build_post_ipsec_rule(
-                        "Clamp TCP MSS for translated traffic leaving the post-IPsec NAT block",
-                        f"iptables -t mangle -C OUTPUT -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || iptables -t mangle -I OUTPUT 1 -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value}",
-                        f"iptables -t mangle -D OUTPUT -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || true",
+                    _post_ipsec_rule(
+                        "Clamp translated egress TCP MSS through nftables",
+                        {
+                            "translated_subnet": translated_subnet,
+                            "remote_subnet": remote_subnet,
+                            "tcp_mss": tcp_mss_value,
+                        },
                     )
                 )
                 forward_tcp_mss_rules.append(
-                    _build_post_ipsec_rule(
-                        "Clamp TCP MSS for translated traffic forwarded toward the customer IPsec peer",
-                        f"iptables -t mangle -C FORWARD -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value}",
-                        f"iptables -t mangle -D FORWARD -p tcp -s {translated_subnet} -d {remote_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || true",
+                    _post_ipsec_rule(
+                        "Clamp translated forward TCP MSS through nftables",
+                        {
+                            "translated_subnet": translated_subnet,
+                            "remote_subnet": remote_subnet,
+                            "tcp_mss": tcp_mss_value,
+                        },
                     )
                 )
-
     if mode == "netmap" and real_subnets and translated_subnets and core_subnets:
-        if output_mark:
-            for core_subnet in core_subnets:
-                for translated_subnet in translated_subnets:
-                    core_reply_mark_rules.append(
-                        _build_post_ipsec_rule(
-                            "Mark forwarded core reply traffic destined to the translated customer block so it returns through the correct IPsec context",
-                            f"iptables -t mangle -C PREROUTING -s {core_subnet} -d {translated_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || iptables -t mangle -I PREROUTING 1 -s {core_subnet} -d {translated_subnet} -j MARK --set-xmark {output_mark}",
-                            f"iptables -t mangle -D PREROUTING -s {core_subnet} -d {translated_subnet} -j MARK --set-xmark {output_mark} 2>/dev/null || true",
-                        )
-                    )
-        if tcp_mss_value is not None:
-            for core_subnet in core_subnets:
-                for real_subnet in real_subnets:
-                    core_reply_tcp_mss_rules.append(
-                        _build_post_ipsec_rule(
-                            "Clamp TCP MSS for forwarded core reply traffic heading back toward the customer real subnet",
-                            f"iptables -t mangle -C FORWARD -p tcp -s {core_subnet} -d {real_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp -s {core_subnet} -d {real_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value}",
-                            f"iptables -t mangle -D FORWARD -p tcp -s {core_subnet} -d {real_subnet} --tcp-flags SYN,RST SYN -j TCPMSS --set-mss {tcp_mss_value} 2>/dev/null || true",
-                        )
-                    )
         for real_subnet, translated_subnet in zip(real_subnets, translated_subnets):
             for core_subnet in core_subnets:
+                if output_mark:
+                    core_reply_mark_rules.append(
+                        _post_ipsec_rule(
+                            "Mark core replies for the customer IPsec context through nftables",
+                            {
+                                "core_subnet": core_subnet,
+                                "translated_subnet": translated_subnet,
+                                "output_mark": output_mark,
+                            },
+                        )
+                    )
+                if tcp_mss_value is not None:
+                    core_reply_tcp_mss_rules.append(
+                        _post_ipsec_rule(
+                            "Clamp core reply TCP MSS through nftables",
+                            {
+                                "core_subnet": core_subnet,
+                                "real_subnet": real_subnet,
+                                "tcp_mss": tcp_mss_value,
+                            },
+                        )
+                    )
                 netmap_prerouting_rules.append(
-                    _build_post_ipsec_rule(
-                        "Map translated customer space back to the customer's real subnet before delivery",
-                        f"iptables -t nat -C PREROUTING -s {core_subnet} -d {translated_subnet} -j NETMAP --to {real_subnet} 2>/dev/null || iptables -t nat -A PREROUTING -s {core_subnet} -d {translated_subnet} -j NETMAP --to {real_subnet}",
-                        f"iptables -t nat -D PREROUTING -s {core_subnet} -d {translated_subnet} -j NETMAP --to {real_subnet} 2>/dev/null || true",
+                    _post_ipsec_rule(
+                        "Map translated customer space back to real customer space through nftables",
+                        {
+                            "core_subnet": core_subnet,
+                            "translated_subnet": translated_subnet,
+                            "real_subnet": real_subnet,
+                        },
                     )
                 )
                 netmap_postrouting_rules.append(
-                    _build_post_ipsec_rule(
-                        "Translate the customer's real subnet into its unique internal block for the core",
-                        f"iptables -t nat -C POSTROUTING -s {real_subnet} -d {core_subnet} -j NETMAP --to {translated_subnet} 2>/dev/null || iptables -t nat -A POSTROUTING -s {real_subnet} -d {core_subnet} -j NETMAP --to {translated_subnet}",
-                        f"iptables -t nat -D POSTROUTING -s {real_subnet} -d {core_subnet} -j NETMAP --to {translated_subnet} 2>/dev/null || true",
+                    _post_ipsec_rule(
+                        "Map real customer space into translated customer space through nftables",
+                        {
+                            "real_subnet": real_subnet,
+                            "core_subnet": core_subnet,
+                            "translated_subnet": translated_subnet,
+                        },
                     )
                 )
 
     if route_via or route_dev:
         for translated_subnet in translated_subnets:
-            if route_via:
-                add_cli = f"ip route replace {translated_subnet} via {route_via}" + (f" dev {route_dev}" if route_dev else "")
-                del_cli = f"ip route del {translated_subnet} via {route_via}" + (f" dev {route_dev}" if route_dev else "") + " 2>/dev/null || true"
-            else:
-                add_cli = f"ip route replace {translated_subnet} dev {route_dev}"
-                del_cli = f"ip route del {translated_subnet} dev {route_dev} 2>/dev/null || true"
             route_rules.append(
-                _build_post_ipsec_rule(
-                    "Install a southbound route for the translated post-IPsec block",
-                    add_cli,
-                    del_cli,
+                _post_ipsec_rule(
+                    "Install a route for the translated post-IPsec block",
+                    {
+                        "translated_subnet": translated_subnet,
+                        "route_via": route_via,
+                        "route_dev": route_dev,
+                    },
                 )
             )
-
-    if mode == "netmap" and (netmap_prerouting_rules or netmap_postrouting_rules):
-        legacy_apply_commands.append("modprobe xt_NETMAP >/dev/null 2>&1 || true")
-
-    for rule_group in (
-        local_identity_rules,
-        output_mark_rules,
-        prerouting_mark_rules,
-        tcp_mss_rules,
-        forward_tcp_mss_rules,
-        core_reply_mark_rules,
-        core_reply_tcp_mss_rules,
-        netmap_prerouting_rules,
-        netmap_postrouting_rules,
-        route_rules,
-    ):
-        for rule in rule_group:
-            legacy_apply_commands.append(rule["add_cli"])
-
-    for rule_group in (
-        route_rules,
-        netmap_postrouting_rules,
-        netmap_prerouting_rules,
-        forward_tcp_mss_rules,
-        tcp_mss_rules,
-        prerouting_mark_rules,
-        output_mark_rules,
-        local_identity_rules,
-        core_reply_tcp_mss_rules,
-        core_reply_mark_rules,
-    ):
-        for rule in rule_group:
-            legacy_rollback_commands.append(rule["del_cli"])
-
-    apply_commands = [
-        "nft -c -f post-ipsec-nat/nftables.apply.nft",
-        "nft -f post-ipsec-nat/nftables.apply.nft",
-    ]
-    rollback_commands = [
-        "nft -f post-ipsec-nat/nftables.remove.nft",
-    ]
 
     return {
         "enabled": True,
@@ -358,10 +302,15 @@ def derive_post_ipsec_nat(module: Dict[str, Any]) -> Dict[str, Any]:
             "netmap_postrouting_rules": netmap_postrouting_rules,
             "route_rules": route_rules,
         },
-        "apply_commands": apply_commands,
-        "rollback_commands": rollback_commands,
-        "legacy_apply_commands": legacy_apply_commands,
-        "legacy_rollback_commands": legacy_rollback_commands,
+        "apply_commands": [
+            "nft -c -f post-ipsec-nat/nftables.apply.nft",
+            "nft -f post-ipsec-nat/nftables.apply.nft",
+        ],
+        "rollback_commands": [
+            "nft -f post-ipsec-nat/nftables.remove.nft",
+        ],
+        "blocked_apply_commands": [],
+        "blocked_rollback_commands": [],
     }
 
 
@@ -428,286 +377,27 @@ def derive_passthrough_dataplane(
     muxer_doc: Dict[str, Any],
 ) -> Dict[str, Any]:
     interfaces = muxer_doc.get("interfaces", {}) or {}
-    iptables_cfg = muxer_doc.get("iptables", {}) or {}
+    firewall_policy = muxer_doc.get("firewall_policy", {}) or {}
     nft_cfg = (muxer_doc.get("nftables") or {}).get("pass_through", {}) or {}
-    chains = iptables_cfg.get("chains", {}) or {}
     public_ip = str(muxer_doc["public_ip"]).strip()
     public_priv_ip = str(interfaces.get("public_private_ip") or public_ip).strip()
-    pub_if = str(interfaces.get("public_if", "")).strip()
-    mangle_chain = str(chains.get("mangle_chain", "MUXER_MANGLE"))
-    mangle_post_chain = str(chains.get("mangle_postrouting_chain", "MUXER_MANGLE_POST"))
-    filter_chain = str(chains.get("filter_chain", "MUXER_FILTER"))
-    nat_pre_chain = str(chains.get("nat_prerouting_chain", "MUXER_NAT_PRE"))
-    nat_post_chain = str(chains.get("nat_postrouting_chain", "MUXER_NAT_POST"))
-    nat_rewrite = bool(iptables_cfg.get("use_nat_rewrite", True))
-    default_drop = bool(iptables_cfg.get("default_drop_ipsec_to_public_ip", True))
+    nat_rewrite = bool(firewall_policy.get("use_nat_rewrite", True))
     classification_backend = normalize_passthrough_classification_backend(
-        nft_cfg.get("classification_backend", "legacy_iptables")
+        nft_cfg.get("classification_backend", "nftables")
     )
     translation_backend = normalize_passthrough_translation_backend(
-        nft_cfg.get("translation_backend", "legacy_iptables")
+        nft_cfg.get("translation_backend", "nftables")
     )
     bridge_backend = normalize_passthrough_bridge_backend(
-        nft_cfg.get("bridge_backend", "legacy_iptables")
+        nft_cfg.get("bridge_backend", "nftables")
     )
-    use_nft_classification = classification_backend == "nftables"
-    use_nft_translation = translation_backend == "nftables"
-    use_nft_bridge = bridge_backend == "nftables"
-    peer_cidr = str(module["peer_ip"])
+    if {classification_backend, translation_backend, bridge_backend} != {"nftables"}:
+        raise ValueError("RPDB dataplane derivation requires nftables-only pass-through backends")
 
     transport = derive_customer_transport(module, muxer_doc)
     udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
-    natd_rewrite_enabled, natd_inner_ip = customer_natd_flags(module)
     nat_preroute_targets = [public_priv_ip, public_ip] if public_priv_ip != public_ip else [public_ip]
-    # Forced 4500->500 bridge mode still preserves the strict customer's
-    # backend delivery identity on UDP/500 and ESP; only true NAT-T customers
-    # are delivered to the backend underlay IP by default.
     nat_preroute_dst = transport["backend_underlay_ip"] if udp4500 else public_ip
-
-    filter_accept: List[Dict[str, str]] = []
-    mangle_mark: List[Dict[str, str]] = []
-    nat_prerouting: List[Dict[str, str]] = []
-    nat_postrouting: List[Dict[str, str]] = []
-    mangle_postrouting: List[Dict[str, str]] = []
-    bridge_prerouting: List[Dict[str, str]] = []
-    bridge_postrouting: List[Dict[str, str]] = []
-    default_drop_rules: List[Dict[str, str]] = []
-
-    if udp500:
-        if not use_nft_classification:
-            _append_rule(
-                filter_accept,
-                "Allow inbound IKE on UDP/500 to the muxer public identity",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "ACCEPT"],
-            )
-            _append_rule(
-                mangle_mark,
-                "Mark inbound UDP/500 for the customer-specific route table",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-            )
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                _append_rule(
-                    mangle_mark,
-                    "Also mark UDP/500 addressed to the ENI private IP used behind the EIP edge",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-                )
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    _append_rule(
-                        nat_prerouting,
-                        "DNAT inbound UDP/500 to the derived backend delivery destination",
-                        "nat",
-                        ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst],
-                    )
-                if force_4500_to_500:
-                    for egress_source in transport["headend_egress_sources"]:
-                        _append_rule(
-                            nat_postrouting,
-                            "Present head-end UDP/500 replies as UDP/4500 toward the NAT-T peer",
-                            "nat",
-                            ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
-                        )
-                else:
-                    for egress_source in transport["headend_egress_sources"]:
-                        _append_rule(
-                            nat_postrouting,
-                            "SNAT head-end UDP/500 replies back to the muxer public-side identity",
-                            "nat",
-                            ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip],
-                        )
-
-    if force_4500_to_500:
-        if not use_nft_classification:
-            _append_rule(
-                mangle_mark,
-                "Mark inbound UDP/4500 for a forced 4500->500 bridge customer",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-            )
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                _append_rule(
-                    mangle_mark,
-                    "Also mark inbound UDP/4500 addressed to the ENI private IP",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-                )
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    _append_rule(
-                        nat_prerouting,
-                        "DNAT inbound UDP/4500 to backend UDP/500 for forced bridge mode",
-                        "nat",
-                        ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"],
-                    )
-                for egress_source in transport["headend_egress_sources"]:
-                    _append_rule(
-                        nat_postrouting,
-                        "SNAT head-end UDP/4500 replies back to muxer public identity in forced bridge mode",
-                        "nat",
-                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"],
-                    )
-        if not use_nft_bridge:
-            _append_rule(
-                bridge_prerouting,
-                "Userspace bridge queue for inbound UDP/4500 packets targeting the muxer public identity",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", "<queue_in>"],
-            )
-            _append_rule(
-                bridge_prerouting,
-                "Re-assert the customer fwmark after inbound UDP/4500 bridge processing on the muxer public identity",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-            )
-            if public_priv_ip != public_ip:
-                _append_rule(
-                    bridge_prerouting,
-                    "Userspace bridge queue for inbound UDP/4500 packets targeting the muxer ENI private identity",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", "<queue_in>"],
-                )
-                _append_rule(
-                    bridge_prerouting,
-                    "Re-assert the customer fwmark after inbound UDP/4500 bridge processing on the muxer ENI private identity",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-                )
-            _append_rule(
-                bridge_postrouting,
-                "Userspace bridge queue for translating outbound backend UDP/500 replies into customer NAT-T format",
-                "mangle",
-                ["-A", mangle_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", "<queue_out>"],
-            )
-            if public_ip != transport["backend_underlay_ip"]:
-                _append_rule(
-                    bridge_postrouting,
-                    "Userspace bridge queue for translating outbound muxer-public UDP/500 replies into customer NAT-T format",
-                    "mangle",
-                    ["-A", mangle_post_chain, "-o", pub_if, "-s", public_ip, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", "<queue_out>"],
-                )
-
-    if udp4500:
-        if not use_nft_classification:
-            _append_rule(
-                filter_accept,
-                "Allow inbound NAT-T on UDP/4500",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"],
-            )
-            _append_rule(
-                mangle_mark,
-                "Mark inbound UDP/4500 for the customer-specific route table",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-            )
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                _append_rule(
-                    mangle_mark,
-                    "Also mark NAT-T traffic addressed to the ENI private IP",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-                )
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    _append_rule(
-                        nat_prerouting,
-                        "DNAT inbound UDP/4500 to the backend head-end",
-                        "nat",
-                        ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst],
-                    )
-                for egress_source in transport["headend_egress_sources"]:
-                    _append_rule(
-                        nat_postrouting,
-                        "SNAT head-end UDP/4500 replies back to the muxer public identity",
-                        "nat",
-                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip],
-                    )
-
-    if esp50:
-        if not use_nft_classification:
-            _append_rule(
-                filter_accept,
-                "Allow inbound ESP for native IPsec peers",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"],
-            )
-            _append_rule(
-                mangle_mark,
-                "Mark inbound ESP for the customer-specific route table",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-            )
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                _append_rule(
-                    mangle_mark,
-                    "Also mark ESP addressed to the ENI private IP",
-                    "mangle",
-                    ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "50", "-j", "MARK", "--set-mark", transport["mark_hex"]],
-                )
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    _append_rule(
-                        nat_prerouting,
-                        "DNAT inbound ESP to the derived backend delivery destination",
-                        "nat",
-                        ["-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst],
-                    )
-                for egress_source in transport["headend_egress_sources"]:
-                    _append_rule(
-                        nat_postrouting,
-                        "SNAT outbound ESP from the head end back to the muxer public identity",
-                        "nat",
-                        ["-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip],
-                    )
-
-    if default_drop and not use_nft_classification:
-        for drop_dst in sorted({public_ip, public_priv_ip}):
-            _append_rule(
-                default_drop_rules,
-                "Drop unclassified UDP/500 to the muxer public edge",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "500", "-j", "DROP"],
-            )
-            _append_rule(
-                default_drop_rules,
-                "Drop unclassified UDP/4500 to the muxer public edge",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "4500", "-j", "DROP"],
-            )
-            _append_rule(
-                default_drop_rules,
-                "Drop unclassified ESP to the muxer public edge",
-                None,
-                ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "50", "-j", "DROP"],
-            )
-
-    if natd_rewrite_enabled and not use_nft_bridge:
-        _append_rule(
-            bridge_prerouting,
-            "Userspace NAT-D rewrite queue for inbound UDP/500 packets destined to the backend underlay identity",
-            "mangle",
-            ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", transport["backend_underlay_ip"], "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_in>"],
-        )
-        if public_priv_ip != public_ip:
-            _append_rule(
-                bridge_prerouting,
-                "Userspace NAT-D rewrite queue for inbound UDP/500 packets destined to the muxer ENI private identity",
-                "mangle",
-                ["-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_in>"],
-            )
-        _append_rule(
-            bridge_postrouting,
-            "Userspace NAT-D rewrite queue for outbound backend UDP/500 replies",
-            "mangle",
-            ["-A", mangle_post_chain, "-o", pub_if, "-s", transport["backend_underlay_ip"], "-d", peer_cidr, "-p", "udp", "--sport", "500", "--dport", "500", "-j", "NFQUEUE", "--queue-num", "<natd_queue_out>"],
-        )
 
     return {
         "customer_class": "strict_non_nat" if strict_non_nat_customer(module) else "nat_t_or_custom",
@@ -716,8 +406,8 @@ def derive_passthrough_dataplane(
             "udp4500": udp4500,
             "esp50": esp50,
             "force_rewrite_4500_to_500": force_4500_to_500,
-            "natd_rewrite_enabled": natd_rewrite_enabled,
-            "natd_inner_ip": natd_inner_ip,
+            "natd_rewrite_enabled": bool((module.get("natd_rewrite") or {}).get("enabled")),
+            "natd_inner_ip": str((module.get("natd_rewrite") or {}).get("initiator_inner_ip") or ""),
         },
         "transport": transport,
         "routing": {
@@ -743,14 +433,14 @@ def derive_passthrough_dataplane(
             "eni_private_identity": public_priv_ip,
             "inbound_match_destinations": nat_preroute_targets,
             "backend_delivery_destination": nat_preroute_dst,
-            "filter_accept_rules": filter_accept,
-            "mangle_mark_rules": mangle_mark,
-            "nat_prerouting_rules": nat_prerouting,
-            "nat_postrouting_rules": nat_postrouting,
-            "mangle_postrouting_rules": mangle_postrouting,
-            "bridge_prerouting_rules": bridge_prerouting,
-            "bridge_postrouting_rules": bridge_postrouting,
-            "default_drop_rules": default_drop_rules,
+            "filter_accept_rules": [],
+            "mangle_mark_rules": [],
+            "nat_prerouting_rules": [],
+            "nat_postrouting_rules": [],
+            "mangle_postrouting_rules": [],
+            "bridge_prerouting_rules": [],
+            "bridge_postrouting_rules": [],
+            "default_drop_rules": [],
             "bridge_backend": bridge_backend,
         },
     }

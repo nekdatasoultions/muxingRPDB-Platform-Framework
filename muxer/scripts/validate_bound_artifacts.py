@@ -20,6 +20,10 @@ PROTOCOL_FIELD_MAP = {
     "udp4500": ("udp4500",),
     "esp50": ("esp50",),
 }
+BANNED_GENERATED_RUNTIME_TOKENS = [
+    "iptables",
+    "iptables-restore",
+]
 
 
 def _load_json(path: Path) -> dict:
@@ -62,6 +66,16 @@ def _validate_bound_snat_coverage(report: dict, bound_dir: Path) -> None:
                 )
 
 
+def _validate_no_legacy_firewall_tokens(report: dict, bound_dir: Path) -> None:
+    for path in iter_text_files(bound_dir):
+        text = path.read_text(encoding="utf-8")
+        for token in BANNED_GENERATED_RUNTIME_TOKENS:
+            if token in text:
+                report["errors"].append(
+                    f"{path.relative_to(bound_dir)} contains banned runtime token: {token}"
+                )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a bound artifact tree.")
     parser.add_argument("bound_dir", help="Path to the bound artifact directory")
@@ -87,6 +101,7 @@ def main() -> int:
                     f"{path.relative_to(bound_dir)} still has unresolved placeholders: {', '.join(unresolved)}"
                 )
         _validate_bound_snat_coverage(report, bound_dir)
+        _validate_no_legacy_firewall_tokens(report, bound_dir)
 
     report["valid"] = not report["errors"]
 

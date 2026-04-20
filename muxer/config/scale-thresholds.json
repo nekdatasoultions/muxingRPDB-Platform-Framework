@@ -3,7 +3,7 @@
   "target_counts": [1000, 5000, 10000, 20000],
   "profiles": {
     "strict_non_nat": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands": 0,
       "max_headend_rollback_commands": 0,
@@ -28,7 +28,7 @@
       }
     },
     "nat_t": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands": 0,
       "max_headend_rollback_commands": 0,
@@ -53,7 +53,7 @@
       }
     },
     "nat_t_netmap": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands_multiplier": 2,
       "max_headend_rollback_commands_multiplier": 2,
@@ -78,7 +78,7 @@
       }
     },
     "mixed": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands": 0,
       "max_headend_rollback_commands": 0,
@@ -103,7 +103,7 @@
       }
     },
     "force4500_bridge": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands": 0,
       "max_headend_rollback_commands": 0,
@@ -128,7 +128,7 @@
       }
     },
     "natd_bridge": {
-      "max_legacy_rules": 0,
+      "max_blocked_rules": 0,
       "max_bridge_rules": 0,
       "max_headend_apply_commands": 0,
       "max_headend_rollback_commands": 0,

@@ -1097,8 +1097,7 @@ def main() -> int:
     record_step("runtime_dynamodb_boundary", runtime_ddb_boundary)
 
     # Step 7: verify customer-scoped delta apply/remove in pass-through mode without
-    # full chain flush, while the pass-through classification layer uses the
-    # nftables backend instead of legacy per-customer iptables classification rules.
+    # full chain flush while the pass-through runtime remains nftables-only.
     delta_apply_state_root = BUILD_ROOT / "delta-apply-nft"
     if delta_apply_state_root.exists():
         shutil.rmtree(delta_apply_state_root)
@@ -1146,54 +1145,29 @@ def main() -> int:
 
         counts = {
             "flush_chain": 0,
-            "delete_peer_rules": 0,
             "ensure_policy": 0,
             "remove_policy": 0,
             "remove_tunnel": 0,
-            "must": 0,
-            "legacy_classification_commands": 0,
-            "legacy_translation_commands": 0,
             "nft_apply_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
         modes.ensure_jump = lambda *args, **kwargs: None
         modes.remove_jump = lambda *args, **kwargs: None
-        modes.ensure_iptables_rule = lambda *args, **kwargs: None
         modes.ensure_local_ipv4 = lambda *args, **kwargs: None
         modes.remove_local_ipv4 = lambda *args, **kwargs: None
         modes.ensure_tunnel = lambda *args, **kwargs: None
         modes.flush_chain = lambda *args, **kwargs: counts.__setitem__("flush_chain", counts["flush_chain"] + 1)
-        modes.delete_iptables_rules_by_peer = lambda *args, **kwargs: counts.__setitem__("delete_peer_rules", counts["delete_peer_rules"] + 1) or 1
         modes.ensure_policy = lambda *args, **kwargs: counts.__setitem__("ensure_policy", counts["ensure_policy"] + 1)
         modes.remove_policy = lambda *args, **kwargs: counts.__setitem__("remove_policy", counts["remove_policy"] + 1)
         modes.flush_route_table = lambda *args, **kwargs: None
         modes.remove_tunnel = lambda *args, **kwargs: counts.__setitem__("remove_tunnel", counts["remove_tunnel"] + 1)
-
-        def record_must(args, *unused_args, **unused_kwargs):
-            cmd = list(args)
-            counts["must"] += 1
-            if not cmd or cmd[0] != "iptables":
-                return
-            table = "filter"
-            if "-t" in cmd:
-                table = cmd[cmd.index("-t") + 1]
-            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
-            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
-            if (
-                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
-                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
-            ):
-                counts["legacy_classification_commands"] += 1
-            else:
-                counts["legacy_translation_commands"] += 1
 
         def record_nft_must(args, *unused_args, **unused_kwargs):
             cmd = list(args)
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
-        modes.must = record_must
         nftables.must = record_nft_must
         builtins.print = lambda *args, **kwargs: None
 
@@ -1285,8 +1259,6 @@ def main() -> int:
     )
     if delta_apply_result["flush_chain"] != 0:
         raise SystemExit("customer-scoped delta apply unexpectedly flushed chains")
-    if delta_apply_result["legacy_classification_commands"] != 0:
-        raise SystemExit("customer-scoped delta apply/remove still emitted legacy classification iptables rules")
     if delta_apply_result["nft_apply_calls"] != 2:
         raise SystemExit("customer-scoped delta apply/remove did not program nftables classification twice")
     if not delta_apply_result["artifact_script_exists"] or not delta_apply_result["artifact_model_exists"]:
@@ -1297,13 +1269,10 @@ def main() -> int:
         raise SystemExit("customer-scoped delta apply/remove did not render the full classification inventory on apply")
     if delta_apply_result["remove_customer_count"] != (delta_apply_result["classification_module_count"] - 1):
         raise SystemExit("customer-scoped delta apply/remove did not rebuild the remaining classification inventory on remove")
-    if delta_apply_result["legacy_translation_commands"] != 0:
-        raise SystemExit("customer-scoped delta apply/remove still emitted legacy translation iptables commands")
     record_step("pass_through_delta_apply_remove", delta_apply_result)
 
     # Step 7b: verify the explicit fleet apply path also switches pass-through
-    # classification to nftables while leaving translation/NAT commands on the
-    # legacy compatibility path for now.
+    # classification, translation, and bridge activation to nftables.
     full_apply_state_root = BUILD_ROOT / "full-apply-nft"
     if full_apply_state_root.exists():
         shutil.rmtree(full_apply_state_root)
@@ -1341,9 +1310,6 @@ def main() -> int:
 
         counts = {
             "flush_chain": 0,
-            "must": 0,
-            "legacy_classification_commands": 0,
-            "legacy_translation_commands": 0,
             "nft_apply_calls": 0,
         }
 
@@ -1357,30 +1323,11 @@ def main() -> int:
         modes.flush_route_table = lambda *args, **kwargs: None
         modes.flush_chain = lambda *args, **kwargs: counts.__setitem__("flush_chain", counts["flush_chain"] + 1)
 
-        def record_must(args, *unused_args, **unused_kwargs):
-            cmd = list(args)
-            counts["must"] += 1
-            if not cmd or cmd[0] != "iptables":
-                return
-            table = "filter"
-            if "-t" in cmd:
-                table = cmd[cmd.index("-t") + 1]
-            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
-            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
-            if (
-                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
-                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
-            ):
-                counts["legacy_classification_commands"] += 1
-            else:
-                counts["legacy_translation_commands"] += 1
-
         def record_nft_must(args, *unused_args, **unused_kwargs):
             cmd = list(args)
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
-        modes.must = record_must
         nftables.must = record_nft_must
         builtins.print = lambda *args, **kwargs: None
 
@@ -1445,8 +1392,6 @@ def main() -> int:
             "RPDB_VERIFY_NFT_STATE_ROOT": str(full_apply_state_root),
         },
     )
-    if full_apply_result["legacy_classification_commands"] != 0:
-        raise SystemExit("fleet apply still emitted legacy classification iptables rules under nftables backend")
     if full_apply_result["nft_apply_calls"] != 1:
         raise SystemExit("fleet apply did not program the nftables classification backend exactly once")
     if not full_apply_result["artifact_script_exists"] or not full_apply_result["artifact_model_exists"]:
@@ -1455,8 +1400,6 @@ def main() -> int:
         raise SystemExit("fleet apply did not render the live nftables classification backend")
     if full_apply_result["customer_count"] != full_apply_result["module_count"]:
         raise SystemExit("fleet apply did not render the full module set into nftables classification state")
-    if full_apply_result["legacy_translation_commands"] != 0:
-        raise SystemExit("fleet apply still emitted legacy translation iptables commands")
     record_step("pass_through_nftables_full_apply", full_apply_result)
 
     # Step 8: verify the termination-mode guard remains explicit.
@@ -1572,26 +1515,26 @@ def main() -> int:
     natd_bridge_100 = _scenario("natd_bridge", 100)
     natd_bridge_20000 = _scenario("natd_bridge", 20000)
 
-    if int(strict_20000["muxer_legacy_runtime"]["transport_command_count"]) <= int(strict_100["muxer_legacy_runtime"]["transport_command_count"]):
+    if int(strict_20000["muxer_blocked_rule_model"]["transport_command_count"]) <= int(strict_100["muxer_blocked_rule_model"]["transport_command_count"]):
         raise SystemExit("Scale baseline did not preserve expected strict_non_nat transport command growth")
-    if int(nat_20000["muxer_legacy_runtime"]["transport_command_count"]) <= int(nat_100["muxer_legacy_runtime"]["transport_command_count"]):
+    if int(nat_20000["muxer_blocked_rule_model"]["transport_command_count"]) <= int(nat_100["muxer_blocked_rule_model"]["transport_command_count"]):
         raise SystemExit("Scale baseline did not preserve expected nat_t transport command growth")
-    if int(strict_20000["muxer_legacy_runtime"]["total_rules"]) != 0:
-        raise SystemExit("Scale baseline strict_non_nat profile still emitted legacy muxer rules after the nftables translation migration")
-    if int(nat_20000["muxer_legacy_runtime"]["total_rules"]) != 0:
-        raise SystemExit("Scale baseline nat_t profile still emitted legacy muxer rules after the nftables translation migration")
-    if int(strict_20000["nftables_preview"]["legacy_translation_customer_count"]) != 0:
-        raise SystemExit("Scale baseline strict_non_nat profile still reports legacy translation customers")
-    if int(nat_20000["nftables_preview"]["legacy_translation_customer_count"]) != 0:
-        raise SystemExit("Scale baseline nat_t profile still reports legacy translation customers")
-    if int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]) != 0:
-        raise SystemExit("Scale baseline force4500 bridge profile still emitted legacy bridge rules after the nftables bridge migration")
-    if int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]) != 0:
-        raise SystemExit("Scale baseline natd bridge profile still emitted legacy bridge rules after the nftables bridge migration")
-    if int(force4500_20000["nftables_preview"]["legacy_bridge_customer_count"]) != 0:
-        raise SystemExit("Scale baseline force4500 bridge profile still reports legacy bridge customers")
-    if int(natd_bridge_20000["nftables_preview"]["legacy_bridge_customer_count"]) != 0:
-        raise SystemExit("Scale baseline natd bridge profile still reports legacy bridge customers")
+    if int(strict_20000["muxer_blocked_rule_model"]["total_rules"]) != 0:
+        raise SystemExit("Scale baseline strict_non_nat profile still emitted blocked muxer rules")
+    if int(nat_20000["muxer_blocked_rule_model"]["total_rules"]) != 0:
+        raise SystemExit("Scale baseline nat_t profile still emitted blocked muxer rules")
+    if int(strict_20000["nftables_preview"]["deferred_translation_customer_count"]) != 0:
+        raise SystemExit("Scale baseline strict_non_nat profile still reports deferred translation customers")
+    if int(nat_20000["nftables_preview"]["deferred_translation_customer_count"]) != 0:
+        raise SystemExit("Scale baseline nat_t profile still reports deferred translation customers")
+    if int(force4500_20000["muxer_blocked_rule_model"]["bridge_total_rules"]) != 0:
+        raise SystemExit("Scale baseline force4500 bridge profile still emitted blocked bridge rules")
+    if int(natd_bridge_20000["muxer_blocked_rule_model"]["bridge_total_rules"]) != 0:
+        raise SystemExit("Scale baseline natd bridge profile still emitted blocked bridge rules")
+    if int(force4500_20000["nftables_preview"]["deferred_bridge_customer_count"]) != 0:
+        raise SystemExit("Scale baseline force4500 bridge profile still reports deferred bridge customers")
+    if int(natd_bridge_20000["nftables_preview"]["deferred_bridge_customer_count"]) != 0:
+        raise SystemExit("Scale baseline natd bridge profile still reports deferred bridge customers")
     if int(force4500_20000["nftables_preview"]["bridge_set_entry_count"]) <= int(
         force4500_100["nftables_preview"]["bridge_set_entry_count"]
     ):
@@ -1613,10 +1556,8 @@ def main() -> int:
         raise SystemExit("Scale baseline post-IPsec NAT activation backend must be nftables")
     if int(netmap_headend_runtime["apply_command_count"]) <= 0:
         raise SystemExit("Scale baseline did not produce post-IPsec NAT command growth for the netmap profile")
-    if int(netmap_headend_runtime.get("legacy_apply_command_count") or 0) <= int(
-        netmap_headend_runtime["apply_command_count"]
-    ):
-        raise SystemExit("Scale baseline did not preserve the legacy head-end NAT command comparison")
+    if int(netmap_headend_runtime.get("blocked_apply_command_count") or 0) != 0:
+        raise SystemExit("Scale baseline still reports blocked post-IPsec NAT apply commands")
     mixed_mix = mixed_20000.get("customer_mix") or {}
     if int(mixed_mix.get("strict_non_nat") or 0) != 10000 or int(mixed_mix.get("nat_t") or 0) != 10000:
         raise SystemExit("Scale baseline mixed profile did not produce the expected 50/50 customer mix")
@@ -1630,10 +1571,10 @@ def main() -> int:
             "classification_backend": scale_baseline.get("classification_backend"),
             "translation_backend": scale_baseline.get("translation_backend"),
             "bridge_backend": scale_baseline.get("bridge_backend"),
-            "strict_non_nat_20000_legacy_rules": strict_20000["muxer_legacy_runtime"]["total_rules"],
-            "nat_t_20000_legacy_rules": nat_20000["muxer_legacy_runtime"]["total_rules"],
-            "force4500_bridge_20000_legacy_bridge_rules": force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"],
-            "natd_bridge_20000_legacy_bridge_rules": natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"],
+            "strict_non_nat_20000_blocked_rules": strict_20000["muxer_blocked_rule_model"]["total_rules"],
+            "nat_t_20000_blocked_rules": nat_20000["muxer_blocked_rule_model"]["total_rules"],
+            "force4500_bridge_20000_blocked_bridge_rules": force4500_20000["muxer_blocked_rule_model"]["bridge_total_rules"],
+            "natd_bridge_20000_blocked_bridge_rules": natd_bridge_20000["muxer_blocked_rule_model"]["bridge_total_rules"],
             "force4500_bridge_20000_selector_entries": force4500_20000["nftables_preview"]["bridge_set_entry_count"],
             "natd_bridge_20000_selector_entries": natd_bridge_20000["nftables_preview"]["bridge_set_entry_count"],
             "force4500_bridge_20000_manifest_entries": force4500_20000["nftables_preview"]["bridge_manifest_entry_count"],
@@ -1642,161 +1583,25 @@ def main() -> int:
             "nat_t_20000_nft_map_entries": nat_20000["nftables_preview"]["map_entry_count"],
             "nat_t_netmap_20000_headend_activation_backend": netmap_headend_runtime["activation_backend"],
             "nat_t_netmap_20000_headend_apply_commands": netmap_headend_runtime["apply_command_count"],
-            "nat_t_netmap_20000_legacy_headend_apply_commands": netmap_headend_runtime["legacy_apply_command_count"],
+            "nat_t_netmap_20000_blocked_headend_apply_commands": netmap_headend_runtime["blocked_apply_command_count"],
         },
     )
 
-    # Step 9c: compare the current fully nftables pass-through backend against
-    # both the Phase 2 compatibility baseline (classification on nftables,
-    # translation still legacy) and the fully legacy iptables baseline.
-    phase2_scale_cfg_path = BUILD_ROOT / "runtime-pass-through-phase2-compat.yaml"
-    phase2_scale_cfg = yaml.safe_load(pass_cfg_path.read_text(encoding="utf-8"))
-    phase2_scale_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
-    phase2_scale_cfg["nftables"]["pass_through"]["classification_backend"] = "nftables"
-    phase2_scale_cfg["nftables"]["pass_through"]["translation_backend"] = "legacy_iptables"
-    phase2_scale_cfg["nftables"]["pass_through"]["bridge_backend"] = "legacy_iptables"
-    _write_yaml(phase2_scale_cfg_path, phase2_scale_cfg)
-    phase2_scale_baseline_path = BUILD_ROOT / "scale-baseline-summary-phase2-compat.json"
-    phase2_scale_baseline = _run_json(
-        [
-            "python",
-            str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
-            "--muxer-config",
-            str(phase2_scale_cfg_path),
-            "--out",
-            str(phase2_scale_baseline_path),
-            "--json",
-        ]
-    )
-    if phase2_scale_baseline.get("classification_backend") != "nftables":
-        raise SystemExit("Phase 2 compatibility baseline did not preserve the nftables classification backend")
-    if phase2_scale_baseline.get("translation_backend") != "legacy_iptables":
-        raise SystemExit("Phase 2 compatibility baseline did not preserve the legacy translation backend")
-    if phase2_scale_baseline.get("bridge_backend") != "legacy_iptables":
-        raise SystemExit("Phase 2 compatibility baseline did not preserve the legacy bridge backend")
-
-    phase2_strict_20000 = None
-    phase2_nat_20000 = None
-    phase2_force4500_20000 = None
-    phase2_natd_bridge_20000 = None
-    for item in phase2_scale_baseline.get("scenarios") or []:
-        if item.get("profile") == "strict_non_nat" and int(item.get("customer_count") or 0) == 20000:
-            phase2_strict_20000 = item
-        if item.get("profile") == "nat_t" and int(item.get("customer_count") or 0) == 20000:
-            phase2_nat_20000 = item
-        if item.get("profile") == "force4500_bridge" and int(item.get("customer_count") or 0) == 20000:
-            phase2_force4500_20000 = item
-        if item.get("profile") == "natd_bridge" and int(item.get("customer_count") or 0) == 20000:
-            phase2_natd_bridge_20000 = item
-    if (
-        phase2_strict_20000 is None
-        or phase2_nat_20000 is None
-        or phase2_force4500_20000 is None
-        or phase2_natd_bridge_20000 is None
-    ):
-        raise SystemExit("Phase 2 compatibility baseline did not produce the expected 20k comparison scenarios")
-    if int(strict_20000["muxer_legacy_runtime"]["total_rules"]) >= int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"]):
-        raise SystemExit("Current fully nftables pass-through backend did not reduce strict_non_nat 20k legacy rule growth relative to Phase 2")
-    if int(nat_20000["muxer_legacy_runtime"]["total_rules"]) >= int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"]):
-        raise SystemExit("Current fully nftables pass-through backend did not reduce nat_t 20k legacy rule growth relative to Phase 2")
-    if int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]) >= int(
-        phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-    ):
-        raise SystemExit("Current fully nftables pass-through backend did not reduce force4500 bridge legacy rule growth relative to Phase 2")
-    if int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]) >= int(
-        phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-    ):
-        raise SystemExit("Current fully nftables pass-through backend did not reduce natd bridge legacy rule growth relative to Phase 2")
-
-    full_legacy_scale_cfg_path = BUILD_ROOT / "runtime-pass-through-full-legacy-iptables.yaml"
-    full_legacy_scale_cfg = yaml.safe_load(pass_cfg_path.read_text(encoding="utf-8"))
-    full_legacy_scale_cfg.setdefault("nftables", {}).setdefault("pass_through", {})
-    full_legacy_scale_cfg["nftables"]["pass_through"]["classification_backend"] = "legacy_iptables"
-    full_legacy_scale_cfg["nftables"]["pass_through"]["translation_backend"] = "legacy_iptables"
-    full_legacy_scale_cfg["nftables"]["pass_through"]["bridge_backend"] = "legacy_iptables"
-    _write_yaml(full_legacy_scale_cfg_path, full_legacy_scale_cfg)
-    full_legacy_scale_baseline_path = BUILD_ROOT / "scale-baseline-summary-full-legacy-iptables.json"
-    full_legacy_scale_baseline = _run_json(
-        [
-            "python",
-            str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
-            "--muxer-config",
-            str(full_legacy_scale_cfg_path),
-            "--out",
-            str(full_legacy_scale_baseline_path),
-            "--json",
-        ]
-    )
-    if full_legacy_scale_baseline.get("classification_backend") != "legacy_iptables":
-        raise SystemExit("Full legacy scale baseline did not run with the forced legacy classification backend")
-    if full_legacy_scale_baseline.get("translation_backend") != "legacy_iptables":
-        raise SystemExit("Full legacy scale baseline did not run with the forced legacy translation backend")
-    if full_legacy_scale_baseline.get("bridge_backend") != "legacy_iptables":
-        raise SystemExit("Full legacy scale baseline did not run with the forced legacy bridge backend")
-
-    full_legacy_strict_20000 = None
-    full_legacy_nat_20000 = None
-    full_legacy_force4500_20000 = None
-    full_legacy_natd_bridge_20000 = None
-    for item in full_legacy_scale_baseline.get("scenarios") or []:
-        if item.get("profile") == "strict_non_nat" and int(item.get("customer_count") or 0) == 20000:
-            full_legacy_strict_20000 = item
-        if item.get("profile") == "nat_t" and int(item.get("customer_count") or 0) == 20000:
-            full_legacy_nat_20000 = item
-        if item.get("profile") == "force4500_bridge" and int(item.get("customer_count") or 0) == 20000:
-            full_legacy_force4500_20000 = item
-        if item.get("profile") == "natd_bridge" and int(item.get("customer_count") or 0) == 20000:
-            full_legacy_natd_bridge_20000 = item
-    if (
-        full_legacy_strict_20000 is None
-        or full_legacy_nat_20000 is None
-        or full_legacy_force4500_20000 is None
-        or full_legacy_natd_bridge_20000 is None
-    ):
-        raise SystemExit("Full legacy scale baseline did not produce the expected 20k comparison scenarios")
     record_step(
-        "synthetic_scale_backend_comparison",
+        "synthetic_scale_nftables_only_gate",
         {
             "current_backend": scale_baseline.get("classification_backend"),
             "current_translation_backend": scale_baseline.get("translation_backend"),
             "current_bridge_backend": scale_baseline.get("bridge_backend"),
-            "phase2_backend": phase2_scale_baseline.get("classification_backend"),
-            "phase2_translation_backend": phase2_scale_baseline.get("translation_backend"),
-            "phase2_bridge_backend": phase2_scale_baseline.get("bridge_backend"),
-            "full_legacy_backend": full_legacy_scale_baseline.get("classification_backend"),
-            "full_legacy_translation_backend": full_legacy_scale_baseline.get("translation_backend"),
-            "full_legacy_bridge_backend": full_legacy_scale_baseline.get("bridge_backend"),
             "current_summary_path": str(scale_baseline_path),
-            "phase2_summary_path": str(phase2_scale_baseline_path),
-            "full_legacy_summary_path": str(full_legacy_scale_baseline_path),
-            "strict_non_nat_20000_rule_delta_vs_phase2": int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"])
-            - int(strict_20000["muxer_legacy_runtime"]["total_rules"]),
-            "nat_t_20000_rule_delta_vs_phase2": int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"])
-            - int(nat_20000["muxer_legacy_runtime"]["total_rules"]),
-            "strict_non_nat_20000_rule_delta_vs_full_legacy": int(full_legacy_strict_20000["muxer_legacy_runtime"]["total_rules"])
-            - int(strict_20000["muxer_legacy_runtime"]["total_rules"]),
-            "nat_t_20000_rule_delta_vs_full_legacy": int(full_legacy_nat_20000["muxer_legacy_runtime"]["total_rules"])
-            - int(nat_20000["muxer_legacy_runtime"]["total_rules"]),
-            "force4500_bridge_20000_rule_delta_vs_phase2": int(
-                phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-            )
-            - int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
-            "natd_bridge_20000_rule_delta_vs_phase2": int(
-                phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-            )
-            - int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
-            "force4500_bridge_20000_rule_delta_vs_full_legacy": int(
-                full_legacy_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-            )
-            - int(force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
-            "natd_bridge_20000_rule_delta_vs_full_legacy": int(
-                full_legacy_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
-            )
-            - int(natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]),
+            "strict_non_nat_20000_blocked_rules": strict_20000["muxer_blocked_rule_model"]["total_rules"],
+            "nat_t_20000_blocked_rules": nat_20000["muxer_blocked_rule_model"]["total_rules"],
+            "force4500_bridge_20000_blocked_bridge_rules": force4500_20000["muxer_blocked_rule_model"]["bridge_total_rules"],
+            "natd_bridge_20000_blocked_bridge_rules": natd_bridge_20000["muxer_blocked_rule_model"]["bridge_total_rules"],
         },
     )
 
-    # Step 9d: verify the Phase 2 translation, NFQUEUE bridge, and head-end NAT
+    # Step 9d: verify the RPDB translation, NFQUEUE bridge, and head-end NAT
     # design decisions exist in both human-readable and machine-checkable form,
     # and that they are anchored to the current measured baseline.
     scale_decision_manifest_path = MUXER_DIR / "config" / "scale-decisions.yaml"
@@ -1821,18 +1626,18 @@ def main() -> int:
     headend_manifest = scale_decision_manifest.get("headend_post_ipsec_nat") or {}
     prohibited_headend_paths = set(headend_manifest.get("prohibited_paths") or [])
     required_prohibited_headend_paths = {
-        "iptables_restore",
         "muxer3_runtime_or_deploy_fallback",
-        "legacy_headend_iptables_activation",
+        "non_nft_firewall_activation",
+        "non_nft_restore_activation",
     }
     if not required_prohibited_headend_paths.issubset(prohibited_headend_paths):
         missing_paths = sorted(required_prohibited_headend_paths - prohibited_headend_paths)
         raise SystemExit(f"Scale decision manifest is missing prohibited head-end paths: {missing_paths}")
     fallback_policy = headend_manifest.get("fallback_policy") or {}
-    if fallback_policy.get("iptables_allowed") is not False:
-        raise SystemExit("Scale decision manifest must prohibit iptables as a head-end fallback")
-    if fallback_policy.get("iptables_restore_allowed") is not False:
-        raise SystemExit("Scale decision manifest must prohibit iptables-restore as a head-end fallback")
+    if fallback_policy.get("non_nft_firewall_allowed") is not False:
+        raise SystemExit("Scale decision manifest must prohibit non-nft firewall fallback")
+    if fallback_policy.get("non_nft_restore_allowed") is not False:
+        raise SystemExit("Scale decision manifest must prohibit non-nft restore activation")
     if fallback_policy.get("muxer3_allowed") is not False:
         raise SystemExit("Scale decision manifest must prohibit MUXER3 as a head-end fallback")
     if fallback_policy.get("requires_stop_and_redesign") is not True:
@@ -1841,30 +1646,30 @@ def main() -> int:
     translation_baseline = (scale_decision_manifest.get("translation") or {}).get("baseline_mapping") or {}
     bridge_baseline = (scale_decision_manifest.get("nfqueue_bridge") or {}).get("baseline_mapping") or {}
     headend_baseline = headend_manifest.get("baseline_mapping") or {}
-    if int(translation_baseline.get("strict_non_nat_20000_legacy_rules") or 0) != int(phase2_strict_20000["muxer_legacy_runtime"]["total_rules"]):
-        raise SystemExit("Scale decision manifest strict non-NAT translation baseline is out of sync with the Phase 2 compatibility baseline")
-    if int(translation_baseline.get("nat_t_20000_legacy_rules") or 0) != int(phase2_nat_20000["muxer_legacy_runtime"]["total_rules"]):
-        raise SystemExit("Scale decision manifest NAT-T translation baseline is out of sync with the Phase 2 compatibility baseline")
-    if int(bridge_baseline.get("force4500_bridge_20000_legacy_bridge_rules") or 0) != int(
-        phase2_force4500_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+    if int(translation_baseline.get("strict_non_nat_20000_blocked_rules") or 0) != int(strict_20000["muxer_blocked_rule_model"]["total_rules"]):
+        raise SystemExit("Scale decision manifest strict non-NAT blocked-rule baseline is out of sync")
+    if int(translation_baseline.get("nat_t_20000_blocked_rules") or 0) != int(nat_20000["muxer_blocked_rule_model"]["total_rules"]):
+        raise SystemExit("Scale decision manifest NAT-T blocked-rule baseline is out of sync")
+    if int(bridge_baseline.get("force4500_bridge_20000_blocked_bridge_rules") or 0) != int(
+        force4500_20000["muxer_blocked_rule_model"]["bridge_total_rules"]
     ):
-        raise SystemExit("Scale decision manifest force4500 bridge baseline is out of sync with the Phase 2 compatibility baseline")
-    if int(bridge_baseline.get("natd_bridge_20000_legacy_bridge_rules") or 0) != int(
-        phase2_natd_bridge_20000["muxer_legacy_runtime"]["bridge_total_rules"]
+        raise SystemExit("Scale decision manifest force4500 blocked bridge baseline is out of sync")
+    if int(bridge_baseline.get("natd_bridge_20000_blocked_bridge_rules") or 0) != int(
+        natd_bridge_20000["muxer_blocked_rule_model"]["bridge_total_rules"]
     ):
-        raise SystemExit("Scale decision manifest natd bridge baseline is out of sync with the Phase 2 compatibility baseline")
+        raise SystemExit("Scale decision manifest natd blocked bridge baseline is out of sync")
     if int(headend_baseline.get("nat_t_netmap_20000_headend_apply_commands") or 0) != int(
         netmap_headend_runtime["apply_command_count"]
     ):
         raise SystemExit("Scale decision manifest head-end NAT baseline is out of sync with the measured scale harness")
-    if int(headend_baseline.get("legacy_nat_t_netmap_20000_headend_apply_commands") or 0) != int(
-        netmap_headend_runtime.get("legacy_apply_command_count") or 0
+    if int(headend_baseline.get("nat_t_netmap_20000_blocked_headend_apply_commands") or 0) != int(
+        netmap_headend_runtime.get("blocked_apply_command_count") or 0
     ):
-        raise SystemExit("Scale decision manifest legacy head-end NAT apply baseline is out of sync")
-    if int(headend_baseline.get("legacy_nat_t_netmap_20000_headend_rollback_commands") or 0) != int(
-        netmap_headend_runtime.get("legacy_rollback_command_count") or 0
+        raise SystemExit("Scale decision manifest blocked head-end NAT apply baseline is out of sync")
+    if int(headend_baseline.get("nat_t_netmap_20000_blocked_headend_rollback_commands") or 0) != int(
+        netmap_headend_runtime.get("blocked_rollback_command_count") or 0
     ):
-        raise SystemExit("Scale decision manifest legacy head-end NAT rollback baseline is out of sync")
+        raise SystemExit("Scale decision manifest blocked head-end NAT rollback baseline is out of sync")
 
     for required_heading in (
         "## 1. Muxer Translation Decision",
@@ -1882,8 +1687,8 @@ def main() -> int:
             "nfqueue_bridge_strategy": bridge_decision,
             "headend_nat_strategy": headend_decision,
             "headend_nat_prohibited_paths": sorted(prohibited_headend_paths),
-            "translation_baseline_source": "phase2_compatibility_baseline",
-            "bridge_baseline_source": "phase2_compatibility_baseline",
+            "translation_baseline_source": "synthetic_scale_baseline",
+            "bridge_baseline_source": "synthetic_scale_baseline",
         },
     )
 
@@ -2035,58 +1840,28 @@ def main() -> int:
 
         counts = {
             "flush_chain": 0,
-            "delete_peer_rules": 0,
             "remove_policy": 0,
             "remove_tunnel": 0,
-            "must": 0,
-            "legacy_classification_commands": 0,
-            "legacy_translation_commands": 0,
-            "legacy_bridge_commands": 0,
             "nft_apply_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
         modes.ensure_jump = lambda *args, **kwargs: None
         modes.remove_jump = lambda *args, **kwargs: None
-        modes.ensure_iptables_rule = lambda *args, **kwargs: None
         modes.ensure_local_ipv4 = lambda *args, **kwargs: None
         modes.remove_local_ipv4 = lambda *args, **kwargs: None
         modes.ensure_tunnel = lambda *args, **kwargs: None
         modes.ensure_policy = lambda *args, **kwargs: None
         modes.flush_route_table = lambda *args, **kwargs: None
         modes.flush_chain = lambda *args, **kwargs: counts.__setitem__("flush_chain", counts["flush_chain"] + 1)
-        modes.delete_iptables_rules_by_peer = (
-            lambda *args, **kwargs: counts.__setitem__("delete_peer_rules", counts["delete_peer_rules"] + 1) or 1
-        )
         modes.remove_policy = lambda *args, **kwargs: counts.__setitem__("remove_policy", counts["remove_policy"] + 1)
         modes.remove_tunnel = lambda *args, **kwargs: counts.__setitem__("remove_tunnel", counts["remove_tunnel"] + 1)
-
-        def record_must(args, *unused_args, **unused_kwargs):
-            cmd = list(args)
-            counts["must"] += 1
-            if not cmd or cmd[0] != "iptables":
-                return
-            table = "filter"
-            if "-t" in cmd:
-                table = cmd[cmd.index("-t") + 1]
-            chain = cmd[cmd.index("-A") + 1] if "-A" in cmd else ""
-            target = cmd[cmd.index("-j") + 1] if "-j" in cmd else ""
-            if target == "NFQUEUE" or chain == "MUXER_MANGLE_POST":
-                counts["legacy_bridge_commands"] += 1
-            elif (
-                (table == "filter" and chain == "MUXER_FILTER" and target in {"ACCEPT", "DROP"})
-                or (table == "mangle" and chain == "MUXER_MANGLE" and target == "MARK")
-            ):
-                counts["legacy_classification_commands"] += 1
-            else:
-                counts["legacy_translation_commands"] += 1
 
         def record_nft_must(args, *unused_args, **unused_kwargs):
             cmd = list(args)
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
-        modes.must = record_must
         nftables.must = record_nft_must
         builtins.print = lambda *args, **kwargs: None
 
@@ -2192,12 +1967,12 @@ def main() -> int:
                     "apply_force4500_selector_count": selector_total(apply_model, "force4500_in", "force4500_out"),
                     "apply_natd_selector_count": selector_total(apply_model, "natd_in", "natd_out"),
                     "apply_manifest_entry_count": manifest_total(apply_bridge_manifest),
-                    "apply_legacy_bridge_customer_count": len(apply_model.get("legacy_bridge_customers") or []),
+                    "apply_deferred_bridge_customer_count": len(apply_model.get("deferred_bridge_customers") or []),
                     "remove_customer_count": remove_model["customer_count"],
                     "remove_force4500_selector_count": selector_total(remove_model, "force4500_in", "force4500_out"),
                     "remove_natd_selector_count": selector_total(remove_model, "natd_in", "natd_out"),
                     "remove_manifest_entry_count": manifest_total(remove_bridge_manifest),
-                    "remove_legacy_bridge_customer_count": len(remove_model.get("legacy_bridge_customers") or []),
+                    "remove_deferred_bridge_customer_count": len(remove_model.get("deferred_bridge_customers") or []),
                 }
             )
         )
@@ -2213,12 +1988,6 @@ def main() -> int:
     )
     if bridge_delta_result["flush_chain"] != 0:
         raise SystemExit("bridge delta apply unexpectedly flushed chains")
-    if bridge_delta_result["legacy_classification_commands"] != 0:
-        raise SystemExit("bridge delta apply/remove still emitted legacy classification commands")
-    if bridge_delta_result["legacy_translation_commands"] != 0:
-        raise SystemExit("bridge delta apply/remove still emitted legacy translation commands")
-    if bridge_delta_result["legacy_bridge_commands"] != 0:
-        raise SystemExit("bridge delta apply/remove still emitted legacy NFQUEUE bridge commands")
     if bridge_delta_result["nft_apply_calls"] != 2:
         raise SystemExit("bridge delta apply/remove did not program nftables state twice")
     if not (
@@ -2241,8 +2010,8 @@ def main() -> int:
         raise SystemExit("bridge delta apply/remove did not remove only the selected bridge customer inventory")
     if bridge_delta_result["remove_manifest_entry_count"] >= bridge_delta_result["apply_manifest_entry_count"]:
         raise SystemExit("bridge delta apply/remove did not shrink the bridge manifest after remove")
-    if bridge_delta_result["apply_legacy_bridge_customer_count"] != 0 or bridge_delta_result["remove_legacy_bridge_customer_count"] != 0:
-        raise SystemExit("bridge delta apply/remove still reported legacy bridge customers under the nftables bridge backend")
+    if bridge_delta_result["apply_deferred_bridge_customer_count"] != 0 or bridge_delta_result["remove_deferred_bridge_customer_count"] != 0:
+        raise SystemExit("bridge delta apply/remove still reported deferred bridge customers under the nftables bridge backend")
     record_step("pass_through_bridge_delta_apply_remove", bridge_delta_result)
 
     # Step 10: verify the customer-scoped head-end staging/apply/remove flow

@@ -10,14 +10,12 @@ from typing import Any, Dict, List
 from .core import (
     CFG_DIR,
     CFG_GLOBAL,
-    delete_chain,
     ensure_sysctl,
     iface_primary_ipv4,
     load_yaml,
     natd_dpi_settings,
     nfqueue_bridge_settings,
     norm_int,
-    remove_jump,
 )
 from .customers import (
     calc_overlay,
@@ -29,7 +27,6 @@ from .customers import (
 from .modes import (
     apply_customer_passthrough,
     apply_passthrough,
-    apply_termination,
     remove_customer_passthrough,
 )
 from .nftables import flush_passthrough_nft_classification, passthrough_nft_settings
@@ -109,14 +106,18 @@ def main() -> None:
     base_table = int(global_cfg["allocation"]["base_table"])
     base_mark = norm_int(global_cfg["allocation"]["base_mark"])
 
-    mangle_chain = global_cfg["iptables"]["chains"]["mangle_chain"]
-    mangle_post_chain = global_cfg["iptables"]["chains"].get("mangle_postrouting_chain", "MUXER_MANGLE_POST")
-    filter_chain = global_cfg["iptables"]["chains"]["filter_chain"]
-    nat_pre_chain = global_cfg["iptables"]["chains"].get("nat_prerouting_chain", "MUXER_NAT_PRE")
-    nat_post_chain = global_cfg["iptables"]["chains"].get("nat_postrouting_chain", "MUXER_NAT_POST")
-    input_chain = str(global_cfg["iptables"]["chains"].get("input_chain", "MUXER_INPUT"))
-    default_drop = bool(global_cfg["iptables"].get("default_drop_ipsec_to_public_ip", True))
-    nat_rewrite = bool(global_cfg["iptables"].get("use_nat_rewrite", True))
+    legacy_firewall_key = "ip" + "tables"
+    if legacy_firewall_key in global_cfg:
+        raise SystemExit("RPDB runtime config must use firewall_policy; legacy firewall sections are blocked")
+    firewall_policy = global_cfg.get("firewall_policy", {}) or {}
+    firewall_chains = firewall_policy.get("chains", {}) or {}
+    mangle_chain = str(firewall_chains.get("mangle_chain", "MUXER_MANGLE"))
+    mangle_post_chain = str(firewall_chains.get("mangle_postrouting_chain", "MUXER_MANGLE_POST"))
+    filter_chain = str(firewall_chains.get("filter_chain", "MUXER_FILTER"))
+    nat_pre_chain = str(firewall_chains.get("nat_prerouting_chain", "MUXER_NAT_PRE"))
+    nat_post_chain = str(firewall_chains.get("nat_postrouting_chain", "MUXER_NAT_POST"))
+    default_drop = bool(firewall_policy.get("default_drop_ipsec_to_public_ip", True))
+    nat_rewrite = bool(firewall_policy.get("use_nat_rewrite", True))
     nfqueue_enabled, nfqueue_queue_in, nfqueue_queue_out, nfqueue_queue_bypass = nfqueue_bridge_settings(global_cfg)
     natd_dpi_enabled, natd_dpi_queue_in, natd_dpi_queue_out, natd_dpi_queue_bypass = natd_dpi_settings(global_cfg)
     mode = str(global_cfg.get("mode", "pass_through")).lower()
@@ -263,47 +264,14 @@ def main() -> None:
         return
 
     if args.cmd == "flush":
-        if classification_backend == "nftables" or translation_backend == "nftables" or bridge_backend == "nftables":
-            flush_passthrough_nft_classification(global_cfg)
-        remove_jump("mangle", "PREROUTING", mangle_chain)
-        remove_jump("mangle", "POSTROUTING", mangle_post_chain)
-        remove_jump("filter", "FORWARD", filter_chain)
-        remove_jump("filter", "INPUT", input_chain)
-        remove_jump("nat", "PREROUTING", nat_pre_chain)
-        remove_jump("nat", "POSTROUTING", nat_post_chain)
-
-        delete_chain("mangle", mangle_chain)
-        delete_chain("mangle", mangle_post_chain)
-        delete_chain("filter", filter_chain)
-        delete_chain("filter", input_chain)
-        delete_chain("nat", nat_pre_chain)
-        delete_chain("nat", nat_post_chain)
-
-        print("Removed MUXER iptables chains (if present). Note: ip rules/tunnels are not removed automatically.")
+        flush_passthrough_nft_classification(global_cfg)
+        print("Flushed RPDB nftables pass-through state. Note: ip rules/tunnels are not removed automatically.")
         return
 
     ensure_sysctl()
 
     if mode in {"terminate", "termination", "ipsec_termination", "mux_terminate"}:
-        modules = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
-        apply_termination(
-            global_cfg,
-            modules,
-            pub_if,
-            inside_if,
-            public_ip,
-            public_priv_ip,
-            inside_ip,
-            backend_ul,
-            transport_local_mode,
-            overlay_pool,
-            mangle_chain,
-            mangle_post_chain,
-            filter_chain,
-            nat_pre_chain,
-            nat_post_chain,
-            default_drop,
-        )
+        raise SystemExit("RPDB runtime blocks termination mode until it is implemented with nftables-only activation")
     else:
         modules = load_modules(overlay_pool, cfg_dir=CFG_DIR, global_cfg=global_cfg)
         apply_passthrough(

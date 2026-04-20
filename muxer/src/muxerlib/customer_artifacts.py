@@ -120,7 +120,9 @@ def _build_snat_coverage(
                 {
                     "source_ip": source_ip,
                     "protocol": protocol_spec["name"],
-                    "iptables": "iptables -t nat " + " ".join(parts),
+                    "peer_cidr": peer_cidr,
+                    "nft_protocol": protocol_spec["protocol"],
+                    "nft_sport": protocol_spec["sport"],
                 }
             )
     return {
@@ -128,6 +130,95 @@ def _build_snat_coverage(
         "egress_sources": egress_sources,
         "protocols": [spec["name"] for spec in protocol_specs],
         "rules": rules,
+    }
+
+
+def _render_muxer_firewall_nftables(customer_name: str, snat_coverage: Dict[str, Any]) -> Dict[str, Any]:
+    table_name = _nft_name(customer_name, prefix="rpdb_mx")
+    rules = list(snat_coverage.get("rules") or [])
+    apply_lines = [
+        f"# RPDB customer-scoped muxer firewall/SNAT for {customer_name}",
+        "# Backend: nftables only.",
+        f"table ip {table_name} {{",
+        "  chain postrouting {",
+        "    type nat hook postrouting priority srcnat; policy accept;",
+    ]
+    rendered_rules: List[Dict[str, Any]] = []
+    for rule in rules:
+        source_ip = str(rule.get("source_ip") or "").strip()
+        peer_cidr = str(rule.get("peer_cidr") or "").strip()
+        protocol = str(rule.get("protocol") or "").strip()
+        nft_protocol = str(rule.get("nft_protocol") or "").strip()
+        nft_sport = str(rule.get("nft_sport") or "").strip()
+        if not source_ip or not peer_cidr or not protocol or not nft_protocol:
+            continue
+        if nft_protocol == "udp":
+            statement = (
+                f'    oifname "{_placeholder("MUXER_PUBLIC_IFACE")}" '
+                f"ip saddr {source_ip} ip daddr {peer_cidr} "
+                f"udp sport {nft_sport} snat to {_placeholder('MUXER_PUBLIC_PRIVATE_IP')}"
+            )
+        elif nft_protocol == "50":
+            statement = (
+                f'    oifname "{_placeholder("MUXER_PUBLIC_IFACE")}" '
+                f"ip saddr {source_ip} ip daddr {peer_cidr} "
+                f"ip protocol esp snat to {_placeholder('MUXER_PUBLIC_PRIVATE_IP')}"
+            )
+        else:
+            statement = (
+                f'    oifname "{_placeholder("MUXER_PUBLIC_IFACE")}" '
+                f"ip saddr {source_ip} ip daddr {peer_cidr} "
+                f"meta l4proto {nft_protocol} snat to {_placeholder('MUXER_PUBLIC_PRIVATE_IP')}"
+            )
+        apply_lines.append(statement)
+        rendered_rules.append(
+            {
+                "source_ip": source_ip,
+                "peer_cidr": peer_cidr,
+                "protocol": protocol,
+                "nft_statement": statement.strip(),
+            }
+        )
+    apply_lines.extend(["  }", "}"])
+    remove_text = "\n".join(
+        [
+            f"# Remove RPDB customer-scoped muxer firewall/SNAT for {customer_name}",
+            f"delete table ip {table_name}",
+        ]
+    ) + "\n"
+    state = {
+        "schema_version": 1,
+        "backend": "nftables",
+        "table_family": "ip",
+        "table_name": table_name,
+        "customer_name": customer_name,
+        "snat_coverage": snat_coverage,
+        "rule_count": len(rendered_rules),
+        "activation_units": {
+            "apply": 2 if rendered_rules else 0,
+            "rollback": 1 if rendered_rules else 0,
+        },
+        "fallback_policy": {
+            "backend": "nftables_only",
+            "non_nft_fallbacks_allowed": False,
+            "external_repo_fallbacks_allowed": False,
+        },
+    }
+    return {
+        "apply": "\n".join(apply_lines) + "\n",
+        "remove": remove_text,
+        "state": state,
+        "manifest": {
+            **state,
+            "artifact_files": [
+                "firewall/nftables.apply.nft",
+                "firewall/nftables.remove.nft",
+                "firewall/nftables-state.json",
+            ],
+            "rendered_rules": rendered_rules,
+            "apply_command_count": state["activation_units"]["apply"],
+            "rollback_command_count": state["activation_units"]["rollback"],
+        },
     }
 
 
@@ -404,7 +495,7 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
         },
         "fallback_policy": {
             "backend": "nftables_only",
-            "legacy_fallbacks_allowed": False,
+            "non_nft_fallbacks_allowed": False,
             "external_repo_fallbacks_allowed": False,
         },
     }
@@ -508,7 +599,7 @@ def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, 
         if str(post_ipsec_nat.get("mapping_strategy") or "") == "one_to_one":
             command_model = "nftables_netmap_one_to_one"
         elif str(post_ipsec_nat.get("mode") or "") == "netmap":
-            command_model = "nftables_legacy_netmap"
+            command_model = "nftables_netmap_compat"
         elif str(post_ipsec_nat.get("mapping_strategy") or "") == "explicit_host_map" or str(post_ipsec_nat.get("mode") or "") == "explicit_map":
             command_model = "nftables_explicit_host_map"
         else:
@@ -559,14 +650,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
         protocols=protocols,
         ipsec=ipsec,
     )
-    snat_lines = [
-        "# Customer-scoped muxer firewall snippet",
-        f"# peer: {peer.get('public_ip')}",
-        f"# fwmark: {transport.get('mark')}",
-        f"# udp500={protocols.get('udp500')} udp4500={protocols.get('udp4500')} esp50={protocols.get('esp50')}",
-        "# head-end egress SNAT coverage",
-    ]
-    snat_lines.extend(rule["iptables"] for rule in snat_coverage["rules"])
+    muxer_firewall_nftables = _render_muxer_firewall_nftables(str(customer.get("name") or ""), snat_coverage)
 
     return {
         "customer/customer-summary.json": {
@@ -651,8 +735,20 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "post_ipsec_nat_mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
             "headend_egress_sources": snat_coverage["egress_sources"],
             "snat_coverage": snat_coverage,
+            "activation_backend": "nftables",
+            "activation_manifest": {
+                "backend": "nftables",
+                "table_name": muxer_firewall_nftables["manifest"].get("table_name"),
+                "apply_command_count": muxer_firewall_nftables["manifest"].get("apply_command_count"),
+                "rollback_command_count": muxer_firewall_nftables["manifest"].get("rollback_command_count"),
+                "rule_count": muxer_firewall_nftables["manifest"].get("rule_count"),
+                "fallback_policy": muxer_firewall_nftables["manifest"].get("fallback_policy"),
+            },
         },
-        "firewall/iptables-snippet.txt": "\n".join(snat_lines) + "\n",
+        "firewall/nftables.apply.nft": muxer_firewall_nftables["apply"],
+        "firewall/nftables.remove.nft": muxer_firewall_nftables["remove"],
+        "firewall/nftables-state.json": muxer_firewall_nftables["state"],
+        "firewall/activation-manifest.json": muxer_firewall_nftables["manifest"],
     }
 
 

@@ -13,6 +13,10 @@ PROTOCOL_FIELD_MAP = {
     "udp4500": ("udp4500",),
     "esp50": ("esp50",),
 }
+BANNED_GENERATED_RUNTIME_TOKENS = [
+    "iptables",
+    "iptables-restore",
+]
 
 
 def _load_json(path: Path) -> dict:
@@ -45,6 +49,22 @@ def _validate_snat_coverage(report: dict, firewall_intent_path: Path) -> None:
             if (source, protocol_name) not in rule_pairs:
                 report["errors"].append(
                     f"SNAT coverage missing {protocol_name} for head-end egress source {source}"
+                )
+
+
+def _validate_no_legacy_firewall_tokens(report: dict, artifact_dir: Path) -> None:
+    for path in sorted(artifact_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        rel = path.relative_to(artifact_dir).as_posix()
+        for token in BANNED_GENERATED_RUNTIME_TOKENS:
+            if token in text:
+                report["errors"].append(
+                    f"rendered artifact contains banned runtime token: {rel} -> {token}"
                 )
 
 
@@ -88,6 +108,7 @@ def main() -> int:
                         )
 
             _validate_snat_coverage(report, render_dir / "muxer" / "firewall" / "firewall-intent.json")
+            _validate_no_legacy_firewall_tokens(report, render_dir)
 
             customer_name = manifest.get("customer_name")
             customer_class = manifest.get("customer_class")

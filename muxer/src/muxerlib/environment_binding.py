@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, Tuple
 from .customer_merge import load_yaml_file
 
 PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
-TEXT_SUFFIXES = {".txt", ".conf", ".json", ".yaml", ".yml", ".md"}
+TEXT_SUFFIXES = {".txt", ".conf", ".json", ".yaml", ".yml", ".md", ".nft"}
 
 
 def _load_json(path: Path) -> Dict[str, Any]:

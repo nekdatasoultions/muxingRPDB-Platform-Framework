@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply handlers for pass-through and termination modes."""
+"""Apply handlers for the RPDB nftables-only pass-through runtime."""
 
 from __future__ import annotations
 
@@ -7,47 +7,46 @@ import ipaddress
 from typing import Any, Dict, List
 
 from .core import (
-    delete_iptables_rules_by_peer,
-    ensure_iptables_rule,
-    ensure_chain,
-    ensure_jump,
-    flush_chain,
+    ensure_local_ipv4,
+    ensure_policy,
+    ensure_tunnel,
     flush_route_table,
-    must,
-    remove_jump,
+    remove_local_ipv4,
     remove_policy,
     remove_tunnel,
-    ensure_tunnel,
-    ensure_policy,
-    ensure_local_ipv4,
-    remove_local_ipv4,
 )
 from .customers import (
     calc_overlay,
     customer_natd_flags,
-    customer_headend_egress_sources,
     customer_protocol_flags,
     customer_tunnel_settings,
-    subnet_list,
 )
 from .nftables import apply_passthrough_nft_state
-from .strongswan import render_strongswan
 
 
 def _use_nft_backend(backend: str) -> bool:
     return str(backend or "").strip().lower() == "nftables"
 
 
-def _use_nft_classification(classification_backend: str) -> bool:
-    return _use_nft_backend(classification_backend)
-
-
-def _use_nft_translation(translation_backend: str) -> bool:
-    return _use_nft_backend(translation_backend)
-
-
-def _use_nft_bridge(bridge_backend: str) -> bool:
-    return _use_nft_backend(bridge_backend)
+def _require_nft_only(
+    *,
+    classification_backend: str,
+    translation_backend: str,
+    bridge_backend: str,
+) -> None:
+    blocked = {
+        "classification_backend": classification_backend,
+        "translation_backend": translation_backend,
+        "bridge_backend": bridge_backend,
+    }
+    invalid = {
+        name: value
+        for name, value in blocked.items()
+        if not _use_nft_backend(str(value))
+    }
+    if invalid:
+        detail = ", ".join(f"{name}={value}" for name, value in sorted(invalid.items()))
+        raise SystemExit(f"RPDB runtime requires nftables-only pass-through backends: {detail}")
 
 
 def _passthrough_nft_global_cfg(
@@ -79,7 +78,7 @@ def _passthrough_nft_global_cfg(
             "public_private_ip": public_priv_ip,
             "public_if": pub_if,
         },
-        "iptables": {
+        "firewall_policy": {
             "default_drop_ipsec_to_public_ip": default_drop,
             "use_nat_rewrite": nat_rewrite,
         },
@@ -129,49 +128,34 @@ def _merge_classification_modules(
     return sorted(merged.values(), key=lambda item: (int(item["id"]), str(item["name"])))
 
 
-def _ensure_passthrough_base(
+def _validate_passthrough_module(
+    module: Dict[str, Any],
     *,
+    name: str,
+    peer_cidr: str,
     nat_rewrite: bool,
-    use_legacy_nat_chains: bool,
-    mangle_chain: str,
-    mangle_post_chain: str,
-    filter_chain: str,
-    nat_pre_chain: str,
-    nat_post_chain: str,
-) -> None:
-    ensure_chain("mangle", mangle_chain)
-    ensure_chain("mangle", mangle_post_chain)
-    ensure_chain("filter", filter_chain)
-    ensure_jump("mangle", "PREROUTING", mangle_chain, position=1)
-    ensure_jump("mangle", "POSTROUTING", mangle_post_chain, position=1)
-    ensure_jump("filter", "FORWARD", filter_chain, position=1)
-    if nat_rewrite and use_legacy_nat_chains:
-        ensure_chain("nat", nat_pre_chain)
-        ensure_chain("nat", nat_post_chain)
-        ensure_jump("nat", "PREROUTING", nat_pre_chain, position=1)
-        ensure_jump("nat", "POSTROUTING", nat_post_chain, position=1)
-    else:
-        remove_jump("nat", "PREROUTING", nat_pre_chain)
-        remove_jump("nat", "POSTROUTING", nat_post_chain)
-
-
-def _ensure_passthrough_default_drop(
-    *,
-    default_drop: bool,
-    pub_if: str,
     public_ip: str,
     public_priv_ip: str,
-    filter_chain: str,
 ) -> None:
-    if not default_drop:
-        return
-    for drop_dst in sorted({public_ip, public_priv_ip}):
-        ensure_iptables_rule("filter", ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "500", "-j", "DROP"])
-        ensure_iptables_rule("filter", ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "4500", "-j", "DROP"])
-        ensure_iptables_rule("filter", ["-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "50", "-j", "DROP"])
+    ipaddress.ip_network(peer_cidr, strict=False)
+    udp500, _udp4500, _esp50, force_4500_to_500 = customer_protocol_flags(module)
+    natd_rewrite_enabled, _natd_inner_ip = customer_natd_flags(module)
+    if force_4500_to_500 and not udp500:
+        raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires protocols.udp500=true")
+    if force_4500_to_500 and not nat_rewrite:
+        raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires firewall_policy.use_nat_rewrite=true")
+    if natd_rewrite_enabled and not udp500:
+        raise SystemExit(f"{name}: natd_rewrite.enabled requires protocols.udp500=true")
+    if natd_rewrite_enabled and force_4500_to_500:
+        raise SystemExit(f"{name}: natd_rewrite.enabled conflicts with protocols.force_rewrite_4500_to_500")
+    if natd_rewrite_enabled and public_priv_ip != public_ip and not nat_rewrite:
+        raise SystemExit(
+            f"{name}: natd_rewrite.enabled requires firewall_policy.use_nat_rewrite=true "
+            "when public_private_ip != public_ip"
+        )
 
 
-def _clear_passthrough_customer_runtime(
+def _clear_passthrough_customer_transport(
     module: Dict[str, Any],
     *,
     inside_if: str,
@@ -179,27 +163,12 @@ def _clear_passthrough_customer_runtime(
     transport_local_mode: str,
     base_table: int,
     base_mark: int,
-    mangle_chain: str,
-    mangle_post_chain: str,
-    filter_chain: str,
-    nat_pre_chain: str,
-    nat_post_chain: str,
 ) -> None:
     cid = int(module["id"])
     name = str(module["name"])
-    peer_cidr = str(module["peer_ip"])
     _tunnel_mode, tunnel_ifname, _tunnel_ttl, _tunnel_key = customer_tunnel_settings(module, name, cid)
     mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
     table_id = base_table + cid if "table" not in module else int(module["table"])
-
-    for table_name, chain_name in (
-        ("filter", filter_chain),
-        ("mangle", mangle_chain),
-        ("mangle", mangle_post_chain),
-        ("nat", nat_pre_chain),
-        ("nat", nat_post_chain),
-    ):
-        delete_iptables_rules_by_peer(table_name, chain_name, peer_cidr)
 
     remove_policy(mark_hex, table_id, priority=module.get("rpdb_priority"))
     flush_route_table(table_id)
@@ -208,6 +177,54 @@ def _clear_passthrough_customer_runtime(
     module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
     if transport_local_mode != "interface_ip" and module_inside_ip != inside_ip:
         remove_local_ipv4(inside_if, module_inside_ip)
+
+
+def _apply_passthrough_customer_transport(
+    module: Dict[str, Any],
+    *,
+    inside_if: str,
+    inside_ip: str,
+    backend_ul: str,
+    transport_local_mode: str,
+    overlay_pool: ipaddress.IPv4Network,
+    base_table: int,
+    base_mark: int,
+) -> None:
+    cid = int(module["id"])
+    name = str(module["name"])
+    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+
+    module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
+    if transport_local_mode == "interface_ip":
+        cust_inside_ip = inside_ip
+        if module_inside_ip != inside_ip:
+            remove_local_ipv4(inside_if, module_inside_ip)
+    else:
+        cust_inside_ip = module_inside_ip
+
+    cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
+    ipaddress.ip_address(cust_inside_ip)
+    ipaddress.ip_address(cust_backend_ul)
+    if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
+        ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
+
+    mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
+    table_id = base_table + cid if "table" not in module else int(module["table"])
+    if "overlay" in module and module["overlay"]:
+        mux_overlay = str(module["overlay"]["mux_ip"])
+    else:
+        mux_overlay, _ = calc_overlay(overlay_pool, cid)
+
+    ensure_tunnel(
+        tunnel_ifname,
+        cust_inside_ip,
+        cust_backend_ul,
+        mux_overlay,
+        mode=tunnel_mode,
+        ttl=tunnel_ttl,
+        key=tunnel_key,
+    )
+    ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
 
 
 def apply_passthrough(
@@ -237,16 +254,18 @@ def apply_passthrough(
     natd_dpi_queue_out: int,
     natd_dpi_queue_bypass: bool,
     default_drop: bool,
-    classification_backend: str = "legacy_iptables",
-    translation_backend: str = "legacy_iptables",
-    bridge_backend: str = "legacy_iptables",
+    classification_backend: str = "nftables",
+    translation_backend: str = "nftables",
+    bridge_backend: str = "nftables",
     classification_state_root: str = "/var/lib/rpdb-muxer/nftables",
     classification_table_name: str = "muxer_passthrough",
     translation_table_name: str = "muxer_passthrough_nat",
 ) -> None:
-    use_nft_classification = _use_nft_classification(classification_backend)
-    use_nft_translation = _use_nft_translation(translation_backend)
-    use_nft_bridge = _use_nft_bridge(bridge_backend)
+    _require_nft_only(
+        classification_backend=classification_backend,
+        translation_backend=translation_backend,
+        bridge_backend=bridge_backend,
+    )
     nft_global_cfg = _passthrough_nft_global_cfg(
         public_ip=public_ip,
         public_priv_ip=public_priv_ip,
@@ -269,336 +288,29 @@ def apply_passthrough(
         classification_table_name=classification_table_name,
         translation_table_name=translation_table_name,
     )
-    _ensure_passthrough_base(
-        nat_rewrite=nat_rewrite,
-        use_legacy_nat_chains=not use_nft_translation,
-        mangle_chain=mangle_chain,
-        mangle_post_chain=mangle_post_chain,
-        filter_chain=filter_chain,
-        nat_pre_chain=nat_pre_chain,
-        nat_post_chain=nat_post_chain,
-    )
-
-    flush_chain("mangle", mangle_chain)
-    flush_chain("mangle", mangle_post_chain)
-    flush_chain("filter", filter_chain)
-    if not use_nft_translation:
-        flush_chain("nat", nat_pre_chain)
-        flush_chain("nat", nat_post_chain)
-
     for module in modules:
         cid = int(module["id"])
         name = str(module["name"])
         peer_cidr = str(module["peer_ip"])
-        ipaddress.ip_network(peer_cidr, strict=False)
-        udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
-        natd_rewrite_enabled, _natd_inner_ip = customer_natd_flags(module)
-        if force_4500_to_500 and not udp500:
-            raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires protocols.udp500=true")
-        if force_4500_to_500 and not nat_rewrite:
-            raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires iptables.use_nat_rewrite=true")
-        if natd_rewrite_enabled and not udp500:
-            raise SystemExit(f"{name}: natd_rewrite.enabled requires protocols.udp500=true")
-        if natd_rewrite_enabled and force_4500_to_500:
-            raise SystemExit(f"{name}: natd_rewrite.enabled conflicts with protocols.force_rewrite_4500_to_500")
-        if natd_rewrite_enabled and public_priv_ip != public_ip and not nat_rewrite:
-            raise SystemExit(f"{name}: natd_rewrite.enabled requires iptables.use_nat_rewrite=true when public_private_ip != public_ip")
-
-        tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
-        module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
-        if transport_local_mode == "interface_ip":
-            cust_inside_ip = inside_ip
-            if module_inside_ip != inside_ip:
-                remove_local_ipv4(inside_if, module_inside_ip)
-        else:
-            cust_inside_ip = module_inside_ip
-        cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
-        ipaddress.ip_address(cust_inside_ip)
-        ipaddress.ip_address(cust_backend_ul)
-        headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
-        if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
-            ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
-        mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
-        table_id = base_table + cid if "table" not in module else int(module["table"])
-
-        if "overlay" in module and module["overlay"]:
-            mux_overlay = str(module["overlay"]["mux_ip"])
-        else:
-            mux_overlay, _ = calc_overlay(overlay_pool, cid)
-
-        ensure_tunnel(
-            tunnel_ifname,
-            cust_inside_ip,
-            cust_backend_ul,
-            mux_overlay,
-            mode=tunnel_mode,
-            ttl=tunnel_ttl,
-            key=tunnel_key,
+        _validate_passthrough_module(
+            module,
+            name=name,
+            peer_cidr=peer_cidr,
+            nat_rewrite=nat_rewrite,
+            public_ip=public_ip,
+            public_priv_ip=public_priv_ip,
         )
-        ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
-
-        nat_preroute_targets: List[str] = []
-        if public_priv_ip != public_ip:
-            nat_preroute_targets.append(public_priv_ip)
-            nat_preroute_targets.append(public_ip)
-        else:
-            nat_preroute_targets.append(public_ip)
-
-        # True NAT-T customers need inbound encrypted traffic handed to the
-        # backend head-end private IP. Forced 4500->500 bridge customers are
-        # different: UDP/500 and ESP must still preserve the shared public
-        # identity semantics expected by the strict backend/head-end config.
-        nat_preroute_dst = cust_backend_ul if udp4500 else public_ip
-
-        if udp500:
-            if not use_nft_classification:
-                must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "ACCEPT"])
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", mark_hex])
-            if public_priv_ip != public_ip:
-                if not use_nft_classification:
-                    must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", mark_hex])
-                if nat_rewrite and not use_nft_translation:
-                    for nat_pre_target in nat_preroute_targets:
-                        must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                    if force_4500_to_500:
-                        for egress_source in headend_egress_sources:
-                            must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
-                    else:
-                        for egress_source in headend_egress_sources:
-                            must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
-
-            if natd_dpi_enabled and natd_rewrite_enabled and not use_nft_bridge:
-                qnat_in = [
-                    "iptables",
-                    "-t",
-                    "mangle",
-                    "-A",
-                    mangle_chain,
-                    "-i",
-                    pub_if,
-                    "-s",
-                    peer_cidr,
-                    "-d",
-                    cust_backend_ul,
-                    "-p",
-                    "udp",
-                    "--dport",
-                    "500",
-                    "-j",
-                    "NFQUEUE",
-                    "--queue-num",
-                    str(natd_dpi_queue_in),
-                ]
-                if natd_dpi_queue_bypass:
-                    qnat_in.append("--queue-bypass")
-                must(qnat_in)
-
-                if public_priv_ip != public_ip:
-                    qnat_in_priv = [
-                        "iptables",
-                        "-t",
-                        "mangle",
-                        "-A",
-                        mangle_chain,
-                        "-i",
-                        pub_if,
-                        "-s",
-                        peer_cidr,
-                        "-d",
-                        public_priv_ip,
-                        "-p",
-                        "udp",
-                        "--dport",
-                        "500",
-                        "-j",
-                        "NFQUEUE",
-                        "--queue-num",
-                        str(natd_dpi_queue_in),
-                    ]
-                    if natd_dpi_queue_bypass:
-                        qnat_in_priv.append("--queue-bypass")
-                    must(qnat_in_priv)
-
-                qnat_out = [
-                    "iptables",
-                    "-t",
-                    "mangle",
-                    "-A",
-                    mangle_post_chain,
-                    "-o",
-                    pub_if,
-                    "-s",
-                    cust_backend_ul,
-                    "-d",
-                    peer_cidr,
-                    "-p",
-                    "udp",
-                    "--sport",
-                    "500",
-                    "--dport",
-                    "500",
-                    "-j",
-                    "NFQUEUE",
-                    "--queue-num",
-                    str(natd_dpi_queue_out),
-                ]
-                if natd_dpi_queue_bypass:
-                    qnat_out.append("--queue-bypass")
-                must(qnat_out)
-
-        if force_4500_to_500:
-            if not use_nft_classification:
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-            if public_priv_ip != public_ip:
-                if not use_nft_classification:
-                    must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-                if nat_rewrite and not use_nft_translation:
-                    for nat_pre_target in nat_preroute_targets:
-                        must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"])
-                    for egress_source in headend_egress_sources:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
-            if nfqueue_enabled and not use_nft_bridge:
-                qin = [
-                    "iptables",
-                    "-t",
-                    "mangle",
-                    "-A",
-                    mangle_chain,
-                    "-i",
-                    pub_if,
-                    "-s",
-                    peer_cidr,
-                    "-d",
-                    public_ip,
-                    "-p",
-                    "udp",
-                    "--dport",
-                    "4500",
-                    "-j",
-                    "NFQUEUE",
-                    "--queue-num",
-                    str(nfqueue_queue_in),
-                ]
-                if nfqueue_queue_bypass:
-                    qin.append("--queue-bypass")
-                must(qin)
-                # Some kernels/userspace NFQUEUE paths can lose skb mark after
-                # payload mutation. Re-assert the per-customer fwmark so the
-                # bridged packet still hits the GRE policy route.
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-
-                if public_priv_ip != public_ip:
-                    qin_priv = [
-                        "iptables",
-                        "-t",
-                        "mangle",
-                        "-A",
-                        mangle_chain,
-                        "-i",
-                        pub_if,
-                        "-s",
-                        peer_cidr,
-                        "-d",
-                        public_priv_ip,
-                        "-p",
-                        "udp",
-                        "--dport",
-                        "4500",
-                        "-j",
-                        "NFQUEUE",
-                        "--queue-num",
-                        str(nfqueue_queue_in),
-                    ]
-                    if nfqueue_queue_bypass:
-                        qin_priv.append("--queue-bypass")
-                    must(qin_priv)
-                    must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-
-                qout = [
-                    "iptables",
-                    "-t",
-                    "mangle",
-                    "-A",
-                    mangle_post_chain,
-                    "-o",
-                    pub_if,
-                    "-s",
-                    cust_backend_ul,
-                    "-d",
-                    peer_cidr,
-                    "-p",
-                    "udp",
-                    "--sport",
-                    "500",
-                    "-j",
-                    "NFQUEUE",
-                    "--queue-num",
-                    str(nfqueue_queue_out),
-                ]
-                if nfqueue_queue_bypass:
-                    qout.append("--queue-bypass")
-                must(qout)
-                if public_ip != cust_backend_ul:
-                    qout_pub = [
-                        "iptables",
-                        "-t",
-                        "mangle",
-                        "-A",
-                        mangle_post_chain,
-                        "-o",
-                        pub_if,
-                        "-s",
-                        public_ip,
-                        "-d",
-                        peer_cidr,
-                        "-p",
-                        "udp",
-                        "--sport",
-                        "500",
-                        "-j",
-                        "NFQUEUE",
-                        "--queue-num",
-                        str(nfqueue_queue_out),
-                    ]
-                    if nfqueue_queue_bypass:
-                        qout_pub.append("--queue-bypass")
-                    must(qout_pub)
-
-        if udp4500:
-            if not use_nft_classification:
-                must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"])
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-            if public_priv_ip != public_ip:
-                if not use_nft_classification:
-                    must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-                if nat_rewrite and not use_nft_translation:
-                    for nat_pre_target in nat_preroute_targets:
-                        must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                    for egress_source in headend_egress_sources:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
-
-        if esp50:
-            if not use_nft_classification:
-                must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"])
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "MARK", "--set-mark", mark_hex])
-            if public_priv_ip != public_ip:
-                if not use_nft_classification:
-                    must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "50", "-j", "MARK", "--set-mark", mark_hex])
-                if nat_rewrite and not use_nft_translation:
-                    for nat_pre_target in nat_preroute_targets:
-                        must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                    for egress_source in headend_egress_sources:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
-
-    if default_drop and not use_nft_classification:
-        for drop_dst in sorted({public_ip, public_priv_ip}):
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "500", "-j", "DROP"])
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "4500", "-j", "DROP"])
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-d", drop_dst, "-p", "50", "-j", "DROP"])
-
-    if use_nft_classification or use_nft_translation or use_nft_bridge:
-        apply_passthrough_nft_state(modules, nft_global_cfg)
-
+        _apply_passthrough_customer_transport(
+            module,
+            inside_if=inside_if,
+            inside_ip=inside_ip,
+            backend_ul=backend_ul,
+            transport_local_mode=transport_local_mode,
+            overlay_pool=overlay_pool,
+            base_table=base_table,
+            base_mark=base_mark,
+        )
+    apply_passthrough_nft_state(modules, nft_global_cfg)
     print(f"Applied {len(modules)} customer module(s).")
     print("Mode: pass-through (IPsec terminated on backend).")
 
@@ -631,17 +343,51 @@ def apply_customer_passthrough(
     natd_dpi_queue_out: int,
     natd_dpi_queue_bypass: bool,
     default_drop: bool,
-    classification_backend: str = "legacy_iptables",
-    translation_backend: str = "legacy_iptables",
-    bridge_backend: str = "legacy_iptables",
+    classification_backend: str = "nftables",
+    translation_backend: str = "nftables",
+    bridge_backend: str = "nftables",
     classification_state_root: str = "/var/lib/rpdb-muxer/nftables",
     classification_table_name: str = "muxer_passthrough",
     translation_table_name: str = "muxer_passthrough_nat",
     classification_modules: List[Dict[str, Any]] | None = None,
 ) -> None:
-    use_nft_classification = _use_nft_classification(classification_backend)
-    use_nft_translation = _use_nft_translation(translation_backend)
-    use_nft_bridge = _use_nft_bridge(bridge_backend)
+    _require_nft_only(
+        classification_backend=classification_backend,
+        translation_backend=translation_backend,
+        bridge_backend=bridge_backend,
+    )
+    if classification_modules is None:
+        raise SystemExit("nftables pass-through backends require local customer inventory for customer-scoped apply")
+
+    name = str(module["name"])
+    peer_cidr = str(module["peer_ip"])
+    _validate_passthrough_module(
+        module,
+        name=name,
+        peer_cidr=peer_cidr,
+        nat_rewrite=nat_rewrite,
+        public_ip=public_ip,
+        public_priv_ip=public_priv_ip,
+    )
+    _clear_passthrough_customer_transport(
+        module,
+        inside_if=inside_if,
+        inside_ip=inside_ip,
+        transport_local_mode=transport_local_mode,
+        base_table=base_table,
+        base_mark=base_mark,
+    )
+    _apply_passthrough_customer_transport(
+        module,
+        inside_if=inside_if,
+        inside_ip=inside_ip,
+        backend_ul=backend_ul,
+        transport_local_mode=transport_local_mode,
+        overlay_pool=overlay_pool,
+        base_table=base_table,
+        base_mark=base_mark,
+    )
+
     nft_global_cfg = _passthrough_nft_global_cfg(
         public_ip=public_ip,
         public_priv_ip=public_priv_ip,
@@ -664,217 +410,8 @@ def apply_customer_passthrough(
         classification_table_name=classification_table_name,
         translation_table_name=translation_table_name,
     )
-    _ensure_passthrough_base(
-        nat_rewrite=nat_rewrite,
-        use_legacy_nat_chains=not use_nft_translation,
-        mangle_chain=mangle_chain,
-        mangle_post_chain=mangle_post_chain,
-        filter_chain=filter_chain,
-        nat_pre_chain=nat_pre_chain,
-        nat_post_chain=nat_post_chain,
-    )
-    _clear_passthrough_customer_runtime(
-        module,
-        inside_if=inside_if,
-        inside_ip=inside_ip,
-        transport_local_mode=transport_local_mode,
-        base_table=base_table,
-        base_mark=base_mark,
-        mangle_chain=mangle_chain,
-        mangle_post_chain=mangle_post_chain,
-        filter_chain=filter_chain,
-        nat_pre_chain=nat_pre_chain,
-        nat_post_chain=nat_post_chain,
-    )
-
-    cid = int(module["id"])
-    name = str(module["name"])
-    peer_cidr = str(module["peer_ip"])
-    ipaddress.ip_network(peer_cidr, strict=False)
-    udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
-    natd_rewrite_enabled, _natd_inner_ip = customer_natd_flags(module)
-    if force_4500_to_500 and not udp500:
-        raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires protocols.udp500=true")
-    if force_4500_to_500 and not nat_rewrite:
-        raise SystemExit(f"{name}: protocols.force_rewrite_4500_to_500 requires iptables.use_nat_rewrite=true")
-    if natd_rewrite_enabled and not udp500:
-        raise SystemExit(f"{name}: natd_rewrite.enabled requires protocols.udp500=true")
-    if natd_rewrite_enabled and force_4500_to_500:
-        raise SystemExit(f"{name}: natd_rewrite.enabled conflicts with protocols.force_rewrite_4500_to_500")
-    if natd_rewrite_enabled and public_priv_ip != public_ip and not nat_rewrite:
-        raise SystemExit(f"{name}: natd_rewrite.enabled requires iptables.use_nat_rewrite=true when public_private_ip != public_ip")
-
-    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
-    module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
-    if transport_local_mode == "interface_ip":
-        cust_inside_ip = inside_ip
-        if module_inside_ip != inside_ip:
-            remove_local_ipv4(inside_if, module_inside_ip)
-    else:
-        cust_inside_ip = module_inside_ip
-    cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
-    ipaddress.ip_address(cust_inside_ip)
-    ipaddress.ip_address(cust_backend_ul)
-    headend_egress_sources = customer_headend_egress_sources(module, cust_backend_ul)
-    if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
-        ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
-    mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
-    table_id = base_table + cid if "table" not in module else int(module["table"])
-
-    if "overlay" in module and module["overlay"]:
-        mux_overlay = str(module["overlay"]["mux_ip"])
-    else:
-        mux_overlay, _ = calc_overlay(overlay_pool, cid)
-
-    ensure_tunnel(
-        tunnel_ifname,
-        cust_inside_ip,
-        cust_backend_ul,
-        mux_overlay,
-        mode=tunnel_mode,
-        ttl=tunnel_ttl,
-        key=tunnel_key,
-    )
-    ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
-
-    nat_preroute_targets: List[str] = []
-    if public_priv_ip != public_ip:
-        nat_preroute_targets.append(public_priv_ip)
-        nat_preroute_targets.append(public_ip)
-    else:
-        nat_preroute_targets.append(public_ip)
-
-    nat_preroute_dst = cust_backend_ul if udp4500 else public_ip
-
-    if udp500:
-        if not use_nft_classification:
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "ACCEPT"])
-            must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", mark_hex])
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "MARK", "--set-mark", mark_hex])
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                if force_4500_to_500:
-                    for egress_source in headend_egress_sources:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
-                else:
-                    for egress_source in headend_egress_sources:
-                        must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "SNAT", "--to-source", public_priv_ip])
-
-        if natd_dpi_enabled and natd_rewrite_enabled and not use_nft_bridge:
-            qnat_in = [
-                "iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr,
-                "-d", cust_backend_ul, "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", str(natd_dpi_queue_in),
-            ]
-            if natd_dpi_queue_bypass:
-                qnat_in.append("--queue-bypass")
-            must(qnat_in)
-
-            if public_priv_ip != public_ip:
-                qnat_in_priv = [
-                    "iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr,
-                    "-d", public_priv_ip, "-p", "udp", "--dport", "500", "-j", "NFQUEUE", "--queue-num", str(natd_dpi_queue_in),
-                ]
-                if natd_dpi_queue_bypass:
-                    qnat_in_priv.append("--queue-bypass")
-                must(qnat_in_priv)
-
-            qnat_out = [
-                "iptables", "-t", "mangle", "-A", mangle_post_chain, "-o", pub_if, "-s", cust_backend_ul,
-                "-d", peer_cidr, "-p", "udp", "--sport", "500", "--dport", "500", "-j", "NFQUEUE", "--queue-num", str(natd_dpi_queue_out),
-            ]
-            if natd_dpi_queue_bypass:
-                qnat_out.append("--queue-bypass")
-            must(qnat_out)
-
-    if force_4500_to_500:
-        if not use_nft_classification:
-            must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", f"{nat_preroute_dst}:500"])
-                for egress_source in headend_egress_sources:
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", f"{public_priv_ip}:4500"])
-        if nfqueue_enabled and not use_nft_bridge:
-            qin = [
-                "iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr,
-                "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", str(nfqueue_queue_in),
-            ]
-            if nfqueue_queue_bypass:
-                qin.append("--queue-bypass")
-            must(qin)
-            must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-
-            if public_priv_ip != public_ip:
-                qin_priv = [
-                    "iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr,
-                    "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "NFQUEUE", "--queue-num", str(nfqueue_queue_in),
-                ]
-                if nfqueue_queue_bypass:
-                    qin_priv.append("--queue-bypass")
-                must(qin_priv)
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-
-            qout = [
-                "iptables", "-t", "mangle", "-A", mangle_post_chain, "-o", pub_if, "-s", cust_backend_ul,
-                "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", str(nfqueue_queue_out),
-            ]
-            if nfqueue_queue_bypass:
-                qout.append("--queue-bypass")
-            must(qout)
-            if public_ip != cust_backend_ul:
-                qout_pub = [
-                    "iptables", "-t", "mangle", "-A", mangle_post_chain, "-o", pub_if, "-s", public_ip,
-                    "-d", peer_cidr, "-p", "udp", "--sport", "500", "-j", "NFQUEUE", "--queue-num", str(nfqueue_queue_out),
-                ]
-                if nfqueue_queue_bypass:
-                    qout_pub.append("--queue-bypass")
-                must(qout_pub)
-
-    if udp4500:
-        if not use_nft_classification:
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"])
-            must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "udp", "--dport", "4500", "-j", "MARK", "--set-mark", mark_hex])
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "udp", "--dport", "4500", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                for egress_source in headend_egress_sources:
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "udp", "--sport", "4500", "-j", "SNAT", "--to-source", public_priv_ip])
-
-    if esp50:
-        if not use_nft_classification:
-            must(["iptables", "-A", filter_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "ACCEPT"])
-            must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_ip, "-p", "50", "-j", "MARK", "--set-mark", mark_hex])
-        if public_priv_ip != public_ip:
-            if not use_nft_classification:
-                must(["iptables", "-t", "mangle", "-A", mangle_chain, "-i", pub_if, "-s", peer_cidr, "-d", public_priv_ip, "-p", "50", "-j", "MARK", "--set-mark", mark_hex])
-            if nat_rewrite and not use_nft_translation:
-                for nat_pre_target in nat_preroute_targets:
-                    must(["iptables", "-t", "nat", "-A", nat_pre_chain, "-i", pub_if, "-s", peer_cidr, "-d", nat_pre_target, "-p", "50", "-j", "DNAT", "--to-destination", nat_preroute_dst])
-                for egress_source in headend_egress_sources:
-                    must(["iptables", "-t", "nat", "-A", nat_post_chain, "-o", pub_if, "-s", egress_source, "-d", peer_cidr, "-p", "50", "-j", "SNAT", "--to-source", public_priv_ip])
-
-    if use_nft_classification or use_nft_translation or use_nft_bridge:
-        if classification_modules is None:
-            raise SystemExit("nftables pass-through backends require local customer inventory for customer-scoped apply")
-        merged_modules = _merge_classification_modules(classification_modules, selected_module=module)
-        apply_passthrough_nft_state(merged_modules, nft_global_cfg)
-    else:
-        _ensure_passthrough_default_drop(
-            default_drop=default_drop,
-            pub_if=pub_if,
-            public_ip=public_ip,
-            public_priv_ip=public_priv_ip,
-            filter_chain=filter_chain,
-        )
+    merged_modules = _merge_classification_modules(classification_modules, selected_module=module)
+    apply_passthrough_nft_state(merged_modules, nft_global_cfg)
     print(f"Applied customer module {module['name']}.")
     print("Mode: pass-through (customer-scoped delta apply).")
 
@@ -900,9 +437,9 @@ def remove_customer_passthrough(
     natd_dpi_queue_in: int = 2111,
     natd_dpi_queue_out: int = 2112,
     natd_dpi_queue_bypass: bool = True,
-    classification_backend: str = "legacy_iptables",
-    translation_backend: str = "legacy_iptables",
-    bridge_backend: str = "legacy_iptables",
+    classification_backend: str = "nftables",
+    translation_backend: str = "nftables",
+    bridge_backend: str = "nftables",
     classification_state_root: str = "/var/lib/rpdb-muxer/nftables",
     classification_table_name: str = "muxer_passthrough",
     translation_table_name: str = "muxer_passthrough_nat",
@@ -912,154 +449,49 @@ def remove_customer_passthrough(
     public_priv_ip: str = "",
     default_drop: bool = True,
 ) -> None:
-    use_nft_classification = _use_nft_classification(classification_backend)
-    use_nft_translation = _use_nft_translation(translation_backend)
-    use_nft_bridge = _use_nft_bridge(bridge_backend)
-    _clear_passthrough_customer_runtime(
+    _require_nft_only(
+        classification_backend=classification_backend,
+        translation_backend=translation_backend,
+        bridge_backend=bridge_backend,
+    )
+    if classification_modules is None:
+        raise SystemExit("nftables pass-through backends require local customer inventory for customer-scoped remove")
+
+    _clear_passthrough_customer_transport(
         module,
         inside_if=inside_if,
         inside_ip=inside_ip,
         transport_local_mode=transport_local_mode,
         base_table=base_table,
         base_mark=base_mark,
-        mangle_chain=mangle_chain,
-        mangle_post_chain=mangle_post_chain,
-        filter_chain=filter_chain,
-        nat_pre_chain=nat_pre_chain,
-        nat_post_chain=nat_post_chain,
     )
-    if use_nft_classification or use_nft_translation or use_nft_bridge:
-        if classification_modules is None:
-            raise SystemExit("nftables pass-through backends require local customer inventory for customer-scoped remove")
-        nft_global_cfg = _passthrough_nft_global_cfg(
-            public_ip=public_ip,
-            public_priv_ip=public_priv_ip,
-            pub_if=pub_if,
-            default_drop=default_drop,
-            nat_rewrite=True,
-            base_mark=base_mark,
-            classification_backend=classification_backend,
-            translation_backend=translation_backend,
-            bridge_backend=bridge_backend,
-            nfqueue_enabled=nfqueue_enabled,
-            nfqueue_queue_in=nfqueue_queue_in,
-            nfqueue_queue_out=nfqueue_queue_out,
-            nfqueue_queue_bypass=nfqueue_queue_bypass,
-            natd_dpi_enabled=natd_dpi_enabled,
-            natd_dpi_queue_in=natd_dpi_queue_in,
-            natd_dpi_queue_out=natd_dpi_queue_out,
-            natd_dpi_queue_bypass=natd_dpi_queue_bypass,
-            classification_state_root=classification_state_root,
-            classification_table_name=classification_table_name,
-            translation_table_name=translation_table_name,
-        )
-        remaining_modules = _merge_classification_modules(classification_modules, remove_name=str(module["name"]))
-        apply_passthrough_nft_state(remaining_modules, nft_global_cfg)
+    nft_global_cfg = _passthrough_nft_global_cfg(
+        public_ip=public_ip,
+        public_priv_ip=public_priv_ip,
+        pub_if=pub_if,
+        default_drop=default_drop,
+        nat_rewrite=True,
+        base_mark=base_mark,
+        classification_backend=classification_backend,
+        translation_backend=translation_backend,
+        bridge_backend=bridge_backend,
+        nfqueue_enabled=nfqueue_enabled,
+        nfqueue_queue_in=nfqueue_queue_in,
+        nfqueue_queue_out=nfqueue_queue_out,
+        nfqueue_queue_bypass=nfqueue_queue_bypass,
+        natd_dpi_enabled=natd_dpi_enabled,
+        natd_dpi_queue_in=natd_dpi_queue_in,
+        natd_dpi_queue_out=natd_dpi_queue_out,
+        natd_dpi_queue_bypass=natd_dpi_queue_bypass,
+        classification_state_root=classification_state_root,
+        classification_table_name=classification_table_name,
+        translation_table_name=translation_table_name,
+    )
+    remaining_modules = _merge_classification_modules(classification_modules, remove_name=str(module["name"]))
+    apply_passthrough_nft_state(remaining_modules, nft_global_cfg)
     print(f"Removed customer module {module['name']}.")
     print("Mode: pass-through (customer-scoped delta remove).")
 
 
-def apply_termination(
-    global_cfg: Dict[str, Any],
-    modules: List[Dict[str, Any]],
-    pub_if: str,
-    inside_if: str,
-    public_ip: str,
-    public_priv_ip: str,
-    inside_ip: str,
-    backend_ul: str,
-    transport_local_mode: str,
-    overlay_pool: ipaddress.IPv4Network,
-    mangle_chain: str,
-    mangle_post_chain: str,
-    filter_chain: str,
-    nat_pre_chain: str,
-    nat_post_chain: str,
-    default_drop: bool,
-) -> None:
-    input_chain = str(global_cfg["iptables"]["chains"].get("input_chain", "MUXER_INPUT"))
-
-    remove_jump("mangle", "PREROUTING", mangle_chain)
-    remove_jump("mangle", "POSTROUTING", mangle_post_chain)
-    remove_jump("nat", "PREROUTING", nat_pre_chain)
-    remove_jump("nat", "POSTROUTING", nat_post_chain)
-    flush_chain("mangle", mangle_chain)
-    flush_chain("mangle", mangle_post_chain)
-    flush_chain("nat", nat_pre_chain)
-    flush_chain("nat", nat_post_chain)
-
-    ensure_chain("filter", filter_chain)
-    ensure_chain("filter", input_chain)
-    ensure_jump("filter", "FORWARD", filter_chain, position=1)
-    ensure_jump("filter", "INPUT", input_chain, position=1)
-
-    flush_chain("filter", filter_chain)
-    flush_chain("filter", input_chain)
-
-    must(["iptables", "-A", filter_chain, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"])
-    must(["iptables", "-A", input_chain, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"])
-
-    for module in modules:
-        cid = int(module["id"])
-        name = str(module["name"])
-        peer_cidr = str(module["peer_ip"])
-        ipaddress.ip_network(peer_cidr, strict=False)
-        udp500, udp4500, esp50, _force_4500_to_500 = customer_protocol_flags(module)
-
-        tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
-        module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
-        if transport_local_mode == "interface_ip":
-            cust_inside_ip = inside_ip
-            if module_inside_ip != inside_ip:
-                remove_local_ipv4(inside_if, module_inside_ip)
-        else:
-            cust_inside_ip = module_inside_ip
-        cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
-        ipaddress.ip_address(cust_inside_ip)
-        ipaddress.ip_address(cust_backend_ul)
-        if transport_local_mode != "interface_ip" and cust_inside_ip != inside_ip:
-            ensure_local_ipv4(inside_if, cust_inside_ip, prefix_len=32)
-        if "overlay" in module and module["overlay"]:
-            mux_overlay = str(module["overlay"]["mux_ip"])
-        else:
-            mux_overlay, _ = calc_overlay(overlay_pool, cid)
-        ensure_tunnel(
-            tunnel_ifname,
-            cust_inside_ip,
-            cust_backend_ul,
-            mux_overlay,
-            mode=tunnel_mode,
-            ttl=tunnel_ttl,
-            key=tunnel_key,
-        )
-
-        ipsec_cfg = module.get("ipsec", {}) or {}
-        local_subnets = subnet_list(ipsec_cfg.get("local_subnets", []))
-        remote_subnets = subnet_list(ipsec_cfg.get("remote_subnets", []))
-
-        for local_subnet in local_subnets:
-            must(["ip", "route", "replace", local_subnet, "dev", tunnel_ifname])
-
-        for remote_subnet in remote_subnets:
-            for local_subnet in local_subnets:
-                must(["iptables", "-A", filter_chain, "-s", remote_subnet, "-d", local_subnet, "-o", tunnel_ifname, "-j", "ACCEPT"])
-                must(["iptables", "-A", filter_chain, "-i", tunnel_ifname, "-s", local_subnet, "-d", remote_subnet, "-j", "ACCEPT"])
-
-        for dst in sorted({public_ip, public_priv_ip}):
-            if udp500:
-                must(["iptables", "-A", input_chain, "-i", pub_if, "-s", peer_cidr, "-d", dst, "-p", "udp", "--dport", "500", "-j", "ACCEPT"])
-            if udp4500:
-                must(["iptables", "-A", input_chain, "-i", pub_if, "-s", peer_cidr, "-d", dst, "-p", "udp", "--dport", "4500", "-j", "ACCEPT"])
-            if esp50:
-                must(["iptables", "-A", input_chain, "-i", pub_if, "-s", peer_cidr, "-d", dst, "-p", "50", "-j", "ACCEPT"])
-
-    if default_drop:
-        for drop_dst in sorted({public_ip, public_priv_ip}):
-            must(["iptables", "-A", input_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "500", "-j", "DROP"])
-            must(["iptables", "-A", input_chain, "-i", pub_if, "-d", drop_dst, "-p", "udp", "--dport", "4500", "-j", "DROP"])
-            must(["iptables", "-A", input_chain, "-i", pub_if, "-d", drop_dst, "-p", "50", "-j", "DROP"])
-
-    conf_path, secrets_path, conn_count = render_strongswan(global_cfg, modules)
-    print(f"Applied {len(modules)} customer module(s).")
-    print("Mode: muxer-termination (IPsec terminated locally; cleartext routed over per-customer IPIP).")
-    print(f"Rendered strongSwan: {conf_path} and {secrets_path} with {conn_count} connection(s).")
+def apply_termination(*args: Any, **kwargs: Any) -> None:
+    raise SystemExit("RPDB runtime blocks termination mode until it is implemented with nftables-only activation")

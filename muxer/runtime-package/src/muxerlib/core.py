@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import ipaddress
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
@@ -121,79 +120,6 @@ def ensure_sysctl() -> None:
     must(["sysctl", "-w", "net.ipv4.ip_forward=1"])
     must(["sysctl", "-w", "net.ipv4.conf.all.rp_filter=0"])
     must(["sysctl", "-w", "net.ipv4.conf.default.rp_filter=0"])
-
-
-def ensure_chain(table: str, chain: str) -> None:
-    result = sh(["iptables", "-t", table, "-S", chain], check=False)
-    if result.returncode != 0:
-        must(["iptables", "-t", table, "-N", chain])
-
-
-def ensure_jump(table: str, parent_chain: str, chain: str, position: int = 1) -> None:
-    rules = out(["iptables", "-t", table, "-S", parent_chain]).splitlines()
-    want = f"-A {parent_chain} -j {chain}"
-    if not any(want in rule for rule in rules):
-        must(["iptables", "-t", table, "-I", parent_chain, str(position), "-j", chain])
-
-
-def flush_chain(table: str, chain: str) -> None:
-    sh(["iptables", "-t", table, "-F", chain], check=False)
-
-
-def delete_chain(table: str, chain: str) -> None:
-    sh(["iptables", "-t", table, "-F", chain], check=False)
-    sh(["iptables", "-t", table, "-X", chain], check=False)
-
-
-def remove_jump(table: str, parent_chain: str, chain: str) -> None:
-    while True:
-        rules = out(["iptables", "-t", table, "-S", parent_chain]).splitlines()
-        found = False
-        for rule in rules:
-            if rule.strip() == f"-A {parent_chain} -j {chain}":
-                must(["iptables", "-t", table, "-D", parent_chain, "-j", chain])
-                found = True
-                break
-        if not found:
-            break
-
-
-def ensure_iptables_rule(table: str, parts: List[str]) -> None:
-    if not parts or parts[0] != "-A" or len(parts) < 2:
-        raise SystemExit("ensure_iptables_rule expects an append-form iptables rule")
-    check_cmd = ["iptables", "-t", table, "-C", parts[1], *parts[2:]]
-    if sh(check_cmd, check=False).returncode == 0:
-        return
-    must(["iptables", "-t", table, *parts])
-
-
-def delete_iptables_rule(table: str, parts: List[str]) -> None:
-    if not parts or parts[0] != "-A" or len(parts) < 2:
-        raise SystemExit("delete_iptables_rule expects an append-form iptables rule")
-    sh(["iptables", "-t", table, "-D", parts[1], *parts[2:]], check=False)
-
-
-def delete_iptables_rules_by_peer(table: str, chain: str, peer_cidr: str) -> int:
-    removed = 0
-    while True:
-        result = sh(["iptables", "-t", table, "-S", chain], check=False)
-        if result.returncode != 0:
-            return removed
-        matched_rule = ""
-        for rule in (result.stdout or "").splitlines():
-            line = rule.strip()
-            if not line.startswith(f"-A {chain} "):
-                continue
-            haystack = f" {line} "
-            if f" -s {peer_cidr} " in haystack or f" -d {peer_cidr} " in haystack:
-                matched_rule = line
-                break
-        if not matched_rule:
-            return removed
-        parts = shlex.split(matched_rule)
-        parts[0] = "-D"
-        must(["iptables", "-t", table, *parts])
-        removed += 1
 
 
 def ensure_tunnel(
