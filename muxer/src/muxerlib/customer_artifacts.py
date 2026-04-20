@@ -236,9 +236,11 @@ def _render_ipsec_intent(
 ) -> Dict[str, Any]:
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
+    local_addrs = ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP")
     return {
         "customer_name": customer.get("name"),
         "peer_public_ip": peer.get("public_ip"),
+        "local_addrs": local_addrs,
         "remote_id": ipsec.get("remote_id") or peer.get("remote_id"),
         "local_id": ipsec.get("local_id") or _placeholder("HEADEND_ID"),
         "ike_version": str(ipsec.get("ike_version") or "ikev2"),
@@ -297,13 +299,14 @@ def _render_swanctl_connection(
     secret_name = f"ike-{customer_name}-psk"
     remote_id = str(ipsec.get("remote_id") or peer.get("remote_id") or peer.get("public_ip") or "")
     local_id = str(ipsec.get("local_id") or "")
+    local_addrs = str(ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP"))
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
     lines: List[str] = [
         "connections {",
         f"  {customer_name} {{",
         f"    version = {_render_swanctl_version(ipsec)}",
-        f"    local_addrs = {_placeholder('HEADEND_PUBLIC_IP')}",
+        f"    local_addrs = {local_addrs}",
         f"    remote_addrs = {peer.get('public_ip')}",
     ]
     _append_if(lines, "proposals", ike_proposals or None)

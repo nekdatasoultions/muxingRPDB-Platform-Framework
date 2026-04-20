@@ -707,13 +707,19 @@ def main() -> int:
         raise SystemExit("Customer 4 NAT-T dry-run did not select NAT head end")
     if ((customer4_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 4 NAT-T dry-run gate did not report dry_run_ready")
+    customer4_package_dir = _resolve_repo_path(str((customer4_deploy.get("package") or {}).get("package_dir") or ""))
     customer4_edge_return_route = _assert_headend_edge_return_route(
-        _resolve_repo_path(str((customer4_deploy.get("package") or {}).get("package_dir") or "")),
+        customer4_package_dir,
         customer_name="vpn-customer-stage1-15-cust-0004",
         peer_public_ip="3.237.201.84",
         muxer_public_private_ip="172.31.33.150",
         headend_public_iface="ens34",
     )
+    customer4_swanctl = (
+        customer4_package_dir / "bundle" / "headend" / "ipsec" / "swanctl-connection.conf"
+    ).read_text(encoding="utf-8")
+    if "local_addrs = 172.31.40.222" not in customer4_swanctl:
+        raise SystemExit("Customer 4 NAT-T head-end config must listen on the NAT head-end primary IP")
 
     blocked_environment = yaml.safe_load(
         (MUXER_DIR / "config" / "deployment-environments" / "example-rpdb.yaml").read_text(
@@ -834,6 +840,7 @@ def main() -> int:
             "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
             "customer4_gate": customer4_deploy["dry_run_gate"]["status"],
             "customer4_edge_return_route": customer4_edge_return_route,
+            "customer4_headend_local_addrs": "172.31.40.222",
             "synthetic_blocked_status": blocked_report["status"],
             "missing_backup_status": missing_backup_report["status"],
             "missing_backup_gate": missing_backup_report["dry_run_gate"]["status"],

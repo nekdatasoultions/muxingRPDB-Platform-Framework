@@ -219,6 +219,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
 
     swanctl_expectations = {
         "swanctl_version": f"version = {ipsec_intent.get('swanctl_version')}",
+        "local_addrs": f"local_addrs = {ipsec_intent.get('local_addrs')}",
         "rendered_ike_proposals": f"proposals = {ipsec_intent.get('rendered_ike_proposals')}",
         "rendered_esp_proposals": f"esp_proposals = {ipsec_intent.get('rendered_esp_proposals')}",
         "rendered_replay_window": f"replay_window = {ipsec_intent.get('rendered_replay_window')}",
