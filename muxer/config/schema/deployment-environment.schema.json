@@ -347,6 +347,15 @@
             },
             "private_ip": {
               "$ref": "#/$defs/ipv4"
+            },
+            "public_ip": {
+              "$ref": "#/$defs/ipv4"
+            },
+            "eip_allocation_id": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "eip_association_id": {
+              "$ref": "#/$defs/non_empty_string"
             }
           }
         },

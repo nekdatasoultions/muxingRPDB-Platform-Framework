@@ -24,6 +24,9 @@ targets:
       type: instance_id
       value: i-0c8c34de42777c769
       private_ip: 172.31.33.150
+      public_ip: 23.20.31.151
+      eip_allocation_id: eipalloc-0c1769dbbdd3526c1
+      eip_association_id: eipassoc-08b33d79cc8ad0d71
     access:
       method: ssh
   headends:
