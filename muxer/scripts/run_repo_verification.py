@@ -2611,6 +2611,10 @@ print(
         raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
     if 'Path("etc") / "muxer" / "config" / "customer-modules"' not in muxer_customer_lib_text:
         raise SystemExit("muxer customer modules must install under the runtime config/customer-modules inventory")
+    if 'nft list table "${NFT_FAMILY}" "${NFT_TABLE}"' not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer firewall apply must detect an existing customer nftables table")
+    if 'nft delete table "${NFT_FAMILY}" "${NFT_TABLE}"' not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer firewall apply must replace existing customer nftables table before loading")
     live_apply_lib_text = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(encoding="utf-8")
     for required_live_runtime_token in (
         "prepare_muxer_runtime_payload",
@@ -2717,6 +2721,7 @@ print(
             "muxer_apply_invokes_runtime": True,
             "muxer_remove_invokes_runtime": True,
             "module_root_matches_runtime_inventory": True,
+            "customer_nftables_tables_replaced": True,
             "shared_nftables_tables_replaced": True,
             "python39_runtime_write_text_compatible": True,
             "ssh_live_apply_syncs_muxer_runtime": True,

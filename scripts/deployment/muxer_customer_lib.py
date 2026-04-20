@@ -296,6 +296,12 @@ def _render_nft_apply_script() -> str:
         [
             'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
             'NFT_APPLY="${SCRIPT_DIR}/nftables.apply.nft"',
+            'NFT_STATE="${SCRIPT_DIR}/nftables-state.json"',
+            'NFT_FAMILY="$(python3 -c \'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("table_family") or "ip")\' "${NFT_STATE}")"',
+            'NFT_TABLE="$(python3 -c \'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("table_name") or "")\' "${NFT_STATE}")"',
+            'if [ -n "${NFT_TABLE}" ] && nft list table "${NFT_FAMILY}" "${NFT_TABLE}" >/dev/null 2>&1; then',
+            '  nft delete table "${NFT_FAMILY}" "${NFT_TABLE}"',
+            'fi',
             'nft -c -f "${NFT_APPLY}"',
             'nft -f "${NFT_APPLY}"',
         ]
