@@ -2584,6 +2584,16 @@ print(
                 f"SSH live apply must sync and validate muxer runtime before customer apply: {required_live_runtime_token}"
             )
     runtime_nftables_text = (RUNTIME_ROOT / "src" / "muxerlib" / "nftables.py").read_text(encoding="utf-8")
+    runtime_py39_incompatible_writes: list[str] = []
+    for runtime_python in RUNTIME_SRC.rglob("*.py"):
+        for line_number, line in enumerate(runtime_python.read_text(encoding="utf-8").splitlines(), 1):
+            if "write_text(" in line and "newline=" in line:
+                runtime_py39_incompatible_writes.append(f"{runtime_python}:{line_number}")
+    if runtime_py39_incompatible_writes:
+        raise SystemExit(
+            "runtime package must avoid Path.write_text(newline=...) for Python 3.9 nodes: "
+            + ", ".join(runtime_py39_incompatible_writes)
+        )
     if 'sh(["nft", "delete", "table", "inet"' not in runtime_nftables_text:
         raise SystemExit("runtime nftables apply must replace the shared classifier table before loading")
     if 'sh(["nft", "delete", "table", "ip"' not in runtime_nftables_text:
@@ -2663,6 +2673,7 @@ print(
             "muxer_remove_invokes_runtime": True,
             "module_root_matches_runtime_inventory": True,
             "shared_nftables_tables_replaced": True,
+            "python39_runtime_write_text_compatible": True,
             "ssh_live_apply_syncs_muxer_runtime": True,
             "nft_nat_render_contract": nft_nat_render_contract,
         },
