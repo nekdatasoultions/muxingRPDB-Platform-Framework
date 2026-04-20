@@ -11,7 +11,7 @@ This example shows the full RPDB customer flow for one customer:
 
 The example below uses:
 
-- [example-nat-0001/customer.yaml](/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml)
+- [example-nat-0001/customer.yaml](../config/customer-sources/examples/example-nat-0001/customer.yaml)
 
 ## 1. Source File
 

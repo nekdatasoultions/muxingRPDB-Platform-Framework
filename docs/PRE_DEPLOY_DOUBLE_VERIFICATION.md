@@ -11,7 +11,7 @@ verification path across both branches:
 
 ## Wrapper
 
-- [run_double_verification.py](/scripts/deployment/run_double_verification.py)
+- [run_double_verification.py](../scripts/deployment/run_double_verification.py)
 
 ## What It Runs
 

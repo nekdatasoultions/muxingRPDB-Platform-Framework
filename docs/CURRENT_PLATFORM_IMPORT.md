@@ -11,17 +11,17 @@ This gives us one place to work from while we continue the RPDB migration.
 
 ### Current-State Runbooks
 
-Imported under [current-state](/docs/current-state):
+Imported under [current-state](current-state):
 
-- [DEPLOYMENT_RUNBOOK.md](/docs/current-state/DEPLOYMENT_RUNBOOK.md)
-- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](/docs/current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
-- [CLOUDFORMATION_NETBOX_RUNBOOK.md](/docs/current-state/CLOUDFORMATION_NETBOX_RUNBOOK.md)
-- [HEADEND_HA_ACTIVE_STANDBY.md](/docs/current-state/HEADEND_HA_ACTIVE_STANDBY.md)
-- [HEADEND_RUNTIME_STATUS.md](/docs/current-state/HEADEND_RUNTIME_STATUS.md)
+- [DEPLOYMENT_RUNBOOK.md](current-state/DEPLOYMENT_RUNBOOK.md)
+- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
+- [CLOUDFORMATION_NETBOX_RUNBOOK.md](current-state/CLOUDFORMATION_NETBOX_RUNBOOK.md)
+- [HEADEND_HA_ACTIVE_STANDBY.md](current-state/HEADEND_HA_ACTIVE_STANDBY.md)
+- [HEADEND_RUNTIME_STATUS.md](current-state/HEADEND_RUNTIME_STATUS.md)
 
 ### CloudFormation Assets
 
-Imported under [infra/cfn](/infra/cfn):
+Imported under [infra/cfn](../infra/cfn):
 
 - muxer templates and parameter files
 - VPN head-end templates and parameter files
@@ -29,7 +29,7 @@ Imported under [infra/cfn](/infra/cfn):
 
 ### Base Platform Scripts
 
-Imported under [scripts/platform](/scripts/platform):
+Imported under [scripts/platform](../scripts/platform):
 
 - CloudFormation deploy helpers
 - CloudFormation validation helpers
@@ -43,11 +43,11 @@ Imported under [scripts/platform](/scripts/platform):
 
 For a fresh environment with no customers yet:
 
-1. start with the current-state platform docs in [docs/current-state](/docs/current-state)
-2. use the imported CloudFormation assets in [infra/cfn](/infra/cfn)
-3. use the imported base deploy scripts in [scripts/platform](/scripts/platform)
-4. make the database layer explicit with [DATABASE_BOOTSTRAP.md](/docs/DATABASE_BOOTSTRAP.md) and [ensure_dynamodb_tables.py](/scripts/platform/ensure_dynamodb_tables.py)
-5. use the RPDB-native front door in [FRESH_EMPTY_PLATFORM_RUNBOOK.md](/docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md) and [deploy_empty_platform.py](/scripts/platform/deploy_empty_platform.py)
+1. start with the current-state platform docs in [docs/current-state](current-state)
+2. use the imported CloudFormation assets in [infra/cfn](../infra/cfn)
+3. use the imported base deploy scripts in [scripts/platform](../scripts/platform)
+4. make the database layer explicit with [DATABASE_BOOTSTRAP.md](DATABASE_BOOTSTRAP.md) and [ensure_dynamodb_tables.py](../scripts/platform/ensure_dynamodb_tables.py)
+5. use the RPDB-native front door in [FRESH_EMPTY_PLATFORM_RUNBOOK.md](FRESH_EMPTY_PLATFORM_RUNBOOK.md) and [deploy_empty_platform.py](../scripts/platform/deploy_empty_platform.py)
 6. after the empty platform exists and the customer SoT table is ensured, move into the RPDB-native customer flow
 
 ### Customer Onboarding
@@ -55,9 +55,9 @@ For a fresh environment with no customers yet:
 For customer onboarding in the new model, use the RPDB-native pieces already in
 this repo:
 
-- per-customer source files under [muxer/config/customer-sources](/muxer/config/customer-sources)
-- render/export/bind scripts under [muxer/scripts](/muxer/scripts)
-- packaging and readiness scripts under [scripts](/scripts)
+- per-customer source files under [muxer/config/customer-sources](../muxer/config/customer-sources)
+- render/export/bind scripts under [muxer/scripts](../muxer/scripts)
+- packaging and readiness scripts under [scripts](../scripts)
 
 ## Boundary
 

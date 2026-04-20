@@ -16,11 +16,11 @@ Important design direction:
 
 That intent split is tracked in:
 
-- [VPN_SERVICE_INTENT_MODEL.md](/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
+- [VPN_SERVICE_INTENT_MODEL.md](VPN_SERVICE_INTENT_MODEL.md)
 
 The target operator-facing contract is described in:
 
-- [PROVISIONING_INPUT_MODEL.md](/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+- [PROVISIONING_INPUT_MODEL.md](PROVISIONING_INPUT_MODEL.md)
 
 ## File Location
 
@@ -170,7 +170,7 @@ generates a reviewed NAT request when UDP/4500 is observed from the same peer.
 
 Detailed model:
 
-- [DYNAMIC_NAT_T_PROVISIONING.md](/muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md)
+- [DYNAMIC_NAT_T_PROVISIONING.md](DYNAMIC_NAT_T_PROVISIONING.md)
 
 ### `customer.ipsec`
 
@@ -283,10 +283,10 @@ automatically.
 
 That model is tracked in:
 
-- [PROVISIONING_INPUT_MODEL.md](/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+- [PROVISIONING_INPUT_MODEL.md](PROVISIONING_INPUT_MODEL.md)
 
 ## Validation Target
 
 The machine-readable schema for this file lives at:
 
-- [customer-source.schema.json](/muxer/config/schema/customer-source.schema.json)
+- [customer-source.schema.json](../config/schema/customer-source.schema.json)

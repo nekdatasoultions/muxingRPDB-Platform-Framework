@@ -141,8 +141,8 @@ expects at the package root:
 
 The database layer is explicit in:
 
-- [DATABASE_BOOTSTRAP.md](/docs/DATABASE_BOOTSTRAP.md)
-- [ensure_dynamodb_tables.py](/scripts/platform/ensure_dynamodb_tables.py)
+- [DATABASE_BOOTSTRAP.md](DATABASE_BOOTSTRAP.md)
+- [ensure_dynamodb_tables.py](../scripts/platform/ensure_dynamodb_tables.py)
 
 For a fresh empty platform, the important current production-shaped behavior is:
 
@@ -197,6 +197,6 @@ After the empty platform is proven:
 
 References:
 
-- [CURRENT_PLATFORM_IMPORT.md](/docs/CURRENT_PLATFORM_IMPORT.md)
-- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
-- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](/docs/current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
+- [CURRENT_PLATFORM_IMPORT.md](CURRENT_PLATFORM_IMPORT.md)
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](PRE_DEPLOY_DOUBLE_VERIFICATION.md)
+- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)

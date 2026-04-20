@@ -22,7 +22,7 @@ Current imported production shape:
 
 - table name: `muxingplus-customer-sot`
 - source:
-  [parameters.single-muxer.us-east-1.json](/infra/cfn/parameters.single-muxer.us-east-1.json)
+  [parameters.single-muxer.us-east-1.json](../infra/cfn/parameters.single-muxer.us-east-1.json)
 - key schema:
   `customer_name` (HASH, String)
 
@@ -45,9 +45,9 @@ Key schema:
 Current imported production-shaped head-end parameters:
 
 - NAT:
-  [parameters.vpn-headend.nat.graviton-efs.us-east-1.json](/infra/cfn/parameters.vpn-headend.nat.graviton-efs.us-east-1.json)
+  [parameters.vpn-headend.nat.graviton-efs.us-east-1.json](../infra/cfn/parameters.vpn-headend.nat.graviton-efs.us-east-1.json)
 - non-NAT:
-  [parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json](/infra/cfn/parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json)
+  [parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json](../infra/cfn/parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json)
 
 Current imported production shape:
 
@@ -95,7 +95,7 @@ Important note:
 
 Use:
 
-- [ensure_dynamodb_tables.py](/scripts/platform/ensure_dynamodb_tables.py)
+- [ensure_dynamodb_tables.py](../scripts/platform/ensure_dynamodb_tables.py)
 
 ## Example
 
@@ -146,6 +146,6 @@ That means:
 
 ## References
 
-- [CURRENT_PLATFORM_IMPORT.md](/docs/CURRENT_PLATFORM_IMPORT.md)
-- [DEPLOYMENT_RUNBOOK.md](/docs/current-state/DEPLOYMENT_RUNBOOK.md)
-- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](/docs/current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
+- [CURRENT_PLATFORM_IMPORT.md](CURRENT_PLATFORM_IMPORT.md)
+- [DEPLOYMENT_RUNBOOK.md](current-state/DEPLOYMENT_RUNBOOK.md)
+- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
