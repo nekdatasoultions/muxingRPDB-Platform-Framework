@@ -727,6 +727,10 @@ def apply_passthrough_nft_state(
     _write_text(paths["script_path"], script)
     _write_json(paths["model_path"], model)
     _write_json(paths["bridge_manifest_path"], model.get("bridge") or {})
+    sh(["nft", "delete", "table", "inet", model["table"]["name"]], check=False)
+    nat_table_name = str(((model.get("translation") or {}).get("nat_table") or {}).get("name") or "")
+    if nat_table_name:
+        sh(["nft", "delete", "table", "ip", nat_table_name], check=False)
     must(["nft", "-f", str(paths["script_path"])])
     return {
         "customer_count": model["customer_count"],

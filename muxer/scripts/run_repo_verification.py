@@ -1498,6 +1498,7 @@ print(
             "remove_policy": 0,
             "remove_tunnel": 0,
             "nft_apply_calls": 0,
+            "nft_delete_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
@@ -1517,7 +1518,13 @@ print(
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
+        def record_nft_sh(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:3] == ["nft", "delete", "table"]:
+                counts["nft_delete_calls"] += 1
+
         nftables.must = record_nft_must
+        nftables.sh = record_nft_sh
         builtins.print = lambda *args, **kwargs: None
 
         modes.apply_customer_passthrough(
@@ -1610,6 +1617,8 @@ print(
         raise SystemExit("customer-scoped delta apply unexpectedly flushed chains")
     if delta_apply_result["nft_apply_calls"] != 2:
         raise SystemExit("customer-scoped delta apply/remove did not program nftables classification twice")
+    if delta_apply_result["nft_delete_calls"] != 4:
+        raise SystemExit("customer-scoped delta apply/remove did not replace both shared nftables tables on each render")
     if not delta_apply_result["artifact_script_exists"] or not delta_apply_result["artifact_model_exists"]:
         raise SystemExit("customer-scoped delta apply/remove did not write nftables artifacts")
     if delta_apply_result["apply_render_mode"] != "nftables-live-pass-through":
@@ -1660,6 +1669,7 @@ print(
         counts = {
             "flush_chain": 0,
             "nft_apply_calls": 0,
+            "nft_delete_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
@@ -1677,7 +1687,13 @@ print(
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
+        def record_nft_sh(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:3] == ["nft", "delete", "table"]:
+                counts["nft_delete_calls"] += 1
+
         nftables.must = record_nft_must
+        nftables.sh = record_nft_sh
         builtins.print = lambda *args, **kwargs: None
 
         modes.apply_passthrough(
@@ -1743,6 +1759,8 @@ print(
     )
     if full_apply_result["nft_apply_calls"] != 1:
         raise SystemExit("fleet apply did not program the nftables classification backend exactly once")
+    if full_apply_result["nft_delete_calls"] != 2:
+        raise SystemExit("fleet apply did not replace both shared nftables tables before rendering")
     if not full_apply_result["artifact_script_exists"] or not full_apply_result["artifact_model_exists"]:
         raise SystemExit("fleet apply did not write nftables classification artifacts")
     if full_apply_result["render_mode"] != "nftables-live-pass-through":
@@ -2192,6 +2210,7 @@ print(
             "remove_policy": 0,
             "remove_tunnel": 0,
             "nft_apply_calls": 0,
+            "nft_delete_calls": 0,
         }
 
         modes.ensure_chain = lambda *args, **kwargs: None
@@ -2211,7 +2230,13 @@ print(
             if cmd[:2] == ["nft", "-f"]:
                 counts["nft_apply_calls"] += 1
 
+        def record_nft_sh(args, *unused_args, **unused_kwargs):
+            cmd = list(args)
+            if cmd[:3] == ["nft", "delete", "table"]:
+                counts["nft_delete_calls"] += 1
+
         nftables.must = record_nft_must
+        nftables.sh = record_nft_sh
         builtins.print = lambda *args, **kwargs: None
 
         modes.apply_customer_passthrough(
@@ -2339,6 +2364,8 @@ print(
         raise SystemExit("bridge delta apply unexpectedly flushed chains")
     if bridge_delta_result["nft_apply_calls"] != 2:
         raise SystemExit("bridge delta apply/remove did not program nftables state twice")
+    if bridge_delta_result["nft_delete_calls"] != 4:
+        raise SystemExit("bridge delta apply/remove did not replace both shared nftables tables on each render")
     if not (
         bridge_delta_result["artifact_script_exists"]
         and bridge_delta_result["artifact_model_exists"]
@@ -2526,6 +2553,29 @@ print(
             in (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
                 encoding="utf-8"
             ),
+        },
+    )
+
+    muxer_customer_lib_text = (REPO_ROOT / "scripts" / "deployment" / "muxer_customer_lib.py").read_text(
+        encoding="utf-8"
+    )
+    if "/etc/muxer/src/muxctl.py flush" not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer apply must flush shared nftables state before runtime apply")
+    if "/etc/muxer/src/muxctl.py apply-customer" not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer apply must invoke the live muxer runtime customer apply path")
+    if "/etc/muxer/src/muxctl.py remove-customer" not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
+    runtime_nftables_text = (RUNTIME_ROOT / "src" / "muxerlib" / "nftables.py").read_text(encoding="utf-8")
+    if 'sh(["nft", "delete", "table", "inet"' not in runtime_nftables_text:
+        raise SystemExit("runtime nftables apply must replace the shared classifier table before loading")
+    if 'sh(["nft", "delete", "table", "ip"' not in runtime_nftables_text:
+        raise SystemExit("runtime nftables apply must replace the shared NAT table before loading")
+    record_step(
+        "muxer_runtime_customer_apply_gate",
+        {
+            "muxer_apply_invokes_runtime": True,
+            "muxer_remove_invokes_runtime": True,
+            "shared_nftables_tables_replaced": True,
         },
     )
 

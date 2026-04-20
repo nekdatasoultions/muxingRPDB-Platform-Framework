@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -314,6 +315,7 @@ def _render_nft_remove_script() -> str:
 def _render_master_apply_script(customer_name: str) -> str:
     customer_root = f"/{MUXER_STATE_ROOT.as_posix()}/{customer_name}"
     module_json = f"/{MUXER_MODULE_ROOT.as_posix()}/{customer_name}/customer-module.json"
+    quoted_customer = shlex.quote(customer_name)
     return _render_shell_script(
         [
             'ROOT="${RPDB_MUXER_ROOT:-/}"',
@@ -324,6 +326,10 @@ def _render_master_apply_script(customer_name: str) -> str:
             'bash "${CUSTOMER_ROOT}/tunnel/apply-tunnel.sh"',
             'bash "${CUSTOMER_ROOT}/routing/apply-routing.sh"',
             'bash "${CUSTOMER_ROOT}/firewall/apply-firewall.sh"',
+            'if [ -z "${ROOT}" ] && [ "${RPDB_MUXER_RUNTIME_APPLY:-1}" = "1" ] && [ -x /etc/muxer/src/muxctl.py ]; then',
+            '  /etc/muxer/src/muxctl.py flush',
+            f"  /etc/muxer/src/muxctl.py apply-customer {quoted_customer}",
+            "fi",
         ]
     )
 
@@ -331,12 +337,17 @@ def _render_master_apply_script(customer_name: str) -> str:
 def _render_master_remove_script(customer_name: str) -> str:
     customer_root = f"/{MUXER_STATE_ROOT.as_posix()}/{customer_name}"
     module_json = f"/{MUXER_MODULE_ROOT.as_posix()}/{customer_name}/customer-module.json"
+    quoted_customer = shlex.quote(customer_name)
     return _render_shell_script(
         [
             'ROOT="${RPDB_MUXER_ROOT:-/}"',
             'ROOT="${ROOT%/}"',
             f'CUSTOMER_ROOT="${{ROOT}}{customer_root}"',
             f'MODULE_JSON="${{ROOT}}{module_json}"',
+            'if [ -z "${ROOT}" ] && [ "${RPDB_MUXER_RUNTIME_APPLY:-1}" = "1" ] && [ -x /etc/muxer/src/muxctl.py ]; then',
+            '  /etc/muxer/src/muxctl.py flush',
+            f"  /etc/muxer/src/muxctl.py remove-customer {quoted_customer}",
+            "fi",
             'bash "${CUSTOMER_ROOT}/firewall/remove-firewall.sh"',
             'bash "${CUSTOMER_ROOT}/routing/remove-routing.sh"',
             'bash "${CUSTOMER_ROOT}/tunnel/remove-tunnel.sh"',
