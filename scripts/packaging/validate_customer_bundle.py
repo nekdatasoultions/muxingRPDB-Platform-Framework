@@ -48,6 +48,10 @@ HEADEND_TEXT_FILES = [
     "headend/post-ipsec-nat/nftables.remove.nft",
 ]
 
+BANNED_GENERATED_RUNTIME_TOKENS = [
+    "iptables-restore",
+]
+
 PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
 
 
@@ -97,6 +101,20 @@ def main() -> int:
                 report["errors"].append(
                     f"headend bundle file has unresolved placeholders: {name} -> {', '.join(unresolved)}"
                 )
+
+        for path in sorted(bundle_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            rel = path.relative_to(bundle_dir).as_posix()
+            for token in BANNED_GENERATED_RUNTIME_TOKENS:
+                if token in text:
+                    report["errors"].append(
+                        f"generated bundle file contains banned runtime token: {rel} -> {token}"
+                    )
 
         for name in RECOMMENDED_FILES:
             if not (bundle_dir / name).exists():

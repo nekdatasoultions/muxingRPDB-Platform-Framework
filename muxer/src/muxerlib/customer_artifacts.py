@@ -402,11 +402,11 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
             "apply": 2 if enabled else 0,
             "rollback": 1 if enabled else 0,
         },
-        "prohibited_fallbacks": [
-            "iptables-restore",
-            "MUXER3",
-            "legacy_headend_iptables_activation",
-        ],
+        "fallback_policy": {
+            "backend": "nftables_only",
+            "legacy_fallbacks_allowed": False,
+            "external_repo_fallbacks_allowed": False,
+        },
     }
 
     if not enabled:
@@ -537,7 +537,7 @@ def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, 
             "apply_command_count": manifest.get("apply_command_count"),
             "rollback_command_count": manifest.get("rollback_command_count"),
             "host_mapping_count": manifest.get("host_mapping_count"),
-            "prohibited_fallbacks": manifest.get("prohibited_fallbacks"),
+            "fallback_policy": manifest.get("fallback_policy"),
         },
     }
 
