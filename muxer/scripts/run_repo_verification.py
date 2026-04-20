@@ -2656,6 +2656,7 @@ print(
                 "no_verdict_nat_maps": "type ipv4_addr : verdict" not in script,
                 "no_dnat_statements_inside_map": ": dnat to" not in script,
                 "no_snat_statements_inside_map": ": snat to" not in script,
+                "no_transport_fwmark_rules": "meta mark set" not in script,
                 "script_lines": len(script.splitlines()),
             }
             sys.stdout.write(json.dumps(checks))

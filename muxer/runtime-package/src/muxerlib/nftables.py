@@ -167,20 +167,12 @@ def build_passthrough_nft_model(
 
         if udp500:
             _append_unique(udp500_accept_peers, peer)
-            _append_unique(udp500_mark_peers, peer)
-            peer_mark_udp500[peer] = mark_hex
 
         if udp4500:
             _append_unique(udp4500_accept_peers, peer)
 
-        if udp4500 or force_4500_to_500:
-            _append_unique(udp4500_mark_peers, peer)
-            peer_mark_udp4500[peer] = mark_hex
-
         if esp50:
             _append_unique(esp_accept_peers, peer)
-            _append_unique(esp_mark_peers, peer)
-            peer_mark_esp[peer] = mark_hex
 
         if translation_enabled:
             if udp500:
