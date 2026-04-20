@@ -2569,6 +2569,10 @@ print(
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
     if "include conf.d/rpdb-customers/*.conf" not in headend_customer_lib_text:
         raise SystemExit("head-end customer apply must ensure swanctl includes RPDB customer snippets")
+    if 'nft list table "${NFT_FAMILY}" "${NFT_TABLE}"' not in headend_customer_lib_text:
+        raise SystemExit("head-end post-IPsec NAT apply must detect an existing customer nftables table")
+    if 'nft delete table "${NFT_FAMILY}" "${NFT_TABLE}"' not in headend_customer_lib_text:
+        raise SystemExit("head-end post-IPsec NAT apply must replace existing customer nftables table before loading")
     vpn_headend_template_text = (REPO_ROOT / "infra" / "cfn" / "vpn-headend-unit.yaml").read_text(
         encoding="utf-8"
     )
@@ -2581,6 +2585,7 @@ print(
             "apply_stages_when_strongswan_inactive": True,
             "remove_tolerates_inactive_strongswan": True,
             "customer_swanctl_include_enforced": True,
+            "post_ipsec_nat_apply_replaces_existing_table": True,
             "ha_promote_loads_swanctl": "swanctl --load-all"
             in (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
                 encoding="utf-8"
