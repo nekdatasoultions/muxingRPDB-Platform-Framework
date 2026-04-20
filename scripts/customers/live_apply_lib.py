@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -183,6 +184,83 @@ def _backend_apply_created_records(payload: dict[str, Any]) -> bool:
         for result in (payload.get("allocation_results") or [])
         if isinstance(result, dict)
     )
+
+
+def _aws_secret_string(region: str, secret_id: str) -> str:
+    completed = run_local(
+        [
+            "aws",
+            "secretsmanager",
+            "get-secret-value",
+            "--region",
+            region,
+            "--secret-id",
+            secret_id,
+            "--query",
+            "SecretString",
+            "--output",
+            "text",
+        ]
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"unable to resolve customer PSK secret {secret_id}: "
+            f"{(completed.stderr or completed.stdout).strip()}"
+        )
+    secret = completed.stdout.rstrip("\r\n")
+    if not secret or secret == "None":
+        raise RuntimeError(f"customer PSK secret {secret_id} did not contain SecretString")
+    return secret
+
+
+def _swanctl_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _inject_live_headend_secret(
+    journal: list[dict[str, Any]],
+    *,
+    package_dir: Path,
+    headend_prepared: dict[str, Any],
+    region: str,
+) -> dict[str, Any]:
+    module_path = package_dir / "customer-module.json"
+    module = json.loads(module_path.read_text(encoding="utf-8"))
+    peer = module.get("peer") or {}
+    secret_ref = str(peer.get("psk_secret_ref") or "").strip()
+    if not secret_ref:
+        raise RuntimeError("customer module is missing peer.psk_secret_ref for live head-end apply")
+
+    secret = _aws_secret_string(region, secret_ref)
+    swanctl_conf = Path(str((headend_prepared.get("apply") or {}).get("swanctl_conf") or "")).resolve()
+    if not swanctl_conf.exists():
+        raise RuntimeError(f"prepared head-end swanctl config not found: {swanctl_conf}")
+    original = swanctl_conf.read_text(encoding="utf-8")
+    replaced = re.sub(
+        r"(?m)^(\s*secret\s*=\s*).*$",
+        lambda match: match.group(1) + _swanctl_quote(secret),
+        original,
+        count=1,
+    )
+    if replaced == original:
+        raise RuntimeError(f"prepared head-end swanctl config did not contain a PSK secret line: {swanctl_conf}")
+    swanctl_conf.write_text(replaced, encoding="utf-8", newline="\n")
+
+    report = {
+        "secret_ref": secret_ref,
+        "secret_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+        "secret_length": len(secret),
+        "swanctl_conf": repo_relative(swanctl_conf),
+        "injected": True,
+    }
+    _record_structured(
+        journal,
+        action="resolve_headend_psk_secret",
+        target="aws-secretsmanager",
+        payload=report,
+    )
+    return report
 
 
 def _rollback_staged(
@@ -1137,6 +1215,10 @@ def execute_ssh_live_apply(
     context: Any | None = None
 
     try:
+        region = str(((environment_doc.get("environment") or {}).get("aws") or {}).get("region") or "").strip()
+        if not region:
+            raise RuntimeError("environment.aws.region is required for live apply")
+
         backend_prepared = _prepare_backend_root(
             journal,
             customer_name=customer_name,
@@ -1155,6 +1237,13 @@ def execute_ssh_live_apply(
             bundle_dir=bundle_dir,
             apply_dir=apply_dir,
         )
+        headend_secret = _inject_live_headend_secret(
+            journal,
+            package_dir=package_dir,
+            headend_prepared=headend_prepared,
+            region=region,
+        )
+        headend_prepared["secret_resolution"] = headend_secret
 
         published_artifacts = _publish_artifacts_to_s3(
             journal,
@@ -1166,9 +1255,6 @@ def execute_ssh_live_apply(
         )
 
         customer_item_plain, allocation_items_typed = load_customer_backend_payloads(package_dir)
-        region = str(((environment_doc.get("environment") or {}).get("aws") or {}).get("region") or "").strip()
-        if not region:
-            raise RuntimeError("environment.aws.region is required for live apply")
 
         datastores = environment_doc.get("datastores") or {}
         customer_table = str(datastores.get("customer_sot_table") or "").strip()
@@ -1364,6 +1450,7 @@ def execute_ssh_live_apply(
                 "prepared_backend": backend_prepared["validate"],
                 "prepared_muxer": muxer_prepared["validate"],
                 "prepared_headend": headend_prepared["validate"],
+                "headend_secret": headend_secret,
                 "muxer": muxer_remote["validate"],
                 "headend_active": active_remote["validate"],
                 "headend_standby": standby_remote["validate"],

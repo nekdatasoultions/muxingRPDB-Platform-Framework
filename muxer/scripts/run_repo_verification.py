@@ -1100,7 +1100,107 @@ print(
     live_apply_source = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(encoding="utf-8")
     if "_backend_apply_created_records" not in live_apply_source:
         raise SystemExit("Live apply must gate rollback on records created by the current apply")
+    if "_inject_live_headend_secret" not in live_apply_source or "resolve_headend_psk_secret" not in live_apply_source:
+        raise SystemExit("Live SSH apply must resolve head-end PSK secrets before copying customer artifacts")
     record_step("live_backend_idempotent_reapply_gate", live_backend_idempotency)
+
+    live_secret_root = BUILD_ROOT / "live-secret-injection"
+    if live_secret_root.exists():
+        shutil.rmtree(live_secret_root)
+    live_secret_root.mkdir(parents=True, exist_ok=True)
+    live_secret_injection = _run_python_json(
+        r'''
+import hashlib
+import json
+import os
+from pathlib import Path
+
+import live_apply_lib
+
+
+secret_value = 'repo-verification-psk-"quoted"-with-backslash\\'
+secret_ref = "/rpdb/test/customer/psk"
+root = Path(os.environ["RPDB_VERIFY_SECRET_ROOT"])
+package_dir = root / "package"
+package_dir.mkdir(parents=True, exist_ok=True)
+(package_dir / "customer-module.json").write_text(
+    json.dumps({"peer": {"psk_secret_ref": secret_ref}}, sort_keys=True),
+    encoding="utf-8",
+)
+swanctl_conf = root / "headend" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "customer.conf"
+swanctl_conf.parent.mkdir(parents=True, exist_ok=True)
+swanctl_conf.write_text(
+    "connections { }\n"
+    "secrets {\n"
+    "    ike-customer-psk {\n"
+    "        id-1 = 198.51.100.10\n"
+    "        secret = \"resolved-via-secret-store\"\n"
+    "    }\n"
+    "}\n",
+    encoding="utf-8",
+    newline="\n",
+)
+
+
+class Completed:
+    returncode = 0
+    stdout = secret_value + "\n"
+    stderr = ""
+
+
+def fake_run_local(command):
+    if command[:3] != ["aws", "secretsmanager", "get-secret-value"]:
+        raise AssertionError(f"unexpected command: {command}")
+    if command[command.index("--region") + 1] != "us-east-1":
+        raise AssertionError("secret resolution used the wrong region")
+    if command[command.index("--secret-id") + 1] != secret_ref:
+        raise AssertionError("secret resolution used the wrong secret ref")
+    return Completed()
+
+
+journal = []
+live_apply_lib.run_local = fake_run_local
+report = live_apply_lib._inject_live_headend_secret(
+    journal,
+    package_dir=package_dir,
+    headend_prepared={"apply": {"swanctl_conf": str(swanctl_conf)}},
+    region="us-east-1",
+)
+rendered = swanctl_conf.read_text(encoding="utf-8")
+expected_hash = hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
+print(
+    json.dumps(
+        {
+            "injected": report["injected"],
+            "secret_ref": report["secret_ref"],
+            "secret_hash_matches": report["secret_sha256"] == expected_hash,
+            "secret_length_matches": report["secret_length"] == len(secret_value),
+            "placeholder_removed": "resolved-via-secret-store" not in rendered,
+            "rendered_contains_quoted_secret": "repo-verification-psk-\\\"quoted\\\"-with-backslash\\\\" in rendered,
+            "journal_redacted": secret_value not in json.dumps(journal, sort_keys=True),
+        },
+        sort_keys=True,
+    )
+)
+''',
+        pythonpath=REPO_ROOT / "scripts" / "customers",
+        extra_env={"RPDB_VERIFY_SECRET_ROOT": str(live_secret_root)},
+    )
+    if not live_secret_injection.get("injected"):
+        raise SystemExit("Live head-end PSK secret injection did not report injected")
+    if live_secret_injection.get("secret_ref") != "/rpdb/test/customer/psk":
+        raise SystemExit("Live head-end PSK secret injection used the wrong secret ref")
+    if not live_secret_injection.get("secret_hash_matches"):
+        raise SystemExit("Live head-end PSK secret injection reported the wrong secret hash")
+    if not live_secret_injection.get("secret_length_matches"):
+        raise SystemExit("Live head-end PSK secret injection reported the wrong secret length")
+    if not live_secret_injection.get("placeholder_removed"):
+        raise SystemExit("Live head-end PSK secret injection left the placeholder secret")
+    if not live_secret_injection.get("rendered_contains_quoted_secret"):
+        raise SystemExit("Live head-end PSK secret injection did not swanctl-quote the secret")
+    if not live_secret_injection.get("journal_redacted"):
+        raise SystemExit("Live head-end PSK secret injection leaked the PSK into the journal")
+    record_step("live_headend_secret_resolution_gate", live_secret_injection)
 
     empty_platform_readiness = _run_json(
         [
