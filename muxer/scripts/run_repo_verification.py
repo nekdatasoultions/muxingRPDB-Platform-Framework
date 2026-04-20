@@ -2219,6 +2219,28 @@ def main() -> int:
         },
     )
 
+    headend_customer_lib_text = (REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py").read_text(
+        encoding="utf-8"
+    )
+    if "systemctl is-active --quiet strongswan" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply/remove must tolerate inactive standby strongSwan services")
+    if "strongswan is not active; staged config remains" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must stage configs when standby strongSwan is inactive")
+    if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
+    record_step(
+        "headend_standby_swanctl_reload_guard",
+        {
+            "source": str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
+            "apply_stages_when_strongswan_inactive": True,
+            "remove_tolerates_inactive_strongswan": True,
+            "ha_promote_loads_swanctl": "swanctl --load-all"
+            in (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
+                encoding="utf-8"
+            ),
+        },
+    )
+
     # Step 11: prove staged backend, muxer, and selected head-end installs can
     # coexist per customer, and that rollback removes only the target customer.
     phase4_stage_dir = BUILD_ROOT / "phase4"
