@@ -102,7 +102,7 @@ That keeps the framework compatible while the allocator layer is being built.
 The customer-provided service intent versus allocator-owned namespace split is
 tracked in:
 
-- [VPN_SERVICE_INTENT_MODEL.md](/muxer/docs/VPN_SERVICE_INTENT_MODEL.md)
+- [VPN_SERVICE_INTENT_MODEL.md](VPN_SERVICE_INTENT_MODEL.md)
 
 ### Target state
 
@@ -116,16 +116,16 @@ The target state is:
 
 The repo now has a working minimal-request provisioning path through:
 
-- [customer-request.schema.json](/muxer/config/schema/customer-request.schema.json)
-- [defaults.yaml](/muxer/config/allocation-pools/defaults.yaml)
-- [validate_customer_request.py](/muxer/scripts/validate_customer_request.py)
-- [validate_customer_allocations.py](/muxer/scripts/validate_customer_allocations.py)
-- [provision_customer_request.py](/muxer/scripts/provision_customer_request.py)
-- [plan_nat_t_promotion.py](/muxer/scripts/plan_nat_t_promotion.py)
-- [process_nat_t_observation.py](/muxer/scripts/process_nat_t_observation.py)
-- [provision_customer_end_to_end.py](/muxer/scripts/provision_customer_end_to_end.py)
-- [watch_nat_t_logs.py](/muxer/scripts/watch_nat_t_logs.py)
-- [prepare_customer_pilot.py](/muxer/scripts/prepare_customer_pilot.py)
+- [customer-request.schema.json](../config/schema/customer-request.schema.json)
+- [defaults.yaml](../config/allocation-pools/defaults.yaml)
+- [validate_customer_request.py](../scripts/validate_customer_request.py)
+- [validate_customer_allocations.py](../scripts/validate_customer_allocations.py)
+- [provision_customer_request.py](../scripts/provision_customer_request.py)
+- [plan_nat_t_promotion.py](../scripts/plan_nat_t_promotion.py)
+- [process_nat_t_observation.py](../scripts/process_nat_t_observation.py)
+- [provision_customer_end_to_end.py](../scripts/provision_customer_end_to_end.py)
+- [watch_nat_t_logs.py](../scripts/watch_nat_t_logs.py)
+- [prepare_customer_pilot.py](../scripts/prepare_customer_pilot.py)
 
 That path now:
 
@@ -173,11 +173,11 @@ traffic proves NAT-T is needed.
 
 The committed example is:
 
-- [example-dynamic-default-nonnat.yaml](/muxer/config/customer-requests/examples/example-dynamic-default-nonnat.yaml)
+- [example-dynamic-default-nonnat.yaml](../config/customer-requests/examples/example-dynamic-default-nonnat.yaml)
 
 The detailed model is documented in:
 
-- [DYNAMIC_NAT_T_PROVISIONING.md](/muxer/docs/DYNAMIC_NAT_T_PROVISIONING.md)
+- [DYNAMIC_NAT_T_PROVISIONING.md](DYNAMIC_NAT_T_PROVISIONING.md)
 
 ## Example Minimal Non-NAT Input
 
@@ -241,8 +241,8 @@ The NAT-T promotion workflow should then derive and reserve values such as:
 The repo also carries committed examples for the richer VPN compatibility and
 post-IPsec NAT intent:
 
-- [example-service-intent-netmap.yaml](/muxer/config/customer-requests/examples/example-service-intent-netmap.yaml)
-- [example-service-intent-explicit-host-map.yaml](/muxer/config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
+- [example-service-intent-netmap.yaml](../config/customer-requests/examples/example-service-intent-netmap.yaml)
+- [example-service-intent-explicit-host-map.yaml](../config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
 
 Those examples show:
 

@@ -8,9 +8,9 @@ filesystem root before any live-node use.
 
 ## Helpers
 
-- [apply_headend_customer.py](/scripts/deployment/apply_headend_customer.py)
-- [validate_headend_customer.py](/scripts/deployment/validate_headend_customer.py)
-- [remove_headend_customer.py](/scripts/deployment/remove_headend_customer.py)
+- [apply_headend_customer.py](../scripts/deployment/apply_headend_customer.py)
+- [validate_headend_customer.py](../scripts/deployment/validate_headend_customer.py)
+- [remove_headend_customer.py](../scripts/deployment/remove_headend_customer.py)
 
 ## Required Bundle Inputs
 

@@ -187,8 +187,8 @@ The next implementation steps should be:
 
 The repo contains committed examples for both NAT mapping styles:
 
-- [example-service-intent-netmap.yaml](/muxer/config/customer-requests/examples/example-service-intent-netmap.yaml)
-- [example-service-intent-explicit-host-map.yaml](/muxer/config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
+- [example-service-intent-netmap.yaml](../config/customer-requests/examples/example-service-intent-netmap.yaml)
+- [example-service-intent-explicit-host-map.yaml](../config/customer-requests/examples/example-service-intent-explicit-host-map.yaml)
 
 The repo-only verification harness provisions both examples, renders and binds
 their customer artifacts, validates their bundles, and exercises staged

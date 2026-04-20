@@ -89,4 +89,4 @@ python scripts\deployment\remove_backend_customer.py `
 
 Reference:
 
-- [HEADEND_CUSTOMER_ORCHESTRATION.md](/docs/HEADEND_CUSTOMER_ORCHESTRATION.md)
+- [HEADEND_CUSTOMER_ORCHESTRATION.md](../../docs/HEADEND_CUSTOMER_ORCHESTRATION.md)

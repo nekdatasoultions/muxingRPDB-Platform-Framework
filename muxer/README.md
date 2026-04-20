@@ -38,4 +38,4 @@ Current and planned subdirectories:
 
 See:
 
-- [MUXER3_RUNTIME_PORT_MAP.md](/muxer/docs/MUXER3_RUNTIME_PORT_MAP.md)
+- [MUXER3_RUNTIME_PORT_MAP.md](docs/MUXER3_RUNTIME_PORT_MAP.md)

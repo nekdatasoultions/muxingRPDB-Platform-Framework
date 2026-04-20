@@ -10,11 +10,11 @@ current live estate as of April 13, 2026.
 
 ## Files
 
-- [current-dev-nat-active-a.yaml](/muxer/config/environment-defaults/current-dev-nat-active-a.yaml)
-- [current-dev-nonnat-active-a.yaml](/muxer/config/environment-defaults/current-dev-nonnat-active-a.yaml)
-- [rpdb-empty-nat-active-a.yaml](/muxer/config/environment-defaults/rpdb-empty-nat-active-a.yaml)
-- [rpdb-empty-nonnat-active-a.yaml](/muxer/config/environment-defaults/rpdb-empty-nonnat-active-a.yaml)
-- [example-environment.yaml](/muxer/config/environment-defaults/example-environment.yaml)
+- [current-dev-nat-active-a.yaml](../config/environment-defaults/current-dev-nat-active-a.yaml)
+- [current-dev-nonnat-active-a.yaml](../config/environment-defaults/current-dev-nonnat-active-a.yaml)
+- [rpdb-empty-nat-active-a.yaml](../config/environment-defaults/rpdb-empty-nat-active-a.yaml)
+- [rpdb-empty-nonnat-active-a.yaml](../config/environment-defaults/rpdb-empty-nonnat-active-a.yaml)
+- [example-environment.yaml](../config/environment-defaults/example-environment.yaml)
 
 ## Current Dev Bindings
 

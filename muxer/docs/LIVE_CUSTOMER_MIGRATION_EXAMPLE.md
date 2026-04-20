@@ -8,11 +8,11 @@ Show how one real production-shaped customer can be represented in the RPDB
 ## Example Customer
 
 - migrated source:
-  [legacy-cust0003/customer.yaml](/muxer/config/customer-sources/migrated/legacy-cust0003/customer.yaml)
+  [legacy-cust0003/customer.yaml](../config/customer-sources/migrated/legacy-cust0003/customer.yaml)
 - current legacy source reference:
   [customer.yaml](legacy-muxer3:/config/customers/legacy-cust0003/customer.yaml)
 - related NAT example:
-  [LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md](/muxer/docs/LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md)
+  [LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md](LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md)
 
 ## What This Example Proves
 

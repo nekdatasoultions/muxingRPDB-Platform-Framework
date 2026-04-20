@@ -66,8 +66,8 @@ is not needed for the planned customer migration model.
 
 The boundary is exercised by:
 
-- [run_repo_verification.py](/muxer/scripts/run_repo_verification.py)
+- [run_repo_verification.py](../scripts/run_repo_verification.py)
 
 And the summary artifact is written to:
 
-- [repo-verification-summary.json](/build/repo-verification/repo-verification-summary.json)
+- [repo-verification-summary.json](../../build/repo-verification/repo-verification-summary.json)

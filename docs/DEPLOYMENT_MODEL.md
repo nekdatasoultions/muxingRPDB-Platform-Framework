@@ -47,23 +47,23 @@ The deployment model needs to cover:
 
 The first deployment branch helpers are intentionally preflight-oriented:
 
-- [verify_backup_baseline.py](/scripts/backup/verify_backup_baseline.py)
-- [create_prechange_backup_note.py](/scripts/backup/create_prechange_backup_note.py)
-- [assemble_customer_bundle.py](/scripts/packaging/assemble_customer_bundle.py)
-- [build_customer_bundle_manifest.py](/scripts/packaging/build_customer_bundle_manifest.py)
-- [validate_customer_bundle.py](/scripts/packaging/validate_customer_bundle.py)
-- [deployment_readiness_check.py](/scripts/deployment/deployment_readiness_check.py)
-- [create_rollout_notes.py](/scripts/deployment/create_rollout_notes.py)
-- [run_double_verification.py](/scripts/deployment/run_double_verification.py)
-- [apply_headend_customer.py](/scripts/deployment/apply_headend_customer.py)
-- [validate_headend_customer.py](/scripts/deployment/validate_headend_customer.py)
-- [remove_headend_customer.py](/scripts/deployment/remove_headend_customer.py)
+- [verify_backup_baseline.py](../scripts/backup/verify_backup_baseline.py)
+- [create_prechange_backup_note.py](../scripts/backup/create_prechange_backup_note.py)
+- [assemble_customer_bundle.py](../scripts/packaging/assemble_customer_bundle.py)
+- [build_customer_bundle_manifest.py](../scripts/packaging/build_customer_bundle_manifest.py)
+- [validate_customer_bundle.py](../scripts/packaging/validate_customer_bundle.py)
+- [deployment_readiness_check.py](../scripts/deployment/deployment_readiness_check.py)
+- [create_rollout_notes.py](../scripts/deployment/create_rollout_notes.py)
+- [run_double_verification.py](../scripts/deployment/run_double_verification.py)
+- [apply_headend_customer.py](../scripts/deployment/apply_headend_customer.py)
+- [validate_headend_customer.py](../scripts/deployment/validate_headend_customer.py)
+- [remove_headend_customer.py](../scripts/deployment/remove_headend_customer.py)
 
 ## Double Verification Gate
 
 Before any live-node apply rehearsal, run the full cross-branch proof path in:
 
-- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 
 ## Handoff Boundary
 
@@ -82,18 +82,18 @@ that handoff output before any live-node apply logic is added.
 The repo now also has a customer-scoped head-end install/apply/remove contract
 for staged roots and future on-node use:
 
-- [HEADEND_CUSTOMER_ORCHESTRATION.md](/docs/HEADEND_CUSTOMER_ORCHESTRATION.md)
+- [HEADEND_CUSTOMER_ORCHESTRATION.md](HEADEND_CUSTOMER_ORCHESTRATION.md)
 
 ## Current Platform Baseline
 
 The repo now also carries imported current-state platform deploy assets for the
 base empty environment:
 
-- [CURRENT_PLATFORM_IMPORT.md](/docs/CURRENT_PLATFORM_IMPORT.md)
-- [DATABASE_BOOTSTRAP.md](/docs/DATABASE_BOOTSTRAP.md)
-- [FRESH_EMPTY_PLATFORM_RUNBOOK.md](/docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md)
-- [infra/cfn](/infra/cfn)
-- [scripts/platform](/scripts/platform)
+- [CURRENT_PLATFORM_IMPORT.md](CURRENT_PLATFORM_IMPORT.md)
+- [DATABASE_BOOTSTRAP.md](DATABASE_BOOTSTRAP.md)
+- [FRESH_EMPTY_PLATFORM_RUNBOOK.md](FRESH_EMPTY_PLATFORM_RUNBOOK.md)
+- [infra/cfn](../infra/cfn)
+- [scripts/platform](../scripts/platform)
 
 That lets the repo hold both:
 
