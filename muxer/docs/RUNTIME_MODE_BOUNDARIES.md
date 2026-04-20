@@ -68,6 +68,8 @@ The boundary is exercised by:
 
 - [run_repo_verification.py](../scripts/run_repo_verification.py)
 
-And the summary artifact is written to:
+And the generated summary artifact is written under:
 
-- [repo-verification-summary.json](../../build/repo-verification/repo-verification-summary.json)
+```text
+build/repo-verification/repo-verification-summary.json
+```
