@@ -195,24 +195,24 @@ The muxer remains the public encrypted edge. The current live split is:
 
 The current handout for the muxer plus head-end datapath is:
 
-- `E:\Code1\MUXER3\docs\MUXER_AND_VPN_HEADEND_HANDOUT.md`
+- `<legacy-muxer3-repo>\docs\MUXER_AND_VPN_HEADEND_HANDOUT.md`
 
 ## Source of Truth Files
 
 ### Deployment parameter files
 
-- `E:\Code1\Muxingplus-Platform-Deployments\dev\cfn\parameters.vpn-headend.nat.graviton-efs.us-east-1.json`
-- `E:\Code1\Muxingplus-Platform-Deployments\dev\cfn\parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json`
+- `<legacy-platform-deployments-repo>\dev\cfn\parameters.vpn-headend.nat.graviton-efs.us-east-1.json`
+- `<legacy-platform-deployments-repo>\dev\cfn\parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json`
 
 ### NetBox-oriented deployment state
 
-- `E:\Code1\Muxingplus-Platform-Deployments\dev\config\netbox-sot.us-east-1.yaml`
+- `<legacy-platform-deployments-repo>\dev\config\netbox-sot.us-east-1.yaml`
 
 ### Framework implementation
 
-- `E:\Code1\Muxingplus-Platform-Framework\muxer\scripts\render_headend_customer_bundle.py`
-- `E:\Code1\Muxingplus-Platform-Framework\infra\ops\headend-ha-active-standby\scripts\ha-promote.sh`
-- `E:\Code1\Muxingplus-Platform-Framework\muxer\cloudwatch-tunnel-state\lambda_function.py`
+- `<legacy-platform-framework-repo>\muxer\scripts\render_headend_customer_bundle.py`
+- `<legacy-platform-framework-repo>\infra\ops\headend-ha-active-standby\scripts\ha-promote.sh`
+- `<legacy-platform-framework-repo>\muxer\cloudwatch-tunnel-state\lambda_function.py`
 
 ## What To Check First In A New Session
 

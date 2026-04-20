@@ -3,7 +3,7 @@
 ## Purpose
 
 Stand up RPDB as a brand-new stack with a fresh private IP plan and fresh
-public EIPs, without touching `E:\Code1\MUXER3`, without touching legacy
+public EIPs, without touching `<legacy-muxer3-repo>`, without touching legacy
 customer state, and without onboarding customers until the empty platform is
 proven clean.
 
@@ -12,9 +12,9 @@ private IPs that are already in use by live stacks in the same VPC.
 
 ## Guardrails
 
-- work only inside `E:\Code1\muxingRPDB Platform Framework-main` for code and
+- work only inside `<repo-root>` for code and
   documentation changes
-- do not modify `E:\Code1\MUXER3`
+- do not modify `<legacy-muxer3-repo>`
 - do not reuse currently allocated private IPs
 - do not reuse legacy public EIPs unless explicitly approved
 - do not onboard customers during the platform rebuild
@@ -41,7 +41,7 @@ Goal:
 
 Work:
 
-- confirm no changes will be made to `E:\Code1\MUXER3`
+- confirm no changes will be made to `<legacy-muxer3-repo>`
 - confirm no customer onboarding will happen during platform rebuild
 - confirm we are replacing the old `rpdb-empty` address plan
 - confirm this is a fresh-stack approach, not an in-place migration
@@ -363,7 +363,7 @@ re-discovering where the RPDB code and docs live.
 
 ### Current Restart Notes
 
-- `E:\Code1\MUXER3` is out of scope and should not be modified for RPDB work.
+- `<legacy-muxer3-repo>` is out of scope and should not be modified for RPDB work.
 - The fresh address proposal has already been executed and the prepared
   parameter set under:
   - `build\empty-platform\current-prod-shape-rpdb-empty`

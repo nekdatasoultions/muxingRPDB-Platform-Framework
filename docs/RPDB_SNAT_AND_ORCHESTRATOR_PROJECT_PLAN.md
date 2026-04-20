@@ -17,8 +17,8 @@ EIPs.
 
 ## Guardrails
 
-- work only inside `E:\Code1\muxingRPDB Platform Framework-main`
-- do not modify `E:\Code1\MUXER3`
+- work only inside `<repo-root>`
+- do not modify `<legacy-muxer3-repo>`
 - do not touch live muxer or VPN head-end nodes
 - do not call AWS APIs
 - do not write DynamoDB

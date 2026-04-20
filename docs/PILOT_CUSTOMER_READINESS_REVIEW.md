@@ -22,7 +22,7 @@ changed later.
 ### Repo and Artifact Boundary
 
 - All code changes were made inside this repo:
-  `E:\Code1\muxingRPDB Platform Framework-main`
+  `<repo-root>`
 - The old MUXER3 repo was not modified for this stage.
 - The RPDB runtime and platform bundles were rebuilt from this repo and uploaded
   to the RPDB empty-platform S3 artifact paths.

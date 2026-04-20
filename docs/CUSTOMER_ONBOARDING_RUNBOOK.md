@@ -136,7 +136,7 @@ Operational readiness:
 Run commands from the repo root:
 
 ```powershell
-cd "E:\Code1\muxingRPDB Platform Framework-main"
+cd "<repo-root>"
 ```
 
 Set a customer name for repeatable command examples:
@@ -576,11 +576,11 @@ When using separate framework and deployment worktrees, run:
 
 ```powershell
 python scripts\deployment\run_double_verification.py `
-  --framework-repo "E:\Code1\muxingRPDB Platform Framework-main" `
-  --deployment-repo "E:\Code1\muxingRPDB Platform Framework-main" `
+  --framework-repo "<repo-root>" `
+  --deployment-repo "<repo-root>" `
   --customer-source $AllocatedSource `
   --environment-file $EnvironmentFile `
-  --baseline-dir "E:\Code1\muxingRPDB Platform Framework-main\build\verification-fixtures\pre-rpdb-baseline" `
+  --baseline-dir "<repo-root>\build\verification-fixtures\pre-rpdb-baseline" `
   --operator "rpdb-operator" `
   --change-summary "Prepare RPDB customer onboarding package for $CustomerName"
 ```

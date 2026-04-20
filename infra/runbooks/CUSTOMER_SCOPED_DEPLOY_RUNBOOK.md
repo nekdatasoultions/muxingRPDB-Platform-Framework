@@ -14,7 +14,7 @@ Deploy one customer at a time with backup-first gates.
 
 Reference:
 
-- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
 
 ## Planned Workflow
 

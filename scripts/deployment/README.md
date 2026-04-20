@@ -53,11 +53,11 @@ python scripts\deployment\create_rollout_notes.py `
   --customer-name example-nat-0001 `
   --out-dir notes\example-nat-0001
 python scripts\deployment\run_double_verification.py `
-  --framework-repo "E:\Code1\muxingRPDB Platform Framework-fw" `
-  --deployment-repo "E:\Code1\muxingRPDB Platform Framework-deploy" `
+  --framework-repo "<framework-repo-root>" `
+  --deployment-repo "<deployment-repo-root>" `
   --customer-source "muxer\config\customer-sources\examples\example-nat-0001\customer.yaml" `
   --environment-file "muxer\config\environment-defaults\example-environment.yaml" `
-  --baseline-dir "E:\Code1\muxingRPDB Platform Framework\build\verification-fixtures\pre-rpdb-baseline"
+  --baseline-dir "<repo-root>\build\verification-fixtures\pre-rpdb-baseline"
 python scripts\deployment\apply_headend_customer.py `
   --bundle-dir build\customer-bundle `
   --headend-root build\staged-headend-root
@@ -89,4 +89,4 @@ python scripts\deployment\remove_backend_customer.py `
 
 Reference:
 
-- [HEADEND_CUSTOMER_ORCHESTRATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/HEADEND_CUSTOMER_ORCHESTRATION.md)
+- [HEADEND_CUSTOMER_ORCHESTRATION.md](/docs/HEADEND_CUSTOMER_ORCHESTRATION.md)

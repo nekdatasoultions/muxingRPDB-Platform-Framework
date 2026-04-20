@@ -34,11 +34,11 @@ muxer host, while the live code now routes encrypted traffic to VPN head ends.
 
 ### Customer source of truth and config resolution
 
-- `E:\Code1\MUXER3\config\muxer.yaml`
-- `E:\Code1\MUXER3\config\customers.variables.yaml`
-- `E:\Code1\MUXER3\src\muxerlib\variables.py`
-- `E:\Code1\MUXER3\src\muxerlib\dynamodb_sot.py`
-- `E:\Code1\MUXER3\src\muxerlib\customers.py`
+- `<legacy-muxer3-repo>\config\muxer.yaml`
+- `<legacy-muxer3-repo>\config\customers.variables.yaml`
+- `<legacy-muxer3-repo>\src\muxerlib\variables.py`
+- `<legacy-muxer3-repo>\src\muxerlib\dynamodb_sot.py`
+- `<legacy-muxer3-repo>\src\muxerlib\customers.py`
 
 These files define the global muxer settings, load customers from variables or
 DynamoDB, resolve backend roles to active backend IPs, and derive customer
@@ -46,17 +46,17 @@ protocol and tunnel settings.
 
 ### Muxer control plane
 
-- `E:\Code1\MUXER3\src\muxerlib\cli.py`
-- `E:\Code1\MUXER3\src\muxerlib\dataplane.py`
-- `E:\Code1\MUXER3\scripts\render_customer_variables.py`
+- `<legacy-muxer3-repo>\src\muxerlib\cli.py`
+- `<legacy-muxer3-repo>\src\muxerlib\dataplane.py`
+- `<legacy-muxer3-repo>\scripts\render_customer_variables.py`
 
 These files coordinate apply/show/flush operations, derive the readable
 dataplane model, and render per-customer artifacts.
 
 ### Muxer dataplane
 
-- `E:\Code1\MUXER3\src\muxerlib\modes.py`
-- `E:\Code1\MUXER3\src\muxerlib\core.py`
+- `<legacy-muxer3-repo>\src\muxerlib\modes.py`
+- `<legacy-muxer3-repo>\src\muxerlib\core.py`
 
 These files build and maintain the live Linux dataplane:
 
@@ -69,16 +69,16 @@ These files build and maintain the live Linux dataplane:
 
 ### VPN head-end artifact generation
 
-- `E:\Code1\MUXER3\scripts\render_headend_customer_bundle.py`
-- `E:\Code1\MUXER3\config\headend-bundles\`
+- `<legacy-muxer3-repo>\scripts\render_headend_customer_bundle.py`
+- `<legacy-muxer3-repo>\config\headend-bundles\`
 
 These files generate Libreswan configs, GRE apply scripts, post-IPsec NAT
 scripts, and systemd units for the head-end clusters.
 
 ### Operator tooling
 
-- `E:\Code1\MUXER3\scripts\muxer_customer_doctor.py`
-- `E:\Code1\MUXER3\docs\MUXER_OPERATOR_PLAYBOOK.md`
+- `<legacy-muxer3-repo>\scripts\muxer_customer_doctor.py`
+- `<legacy-muxer3-repo>\docs\MUXER_OPERATOR_PLAYBOOK.md`
 
 These files provide drift detection, operational explainability, and repair
 guidance.

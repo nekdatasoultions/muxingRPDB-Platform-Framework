@@ -52,7 +52,7 @@ change window is approved.
 Work from the RPDB repo root:
 
 ```powershell
-cd "E:\Code1\muxingRPDB Platform Framework-main"
+cd "<repo-root>"
 ```
 
 Confirm the repo is clean enough to start:

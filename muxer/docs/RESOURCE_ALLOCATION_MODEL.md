@@ -64,7 +64,7 @@ ownership in the database.
 
 The target operator-facing contract is described in:
 
-- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+- [PROVISIONING_INPUT_MODEL.md](/muxer/docs/PROVISIONING_INPUT_MODEL.md)
 
 ## What Must Be Tracked
 
@@ -202,7 +202,7 @@ Example:
 
 This shape is implemented in:
 
-- [allocation_sot.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/src/muxerlib/allocation_sot.py)
+- [allocation_sot.py](/muxer/src/muxerlib/allocation_sot.py)
 
 ## Provisioning Workflow
 

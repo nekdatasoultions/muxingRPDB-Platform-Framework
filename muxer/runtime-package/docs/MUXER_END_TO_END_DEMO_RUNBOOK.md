@@ -8,8 +8,8 @@ This runbook combines:
 
 The scripts are:
 
-- `E:\Code1\MUXER3\scripts\demo_muxer_end_to_end.sh`
-- `E:\Code1\MUXER3\scripts\demo_file_transfer.sh`
+- `<legacy-muxer3-repo>\scripts\demo_muxer_end_to_end.sh`
+- `<legacy-muxer3-repo>\scripts\demo_file_transfer.sh`
 
 ## Purpose
 

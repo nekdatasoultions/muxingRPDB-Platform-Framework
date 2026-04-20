@@ -11,7 +11,7 @@ This example shows the full RPDB customer flow for one customer:
 
 The example below uses:
 
-- [example-nat-0001/customer.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml)
+- [example-nat-0001/customer.yaml](/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml)
 
 ## 1. Source File
 
@@ -126,7 +126,7 @@ the resolved module looks like this:
   },
   "metadata": {
     "class_name": "nat",
-    "source_ref": "E:/Code1/muxingRPDB Platform Framework/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml"
+    "source_ref": "<repo-root>/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml"
   },
   "natd_rewrite": {
     "enabled": false,
@@ -199,7 +199,7 @@ inspection and keeps the full merged module in `customer_json`.
   "route_table": 41001,
   "rpdb_priority": 1101,
   "schema_version": 1,
-  "source_ref": "E:/Code1/muxingRPDB Platform Framework/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml",
+  "source_ref": "<repo-root>/muxer/config/customer-sources/examples/example-nat-0001/customer.yaml",
   "updated_at": "2026-04-13T21:32:26Z",
   "customer_json": "{...merged customer module...}"
 }

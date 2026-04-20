@@ -40,11 +40,11 @@ Those details are platform-owned and must be resolved by the backend.
 
 Allowed repository:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- `<repo-root>`
 
 Normal operator flow must not:
 
-- modify `E:\Code1\MUXER3`
+- modify `<legacy-muxer3-repo>`
 - require manual node selection
 - require manual NAT/non-NAT selection
 - require hand-copying generated artifacts

@@ -345,14 +345,14 @@ That makes the head end responsible for:
 ## Example Files for This Customer
 
 - Muxer routing:
-  [routing.yaml](/E:/Code1/MUXER3/config/customers/vpn-customer-stage1-15-cust-0003/muxer/routing.yaml)
+  [routing.yaml](legacy-muxer3:/config/customers/vpn-customer-stage1-15-cust-0003/muxer/routing.yaml)
 - Muxer tunnel:
-  [tunnel.yaml](/E:/Code1/MUXER3/config/customers/vpn-customer-stage1-15-cust-0003/muxer/tunnel.yaml)
+  [tunnel.yaml](legacy-muxer3:/config/customers/vpn-customer-stage1-15-cust-0003/muxer/tunnel.yaml)
 - VPN metadata:
-  [ipsec.meta.yaml](/E:/Code1/MUXER3/config/customers/vpn-customer-stage1-15-cust-0003/vpn/ipsec.meta.yaml)
+  [ipsec.meta.yaml](legacy-muxer3:/config/customers/vpn-customer-stage1-15-cust-0003/vpn/ipsec.meta.yaml)
 - Post-IPsec NAT:
-  [post-ipsec-nat.yaml](/E:/Code1/MUXER3/config/customers/vpn-customer-stage1-15-cust-0003/vpn/post-ipsec-nat.yaml)
+  [post-ipsec-nat.yaml](legacy-muxer3:/config/customers/vpn-customer-stage1-15-cust-0003/vpn/post-ipsec-nat.yaml)
 - Rendered strongSwan customer config:
-  [vpn-customer-stage1-15-cust-0003.conf](/E:/Code1/LOCAL_NOTES/tmp-strongswan-headend-cust34-v4/swanctl/conf.d/vpn-customer-stage1-15-cust-0003.conf)
+  [vpn-customer-stage1-15-cust-0003.conf](local-notes:/tmp-strongswan-headend-cust34-v4/swanctl/conf.d/vpn-customer-stage1-15-cust-0003.conf)
 - Rendered XFRM apply script:
-  [vpn-customer-stage1-15-cust-0003-xfrm-apply.sh](/E:/Code1/LOCAL_NOTES/tmp-strongswan-headend-cust34-v4/scripts/vpn-customer-stage1-15-cust-0003-xfrm-apply.sh)
+  [vpn-customer-stage1-15-cust-0003-xfrm-apply.sh](local-notes:/tmp-strongswan-headend-cust34-v4/scripts/vpn-customer-stage1-15-cust-0003-xfrm-apply.sh)

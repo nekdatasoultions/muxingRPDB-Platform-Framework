@@ -23,9 +23,9 @@ This plan includes the node and service touch points required to get there.
 
 ## Non-Negotiable Guardrails
 
-- work only inside `E:\Code1\muxingRPDB Platform Framework-main` for code and
+- work only inside `<repo-root>` for code and
   documentation changes
-- do not modify `E:\Code1\MUXER3`
+- do not modify `<legacy-muxer3-repo>`
 - do not touch legacy muxer nodes during RPDB implementation
 - do not touch live nodes until the live-apply stage is explicitly approved
 - do not move EIPs until a separate cutover approval is given
@@ -79,7 +79,7 @@ Not allowed:
 - AWS APIs
 - DynamoDB writes
 - S3 writes
-- `E:\Code1\MUXER3`
+- `<legacy-muxer3-repo>`
 
 Work included:
 

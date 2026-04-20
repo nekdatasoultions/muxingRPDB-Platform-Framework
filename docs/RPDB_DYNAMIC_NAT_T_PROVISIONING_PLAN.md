@@ -47,7 +47,7 @@ Verify current Git state and identify any uncommitted RPDB-only work.
 Validation:
 
 - `git status --short --branch`
-- confirm all dirty paths are under `E:\Code1\muxingRPDB Platform Framework-main`
+- confirm all dirty paths are under `<repo-root>`
 
 ### Stage 2: Model The Intent
 

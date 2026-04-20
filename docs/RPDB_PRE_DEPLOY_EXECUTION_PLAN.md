@@ -4,11 +4,11 @@
 
 This plan stays inside the RPDB repository only:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- `<repo-root>`
 
 This plan does not allow:
 
-- edits to `E:\Code1\MUXER3`
+- edits to `<legacy-muxer3-repo>`
 - SSH or SSM to live nodes
 - production DynamoDB writes
 - live muxer apply
@@ -212,7 +212,7 @@ Last executed: 2026-04-15.
 Completed stages:
 
 - Stage 1 passed: repo boundary stayed inside
-  `E:\Code1\muxingRPDB Platform Framework-main`.
+  `<repo-root>`.
 - Stage 2 passed: `legacy-cust0002` validated as
   `effective_class=strict-non-nat`, `pool_class=non-nat`, with
   `nat_t_auto_promote`.

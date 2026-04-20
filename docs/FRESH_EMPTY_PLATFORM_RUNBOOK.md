@@ -141,8 +141,8 @@ expects at the package root:
 
 The database layer is explicit in:
 
-- [DATABASE_BOOTSTRAP.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/DATABASE_BOOTSTRAP.md)
-- [ensure_dynamodb_tables.py](/E:/Code1/muxingRPDB%20Platform%20Framework-main/scripts/platform/ensure_dynamodb_tables.py)
+- [DATABASE_BOOTSTRAP.md](/docs/DATABASE_BOOTSTRAP.md)
+- [ensure_dynamodb_tables.py](/scripts/platform/ensure_dynamodb_tables.py)
 
 For a fresh empty platform, the important current production-shaped behavior is:
 
@@ -197,6 +197,6 @@ After the empty platform is proven:
 
 References:
 
-- [CURRENT_PLATFORM_IMPORT.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/CURRENT_PLATFORM_IMPORT.md)
-- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
-- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/docs/current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
+- [CURRENT_PLATFORM_IMPORT.md](/docs/CURRENT_PLATFORM_IMPORT.md)
+- [PRE_DEPLOY_DOUBLE_VERIFICATION.md](/docs/PRE_DEPLOY_DOUBLE_VERIFICATION.md)
+- [DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md](/docs/current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)

@@ -7,10 +7,10 @@ without modifying the original `MUXER3` codebase.
 
 The clean separation is:
 
-- `E:\Code1\MUXER3`
+- `<legacy-muxer3-repo>`
   - old production model
   - leave in place
-- `E:\Code1\muxingRPDB Platform Framework-main\muxer`
+- `<repo-root>\muxer`
   - new RPDB control plane
   - new deployable muxer runtime package
 
@@ -48,71 +48,71 @@ packaging and install flow can stay simple.
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\src\muxctl.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxctl.py` | Main runtime apply/show entrypoint |
-| `E:\Code1\MUXER3\src\ike_nat_bridge.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\ike_nat_bridge.py` | Keep only if NFQUEUE/IKE bridge stays in the runtime model |
-| `E:\Code1\MUXER3\src\mux_trace.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\mux_trace.py` | Runtime tracing helper |
+| `<legacy-muxer3-repo>\src\muxctl.py` | `<repo-root>\muxer\runtime-package\src\muxctl.py` | Main runtime apply/show entrypoint |
+| `<legacy-muxer3-repo>\src\ike_nat_bridge.py` | `<repo-root>\muxer\runtime-package\src\ike_nat_bridge.py` | Keep only if NFQUEUE/IKE bridge stays in the runtime model |
+| `<legacy-muxer3-repo>\src\mux_trace.py` | `<repo-root>\muxer\runtime-package\src\mux_trace.py` | Runtime tracing helper |
 
 ### Runtime Library
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\src\muxerlib\cli.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\cli.py` | Runtime CLI helpers |
-| `E:\Code1\MUXER3\src\muxerlib\core.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\core.py` | Core muxer apply primitives |
-| `E:\Code1\MUXER3\src\muxerlib\customers.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\customers.py` | Customer module loading |
-| `E:\Code1\MUXER3\src\muxerlib\dataplane.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\dataplane.py` | iptables and tunnel dataplane logic |
-| `E:\Code1\MUXER3\src\muxerlib\dynamodb_sot.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\dynamodb_sot.py` | Runtime SoT access layer, to be adapted for RPDB item model |
-| `E:\Code1\MUXER3\src\muxerlib\modes.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\modes.py` | Mode handling |
-| `E:\Code1\MUXER3\src\muxerlib\strongswan.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\strongswan.py` | IPsec render/runtime helpers if still needed |
-| `E:\Code1\MUXER3\src\muxerlib\variables.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\variables.py` | Transitional only; should be reduced as RPDB customer sources take over |
-| `E:\Code1\MUXER3\src\muxerlib\__init__.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\src\muxerlib\__init__.py` | Keep package import shape stable |
+| `<legacy-muxer3-repo>\src\muxerlib\cli.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\cli.py` | Runtime CLI helpers |
+| `<legacy-muxer3-repo>\src\muxerlib\core.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\core.py` | Core muxer apply primitives |
+| `<legacy-muxer3-repo>\src\muxerlib\customers.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\customers.py` | Customer module loading |
+| `<legacy-muxer3-repo>\src\muxerlib\dataplane.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\dataplane.py` | iptables and tunnel dataplane logic |
+| `<legacy-muxer3-repo>\src\muxerlib\dynamodb_sot.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\dynamodb_sot.py` | Runtime SoT access layer, to be adapted for RPDB item model |
+| `<legacy-muxer3-repo>\src\muxerlib\modes.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\modes.py` | Mode handling |
+| `<legacy-muxer3-repo>\src\muxerlib\strongswan.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\strongswan.py` | IPsec render/runtime helpers if still needed |
+| `<legacy-muxer3-repo>\src\muxerlib\variables.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\variables.py` | Transitional only; should be reduced as RPDB customer sources take over |
+| `<legacy-muxer3-repo>\src\muxerlib\__init__.py` | `<repo-root>\muxer\runtime-package\src\muxerlib\__init__.py` | Keep package import shape stable |
 
 ### Runtime Install / Operator Scripts
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\scripts\install-local.sh` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\install-local.sh` | Immediate must-move; current live muxer runs this |
-| `E:\Code1\MUXER3\scripts\install_deps_amzn.sh` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\install_deps_amzn.sh` | Immediate must-move for Amazon Linux bootstrap |
-| `E:\Code1\MUXER3\scripts\install_deps_ubuntu.sh` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\install_deps_ubuntu.sh` | Keep only if Ubuntu support remains in scope |
-| `E:\Code1\MUXER3\scripts\muxer_customer_doctor.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\muxer_customer_doctor.py` | Operator-facing runtime validation |
-| `E:\Code1\MUXER3\scripts\package_project_to_s3.sh` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\package_project_to_s3.sh` | Temporary compatibility helper until RPDB packaging is fully native |
-| `E:\Code1\MUXER3\scripts\sysctl_tuning.conf` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\scripts\sysctl_tuning.conf` | Keep with runtime install assets if still applied |
+| `<legacy-muxer3-repo>\scripts\install-local.sh` | `<repo-root>\muxer\runtime-package\scripts\install-local.sh` | Immediate must-move; current live muxer runs this |
+| `<legacy-muxer3-repo>\scripts\install_deps_amzn.sh` | `<repo-root>\muxer\runtime-package\scripts\install_deps_amzn.sh` | Immediate must-move for Amazon Linux bootstrap |
+| `<legacy-muxer3-repo>\scripts\install_deps_ubuntu.sh` | `<repo-root>\muxer\runtime-package\scripts\install_deps_ubuntu.sh` | Keep only if Ubuntu support remains in scope |
+| `<legacy-muxer3-repo>\scripts\muxer_customer_doctor.py` | `<repo-root>\muxer\runtime-package\scripts\muxer_customer_doctor.py` | Operator-facing runtime validation |
+| `<legacy-muxer3-repo>\scripts\package_project_to_s3.sh` | `<repo-root>\muxer\runtime-package\scripts\package_project_to_s3.sh` | Temporary compatibility helper until RPDB packaging is fully native |
+| `<legacy-muxer3-repo>\scripts\sysctl_tuning.conf` | `<repo-root>\muxer\runtime-package\scripts\sysctl_tuning.conf` | Keep with runtime install assets if still applied |
 
 ### Runtime Systemd Units
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\systemd\muxer.service` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\systemd\muxer.service` | Immediate must-move |
-| `E:\Code1\MUXER3\systemd\muxer-trace.service` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\systemd\muxer-trace.service` | Optional but likely should move with runtime |
-| `E:\Code1\MUXER3\systemd\ike-nat-bridge.service` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\systemd\ike-nat-bridge.service` | Move only if bridge feature remains |
+| `<legacy-muxer3-repo>\systemd\muxer.service` | `<repo-root>\muxer\runtime-package\systemd\muxer.service` | Immediate must-move |
+| `<legacy-muxer3-repo>\systemd\muxer-trace.service` | `<repo-root>\muxer\runtime-package\systemd\muxer-trace.service` | Optional but likely should move with runtime |
+| `<legacy-muxer3-repo>\systemd\ike-nat-bridge.service` | `<repo-root>\muxer\runtime-package\systemd\ike-nat-bridge.service` | Move only if bridge feature remains |
 
 ### Runtime Base Config
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\config\muxer.yaml` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\config\muxer.yaml` | Base runtime config that empty-platform bootstrap patches |
+| `<legacy-muxer3-repo>\config\muxer.yaml` | `<repo-root>\muxer\runtime-package\config\muxer.yaml` | Base runtime config that empty-platform bootstrap patches |
 
 ### Recovery / Monitoring Assets
 
 | MUXER3 source | RPDB destination | Notes |
 | --- | --- | --- |
-| `E:\Code1\MUXER3\cloudwatch-muxer-recovery\lambda_function.py` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\cloudwatch-muxer-recovery\lambda_function.py` | Immediate must-move so recovery no longer depends on `MUXER3` |
-| `E:\Code1\MUXER3\cloudwatch-muxer-recovery\README.md` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\cloudwatch-muxer-recovery\README.md` | Documentation parity |
-| `E:\Code1\MUXER3\cloudwatch-tunnel-state\*` | `E:\Code1\muxingRPDB Platform Framework-main\muxer\runtime-package\cloudwatch-tunnel-state\*` | Move if we still want the same tunnel-state monitoring bundle |
+| `<legacy-muxer3-repo>\cloudwatch-muxer-recovery\lambda_function.py` | `<repo-root>\muxer\runtime-package\cloudwatch-muxer-recovery\lambda_function.py` | Immediate must-move so recovery no longer depends on `MUXER3` |
+| `<legacy-muxer3-repo>\cloudwatch-muxer-recovery\README.md` | `<repo-root>\muxer\runtime-package\cloudwatch-muxer-recovery\README.md` | Documentation parity |
+| `<legacy-muxer3-repo>\cloudwatch-tunnel-state\*` | `<repo-root>\muxer\runtime-package\cloudwatch-tunnel-state\*` | Move if we still want the same tunnel-state monitoring bundle |
 
 ## What Must Not Be Copied As Runtime
 
 These should stay out of `runtime-package/` because they belong to the old
 authoring or rendered-output model:
 
-- `E:\Code1\MUXER3\config\customers.variables.yaml`
-- `E:\Code1\MUXER3\config\customers\`
-- `E:\Code1\MUXER3\config\tunnels.d\`
-- `E:\Code1\MUXER3\config\headend-bundles\`
-- `E:\Code1\MUXER3\config\libreswan\customers\`
-- `E:\Code1\MUXER3\scripts\render_customer_variables.py`
-- `E:\Code1\MUXER3\scripts\render_headend_customer_bundle.py`
-- `E:\Code1\MUXER3\scripts\sync_customers_to_dynamodb.py`
-- `E:\Code1\MUXER3\scripts\bootstrap_customer_sot_table.py`
+- `<legacy-muxer3-repo>\config\customers.variables.yaml`
+- `<legacy-muxer3-repo>\config\customers\`
+- `<legacy-muxer3-repo>\config\tunnels.d\`
+- `<legacy-muxer3-repo>\config\headend-bundles\`
+- `<legacy-muxer3-repo>\config\libreswan\customers\`
+- `<legacy-muxer3-repo>\scripts\render_customer_variables.py`
+- `<legacy-muxer3-repo>\scripts\render_headend_customer_bundle.py`
+- `<legacy-muxer3-repo>\scripts\sync_customers_to_dynamodb.py`
+- `<legacy-muxer3-repo>\scripts\bootstrap_customer_sot_table.py`
 
 Those belong to the old monolithic or rendered workflow and should be replaced
 by the RPDB control-plane model already being built in this repo.

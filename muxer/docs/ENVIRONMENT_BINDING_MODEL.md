@@ -24,8 +24,8 @@ The binding layer uses:
 
 ## Example Binding File
 
-- [example-environment.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/environment-defaults/example-environment.yaml)
-- [CURRENT_ENVIRONMENT_PROFILES.md](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/docs/CURRENT_ENVIRONMENT_PROFILES.md)
+- [example-environment.yaml](/muxer/config/environment-defaults/example-environment.yaml)
+- [CURRENT_ENVIRONMENT_PROFILES.md](/muxer/docs/CURRENT_ENVIRONMENT_PROFILES.md)
 
 ## Workflow
 
@@ -76,6 +76,6 @@ path can be tested without hard-wiring those values into customer source files.
 
 ## Initial Helpers
 
-- [validate_environment_bindings.py](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/scripts/validate_environment_bindings.py)
-- [bind_rendered_artifacts.py](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/scripts/bind_rendered_artifacts.py)
-- [validate_bound_artifacts.py](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/scripts/validate_bound_artifacts.py)
+- [validate_environment_bindings.py](/muxer/scripts/validate_environment_bindings.py)
+- [bind_rendered_artifacts.py](/muxer/scripts/bind_rendered_artifacts.py)
+- [validate_bound_artifacts.py](/muxer/scripts/validate_bound_artifacts.py)

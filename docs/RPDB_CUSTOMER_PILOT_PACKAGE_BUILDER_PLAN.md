@@ -6,11 +6,11 @@ This plan is RPDB-only.
 
 Allowed workspace:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- `<repo-root>`
 
 Not allowed in this plan:
 
-- changes to `E:\Code1\MUXER3`
+- changes to `<legacy-muxer3-repo>`
 - changes to legacy MUXER3 GitHub repositories
 - live node changes
 - production DynamoDB writes
@@ -263,7 +263,7 @@ Validation:
 - repo verification passes
 - GitHub is updated
 - local branch matches `origin/main`
-- all changed paths are inside `E:\Code1\muxingRPDB Platform Framework-main`
+- all changed paths are inside `<repo-root>`
 
 ## Definition Of Done
 

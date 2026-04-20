@@ -11,8 +11,8 @@ same VPC.
 
 ## Scope
 
-- repo: `E:\Code1\muxingRPDB Platform Framework-main`
-- out of scope: `E:\Code1\MUXER3`
+- repo: `<repo-root>`
+- out of scope: `<legacy-muxer3-repo>`
 - account: `594085074402`
 - region: `us-east-1`
 - VPC: `vpc-0f74bd28e5a4239a2`

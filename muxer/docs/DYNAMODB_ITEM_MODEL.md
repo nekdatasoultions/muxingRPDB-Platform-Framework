@@ -98,4 +98,4 @@ resolved PSK value.
 
 The machine-readable schema for this item lives at:
 
-- [customer-ddb-item.schema.json](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/schema/customer-ddb-item.schema.json)
+- [customer-ddb-item.schema.json](/muxer/config/schema/customer-ddb-item.schema.json)

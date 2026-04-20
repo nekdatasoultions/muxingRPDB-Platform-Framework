@@ -33,7 +33,7 @@ Environment variables:
 Package and upload with:
 
 ```bash
-bash "E:\Code1\Muxingplus HA\scripts\package_muxer_recovery_lambda_to_s3.sh" \
+bash "<legacy-ha-repo>\scripts\package_muxer_recovery_lambda_to_s3.sh" \
 s3://baines-networking/Code/muxingRPDB-Platform-Framework/muxer-recovery-lambda.zip
 ```
 

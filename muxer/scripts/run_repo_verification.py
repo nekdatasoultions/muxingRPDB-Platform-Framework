@@ -98,6 +98,30 @@ def _generated_activation_files_with_windows_paths(root: Path) -> list[str]:
     return matches
 
 
+def _tracked_files_with_forbidden_local_paths() -> list[str]:
+    completed = subprocess.run(
+        ["git", "ls-files"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    local_drive_path_re = re.compile(r"E:[\\/]")
+    forbidden_tokens = ("Code" + "1", "LOCAL" + "_NOTES", "shared" + "_chat", "chat" + ".html")
+    matches: list[str] = []
+    for relative_name in completed.stdout.splitlines():
+        path = REPO_ROOT / relative_name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if local_drive_path_re.search(text) or any(token in text for token in forbidden_tokens):
+            matches.append(relative_name)
+    return matches
+
+
 def _resolve_repo_path(path_like: str) -> Path:
     path = Path(path_like)
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
@@ -3337,6 +3361,21 @@ print(
             "root": str(BUILD_ROOT),
             "checked_artifacts": [".conf", ".nft", ".sh", "*.command.txt", "*.commands.txt"],
             "windows_path_match_count": 0,
+        },
+    )
+
+    local_path_matches = _tracked_files_with_forbidden_local_paths()
+    if local_path_matches:
+        raise SystemExit(
+            "tracked repo files contain local workspace/chat path references: "
+            + ", ".join(local_path_matches[:20])
+        )
+    record_step(
+        "tracked_repo_local_path_scrub_boundary",
+        {
+            "checked_scope": "git ls-files",
+            "forbidden_tokens": ["local workspace drive paths", "workspace-root tokens", "chat artifact names"],
+            "match_count": 0,
         },
     )
 

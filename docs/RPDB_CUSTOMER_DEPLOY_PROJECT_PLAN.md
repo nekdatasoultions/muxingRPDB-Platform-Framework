@@ -7,11 +7,11 @@ is ready.
 
 Allowed repository:
 
-- `E:\Code1\muxingRPDB Platform Framework-main`
+- `<repo-root>`
 
 Not allowed in this plan without explicit approval:
 
-- modifying `E:\Code1\MUXER3`
+- modifying `<legacy-muxer3-repo>`
 - changing customer 3 variants
 - deploying more than one customer at a time
 - moving EIPs

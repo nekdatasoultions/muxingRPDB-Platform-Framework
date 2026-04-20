@@ -68,6 +68,6 @@ That is the part that lets us:
 
 ## Related Docs
 
-- [PROVISIONING_INPUT_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/PROVISIONING_INPUT_MODEL.md)
-- [RESOURCE_ALLOCATION_MODEL.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
-- [RUNTIME_COMPLETION_PLAN.md](/E:/Code1/muxingRPDB%20Platform%20Framework-main/muxer/docs/RUNTIME_COMPLETION_PLAN.md)
+- [PROVISIONING_INPUT_MODEL.md](/muxer/docs/PROVISIONING_INPUT_MODEL.md)
+- [RESOURCE_ALLOCATION_MODEL.md](/muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
+- [RUNTIME_COMPLETION_PLAN.md](/muxer/docs/RUNTIME_COMPLETION_PLAN.md)

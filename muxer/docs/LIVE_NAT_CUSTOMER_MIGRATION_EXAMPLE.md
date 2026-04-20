@@ -8,9 +8,9 @@ framework using the same one-file-per-customer model as the strict example.
 ## Example Customer
 
 - migrated source:
-  [vpn-customer-stage1-15-cust-0003/customer.yaml](/E:/Code1/muxingRPDB%20Platform%20Framework/muxer/config/customer-sources/migrated/vpn-customer-stage1-15-cust-0003/customer.yaml)
+  [vpn-customer-stage1-15-cust-0003/customer.yaml](/muxer/config/customer-sources/migrated/vpn-customer-stage1-15-cust-0003/customer.yaml)
 - current legacy source reference:
-  [customer.yaml](/E:/Code1/MUXER3/config/customers/vpn-customer-stage1-15-cust-0003/customer.yaml)
+  [customer.yaml](legacy-muxer3:/config/customers/vpn-customer-stage1-15-cust-0003/customer.yaml)
 
 ## What This Example Proves
 

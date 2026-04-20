@@ -35,8 +35,8 @@ Already complete:
 
 Important guardrails:
 
-- stay inside `E:\Code1\muxingRPDB Platform Framework-main`
-- do not modify `E:\Code1\MUXER3`
+- stay inside `<repo-root>`
+- do not modify `<legacy-muxer3-repo>`
 - do not touch Customer 3 variants
 - do not touch live nodes without explicit approval
 - do not move EIPs without explicit approval

@@ -11,7 +11,7 @@ verification path across both branches:
 
 ## Wrapper
 
-- [run_double_verification.py](/E:/Code1/muxingRPDB%20Platform%20Framework/scripts/deployment/run_double_verification.py)
+- [run_double_verification.py](/scripts/deployment/run_double_verification.py)
 
 ## What It Runs
 
@@ -38,22 +38,22 @@ Strict non-NAT example:
 
 ```powershell
 python scripts\deployment\run_double_verification.py `
-  --framework-repo "E:\Code1\muxingRPDB Platform Framework-fw" `
-  --deployment-repo "E:\Code1\muxingRPDB Platform Framework-deploy" `
+  --framework-repo "<framework-repo-root>" `
+  --deployment-repo "<deployment-repo-root>" `
   --customer-source "muxer\config\customer-sources\migrated\legacy-cust0003\customer.yaml" `
   --environment-file "muxer\config\environment-defaults\current-dev-nonnat-active-a.yaml" `
-  --baseline-dir "E:\Code1\muxingRPDB Platform Framework\build\verification-fixtures\pre-rpdb-baseline"
+  --baseline-dir "<repo-root>\build\verification-fixtures\pre-rpdb-baseline"
 ```
 
 NAT example:
 
 ```powershell
 python scripts\deployment\run_double_verification.py `
-  --framework-repo "E:\Code1\muxingRPDB Platform Framework-fw" `
-  --deployment-repo "E:\Code1\muxingRPDB Platform Framework-deploy" `
+  --framework-repo "<framework-repo-root>" `
+  --deployment-repo "<deployment-repo-root>" `
   --customer-source "muxer\config\customer-sources\migrated\vpn-customer-stage1-15-cust-0003\customer.yaml" `
   --environment-file "muxer\config\environment-defaults\current-dev-nat-active-a.yaml" `
-  --baseline-dir "E:\Code1\muxingRPDB Platform Framework\build\verification-fixtures\pre-rpdb-baseline"
+  --baseline-dir "<repo-root>\build\verification-fixtures\pre-rpdb-baseline"
 ```
 
 ## Output
