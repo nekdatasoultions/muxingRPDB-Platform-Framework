@@ -67,7 +67,11 @@ def render_strongswan(global_cfg: Dict[str, Any], modules: List[Dict[str, Any]])
     for module in modules:
         ipsec_cfg = module.get("ipsec", {}) or {}
         local_subnets = subnet_list(ipsec_cfg.get("local_subnets", []))
-        remote_subnets = subnet_list(ipsec_cfg.get("remote_subnets", []))
+        remote_subnets = subnet_list(
+            ipsec_cfg.get("remote_host_cidrs")
+            or ipsec_cfg.get("effective_remote_subnets")
+            or ipsec_cfg.get("remote_subnets", [])
+        )
         if not local_subnets or not remote_subnets:
             continue
 

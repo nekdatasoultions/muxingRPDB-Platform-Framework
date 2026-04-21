@@ -147,6 +147,9 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
         ipsec_cfg["local_subnets"] = copy.deepcopy(selectors.get("local_subnets") or [])
     if selectors.get("remote_subnets") and not ipsec_cfg.get("remote_subnets"):
         ipsec_cfg["remote_subnets"] = copy.deepcopy(selectors.get("remote_subnets") or [])
+    if selectors.get("remote_host_cidrs"):
+        ipsec_cfg["remote_host_cidrs"] = copy.deepcopy(selectors.get("remote_host_cidrs") or [])
+        ipsec_cfg["effective_remote_subnets"] = copy.deepcopy(selectors.get("remote_host_cidrs") or [])
     if ipsec_cfg:
         compat["ipsec"] = ipsec_cfg
 
@@ -214,6 +217,11 @@ def _runtime_remote_subnets(module: Dict[str, Any]) -> List[str]:
     return list(ipsec_cfg.get("remote_subnets") or [])
 
 
+def _runtime_remote_host_cidrs(module: Dict[str, Any]) -> List[str]:
+    ipsec_cfg = module.get("ipsec") or {}
+    return list(ipsec_cfg.get("remote_host_cidrs") or ipsec_cfg.get("effective_remote_subnets") or [])
+
+
 def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_at: str) -> Dict[str, Any]:
     original = copy.deepcopy(module.get("_rpdb_original") or {})
     if not original:
@@ -272,10 +280,13 @@ def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_a
     selectors_doc = original.setdefault("selectors", {})
     local_subnets = _runtime_local_subnets(module)
     remote_subnets = _runtime_remote_subnets(module)
+    remote_host_cidrs = _runtime_remote_host_cidrs(module)
     if local_subnets:
         selectors_doc["local_subnets"] = copy.deepcopy(local_subnets)
     if remote_subnets:
         selectors_doc["remote_subnets"] = copy.deepcopy(remote_subnets)
+    if remote_host_cidrs:
+        selectors_doc["remote_host_cidrs"] = copy.deepcopy(remote_host_cidrs)
 
     metadata = original.setdefault("metadata", {})
     metadata["source_ref"] = source_ref

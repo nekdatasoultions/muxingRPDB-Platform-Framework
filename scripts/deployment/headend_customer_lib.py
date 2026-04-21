@@ -244,6 +244,30 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         if str(initiation_intent.get("child") or "") not in initiate_script_text:
             report["errors"].append("head-end initiation script must target the rendered child name")
 
+    selector_intent = ipsec_intent.get("selectors") or {}
+    effective_remote_ts = [
+        str(value)
+        for value in (selector_intent.get("effective_remote_ts") or [])
+        if str(value).strip()
+    ]
+    if not effective_remote_ts:
+        effective_remote_ts = [
+            str(value)
+            for value in (selector_intent.get("remote_subnets") or [])
+            if str(value).strip()
+        ]
+    expected_remote_ts = f"remote_ts = {','.join(effective_remote_ts)}"
+    if effective_remote_ts and expected_remote_ts not in swanctl_text:
+        report["errors"].append(
+            f"swanctl-connection.conf missing effective remote_ts selector: {expected_remote_ts}"
+        )
+    if selector_intent.get("remote_host_cidrs"):
+        report["details"]["effective_remote_ts_source"] = selector_intent.get("effective_remote_ts_source")
+        if selector_intent.get("effective_remote_ts_source") != "remote_host_cidrs":
+            report["errors"].append(
+                "remote_host_cidrs are present but not selected as effective remote traffic selectors"
+            )
+
     route_lines = _executable_lines(route_text)
     nft_apply_lines = _executable_lines(nft_apply_text)
     nft_remove_lines = _executable_lines(nft_remove_text)

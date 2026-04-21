@@ -208,7 +208,7 @@
           "$ref": "#/$defs/ipv4_cidr_array"
         },
         "remote_host_cidrs": {
-          "$ref": "#/$defs/host_cidr_array"
+          "$ref": "#/$defs/ipv4_cidr_array"
         }
       }
     },

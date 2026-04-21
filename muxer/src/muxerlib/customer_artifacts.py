@@ -135,6 +135,13 @@ def _render_initiation_script(customer_name: str, initiation: Dict[str, Any]) ->
     ) + "\n"
 
 
+def _effective_remote_ts(selectors: Dict[str, Any]) -> List[str]:
+    scoped = [str(value) for value in (selectors.get("remote_host_cidrs") or []) if str(value).strip()]
+    if scoped:
+        return scoped
+    return [str(value) for value in (selectors.get("remote_subnets") or []) if str(value).strip()]
+
+
 def _append_unique(values: List[str], value: Any) -> None:
     text = str(value or "").strip()
     if text and text not in values:
@@ -314,6 +321,7 @@ def _render_ipsec_intent(
     esp_proposals = _render_esp_proposals(ipsec)
     local_addrs = ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP")
     initiation = _render_ipsec_initiation(ipsec)
+    effective_remote_ts = _effective_remote_ts(selectors)
     return {
         "customer_name": customer.get("name"),
         "peer_public_ip": peer.get("public_ip"),
@@ -355,6 +363,10 @@ def _render_ipsec_intent(
             "local_subnets": selectors.get("local_subnets") or [],
             "remote_subnets": selectors.get("remote_subnets") or [],
             "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
+            "effective_remote_ts": effective_remote_ts,
+            "effective_remote_ts_source": (
+                "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
+            ),
         },
     }
 
@@ -383,6 +395,7 @@ def _render_swanctl_connection(
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
     initiation = _render_ipsec_initiation(ipsec)
+    effective_remote_ts = _effective_remote_ts(selectors)
     lines: List[str] = [
         "connections {",
         f"  {customer_name} {{",
@@ -410,7 +423,7 @@ def _render_swanctl_connection(
             "    children {",
             f"      {customer_name}-child {{",
             f"        local_ts = {','.join(selectors.get('local_subnets') or [])}",
-            f"        remote_ts = {','.join(selectors.get('remote_subnets') or [])}",
+            f"        remote_ts = {','.join(effective_remote_ts)}",
             "        mode = tunnel",
             f"        start_action = {initiation['swanctl_start_action']}",
         ]
@@ -963,6 +976,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "local_subnets": selectors.get("local_subnets") or [],
             "remote_subnets": selectors.get("remote_subnets") or [],
             "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
+            "effective_remote_ts": _effective_remote_ts(selectors),
         },
         "routing/rpdb-routing.json": {
             "fwmark": transport.get("mark"),
@@ -1069,6 +1083,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
     outside_nat_nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors)
     ipsec_initiation = _render_ipsec_initiation(ipsec)
+    effective_remote_ts = _effective_remote_ts(selectors)
     clear_route_subnets = (
         outside_nat.get("real_subnets")
         if bool(outside_nat.get("enabled")) and outside_nat.get("real_subnets")
@@ -1120,6 +1135,10 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "local_subnets": selectors.get("local_subnets") or [],
                 "remote_subnets": selectors.get("remote_subnets") or [],
                 "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
+                "effective_remote_ts": effective_remote_ts,
+                "effective_remote_ts_source": (
+                    "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
+                ),
             },
             "transport_binding": {
                 "fwmark": transport.get("mark"),

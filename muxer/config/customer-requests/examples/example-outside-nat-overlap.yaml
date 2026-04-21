@@ -13,12 +13,14 @@ customer:
     # This may overlap with other customers. It is scoped to this tunnel.
     remote_subnets:
       - 10.200.60.0/24
-    # These are the actual customer hosts expected to source traffic.
+    # These are the actual customer hosts or smaller customer CIDRs expected
+    # to use this tunnel. Every entry must sit inside remote_subnets.
     remote_host_cidrs:
       - 10.200.60.88/32
       - 10.200.60.2/32
       - 10.200.60.3/32
       - 10.200.60.65/32
+      - 10.200.60.128/28
   ipsec:
     ike_version: ikev2
     ike_policies:

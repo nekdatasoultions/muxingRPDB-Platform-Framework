@@ -44,8 +44,10 @@ remote_subnets:
 
 That overlap is acceptable because the selector is scoped to one IPsec tunnel.
 
-The platform also needs to know which concrete customer hosts are actually used
-inside that overlapping subnet. That is modeled with `remote_host_cidrs`:
+The platform also needs to know which exact customer-side ranges are actually
+used inside that overlapping subnet. That is modeled with `remote_host_cidrs`.
+The field name is kept for compatibility, but the values may be either `/32`
+hosts or smaller CIDR blocks contained by `remote_subnets`:
 
 ```yaml
 remote_host_cidrs:
@@ -53,11 +55,12 @@ remote_host_cidrs:
   - 10.200.60.2/32
   - 10.200.60.3/32
   - 10.200.60.65/32
+  - 10.200.60.128/28
 ```
 
-The `/24` remains the customer encryption domain. The `/32` values become the
-tracked host inventory for NAT scoping, validation, troubleshooting, and growth
-accounting.
+The `/24` remains the master customer encryption domain. The scoped values
+become the tracked selector inventory for IPsec policy, NAT scoping,
+validation, troubleshooting, and growth accounting.
 
 ## Customer Request Shape
 
@@ -80,6 +83,7 @@ customer:
       - 10.200.60.2/32
       - 10.200.60.3/32
       - 10.200.60.65/32
+      - 10.200.60.128/28
 
   outside_nat:
     enabled: true
@@ -114,9 +118,11 @@ each tunnel has its own peer, selectors, SA state, marks, routes, and artifacts.
 
 `selectors.remote_host_cidrs`
 
-The concrete customer-side hosts expected to use the tunnel. These must be
-`/32` values. When present, generated outside NAT artifacts scope NAT to these
-hosts instead of the whole overlapping remote subnet.
+The scoped customer-side ranges expected to use the tunnel. These may be `/32`
+hosts or smaller CIDR blocks, but every value must be contained by one of the
+declared `remote_subnets`. When present, generated IPsec artifacts use these as
+the effective remote traffic selectors, and generated outside NAT artifacts
+scope NAT to these values instead of the whole overlapping remote subnet.
 
 ## Generated Head-End Behavior
 
@@ -134,6 +140,11 @@ The generated nftables table performs both directions:
 customer host -> translated local IP -> DNAT to real local/core IP
 real local/core IP -> customer host -> SNAT to translated local IP
 ```
+
+When `remote_host_cidrs` is present, the generated strongSwan connection also
+uses those scoped CIDRs as `remote_ts`. That keeps overlapping customer domains
+from installing broad `/24` XFRM policies when only selected hosts or sub-ranges
+should use that specific tunnel.
 
 The staged head-end apply wrapper installs outside NAT before post-IPsec NAT:
 
@@ -160,7 +171,8 @@ independently.
 
 The repo validates that:
 
-- `remote_host_cidrs` are `/32` values
+- `remote_host_cidrs` are valid CIDRs contained by `remote_subnets`
+- generated `swanctl remote_ts` uses `remote_host_cidrs` when present
 - outside NAT one-to-one mappings have matching subnet sizes
 - outside NAT explicit host mappings stay inside declared translated subnets
 - generated outside NAT artifacts use nftables

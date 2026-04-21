@@ -370,14 +370,34 @@ def _parse_host_mappings(value: Any, path: str) -> Optional[List[HostMapping]]:
     return mappings or None
 
 
-def _as_optional_host_cidr_list(value: Any, path: str) -> Optional[List[str]]:
+def _as_optional_remote_selector_cidr_list(
+    value: Any,
+    path: str,
+    remote_subnets: List[str],
+) -> Optional[List[str]]:
     items = _as_optional_list(value)
     if not items:
         return None
-    return [
-        _validated_cidr(item, f"{path}[{idx}]", prefixlen=32)
-        for idx, item in enumerate(items)
+    parent_networks = [
+        ipaddress.ip_network(str(subnet), strict=False)
+        for subnet in remote_subnets
     ]
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(items):
+        candidate = ipaddress.ip_network(
+            _validated_cidr(item, f"{path}[{idx}]"),
+            strict=False,
+        )
+        if not any(candidate.subnet_of(parent) for parent in parent_networks):
+            raise ValueError(
+                f"{path}[{idx}] must be contained by customer.selectors.remote_subnets"
+            )
+        candidate_text = str(candidate)
+        if candidate_text not in seen:
+            normalized.append(candidate_text)
+            seen.add(candidate_text)
+    return normalized or None
 
 
 def _ensure_same_prefix_size(real_subnets: List[str], translated_subnets: List[str], path: str) -> None:
@@ -603,6 +623,17 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     ipsec = customer.get("ipsec") or {}
     post_ipsec_nat = customer.get("post_ipsec_nat")
     outside_nat = customer.get("outside_nat")
+    selector_local_subnets = _as_list(
+        _require(selectors.get("local_subnets"), "customer.selectors.local_subnets")
+    )
+    selector_remote_subnets = _as_list(
+        _require(selectors.get("remote_subnets"), "customer.selectors.remote_subnets")
+    )
+    selector_remote_host_cidrs = _as_optional_remote_selector_cidr_list(
+        selectors.get("remote_host_cidrs"),
+        "customer.selectors.remote_host_cidrs",
+        selector_remote_subnets,
+    )
 
     return CustomerSource(
         schema_version=int(_require(raw.get("schema_version"), "schema_version")),
@@ -633,16 +664,9 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                 ),
             ),
             selectors=Selectors(
-                local_subnets=_as_list(
-                    _require(selectors.get("local_subnets"), "customer.selectors.local_subnets")
-                ),
-                remote_subnets=_as_list(
-                    _require(selectors.get("remote_subnets"), "customer.selectors.remote_subnets")
-                ),
-                remote_host_cidrs=_as_optional_host_cidr_list(
-                    selectors.get("remote_host_cidrs"),
-                    "customer.selectors.remote_host_cidrs",
-                ),
+                local_subnets=selector_local_subnets,
+                remote_subnets=selector_remote_subnets,
+                remote_host_cidrs=selector_remote_host_cidrs,
             ),
             backend=(
                 Backend(
