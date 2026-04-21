@@ -327,3 +327,45 @@ def copy_paths_to_remote_root(
         "extract_stderr": extract_result["stderr"],
         "remote_tar": remote_tar,
     }
+
+
+def copy_remote_file_to_local(
+    *,
+    context: SshAccessContext,
+    target_instance_id: str,
+    remote_path: str,
+    local_path: Path,
+    via_bastion: bool,
+    timeout_seconds: int = 180,
+) -> dict[str, Any]:
+    _prime_eic_keys(context, target_instance_id, via_bastion=via_bastion)
+    host = _target_host(context, target_instance_id, via_bastion=via_bastion)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    scp_command = [
+        "scp",
+        "-i",
+        context.key_name,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        f"UserKnownHostsFile={context.known_hosts}",
+        "-o",
+        "ConnectTimeout=8",
+    ]
+    if via_bastion:
+        scp_command.extend(["-o", f"ProxyCommand={_proxy_command(context)}"])
+    scp_command.extend([f"{context.ssh_user}@{host}:{remote_path}", str(local_path)])
+    completed = run_local(scp_command, cwd=context.key_dir, timeout=timeout_seconds)
+    return {
+        "success": completed.returncode == 0,
+        "transport": "ssh-bastion" if via_bastion else "ssh-direct",
+        "target_instance_id": target_instance_id,
+        "command": scp_command,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "remote_path": remote_path,
+        "local_path": str(local_path),
+        "returncode": completed.returncode,
+    }

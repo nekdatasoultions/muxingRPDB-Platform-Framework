@@ -61,3 +61,41 @@ The first RPDB live validations should assume rollback may require restoring:
 - NAT head-end customer runtime
 - non-NAT head-end customer runtime
 - customer-scoped deployment artifacts
+
+## RPDB-Empty Live Pre-Change Backup
+
+Before the first RPDB-empty live-node update, a fresh read-only backup was
+captured from the five RPDB-empty nodes on April 21, 2026.
+
+Backup command:
+
+```powershell
+python scripts\backup\create_live_node_backups.py `
+  --environment rpdb-empty-live `
+  --upload-s3 `
+  --json
+```
+
+Backup run ID:
+
+```text
+20260421T194634Z
+```
+
+Verified S3 snapshot roots:
+
+- `s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/muxer/muxer-i-0c8c34de42777c769-20260421T194634Z/`
+- `s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend/nat-active-i-0a5f8a1e1b0fed116-20260421T194634Z/`
+- `s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend/nat-standby-i-026dcd8f4b658772b-20260421T194634Z/`
+- `s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend/non_nat-active-i-05c6a9f56cd531322-20260421T194634Z/`
+- `s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend/non_nat-standby-i-0eb58b43b6886ea0c-20260421T194634Z/`
+
+Each snapshot was verified to include:
+
+- `manifest.txt`
+- `sha256sums.txt`
+- `nft-ruleset.txt`
+
+The backup command is read-only against node runtime state. It may capture
+`iptables-save.txt` for rollback visibility, but RPDB runtime/apply artifacts
+remain nftables-only.
