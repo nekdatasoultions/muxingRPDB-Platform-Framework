@@ -429,11 +429,34 @@ def apply_backend_payloads(
             }
         )
 
-    if customer_action == "created":
-        put_typed_item(region, customer_table, customer_item_typed)
-    for item, result in zip(allocation_items_typed, allocation_results, strict=True):
-        if result["action"] == "created":
-            put_typed_item(region, allocation_table, item)
+    if len(allocation_items_typed) != len(allocation_results):
+        raise RuntimeError("allocation planning count does not match allocation payload count")
+
+    created_customer = False
+    created_allocation_keys: list[dict[str, Any]] = []
+    try:
+        if customer_action == "created":
+            put_typed_item(region, customer_table, customer_item_typed)
+            created_customer = True
+        for item, result in zip(allocation_items_typed, allocation_results):
+            if result["action"] == "created":
+                put_typed_item(region, allocation_table, item)
+                created_allocation_keys.append(result["key"])
+    except Exception as exc:
+        cleanup_errors: list[str] = []
+        for key in reversed(created_allocation_keys):
+            try:
+                delete_typed_item(region, allocation_table, key)
+            except Exception as cleanup_exc:  # pragma: no cover - best effort for live cleanup
+                cleanup_errors.append(str(cleanup_exc))
+        if created_customer:
+            try:
+                delete_typed_item(region, customer_table, customer_key)
+            except Exception as cleanup_exc:  # pragma: no cover - best effort for live cleanup
+                cleanup_errors.append(str(cleanup_exc))
+        if cleanup_errors:
+            raise RuntimeError(f"{exc}; backend cleanup errors: {'; '.join(cleanup_errors)}") from exc
+        raise
 
     return {
         "customer_item_typed": customer_item_typed,
