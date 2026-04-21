@@ -15,6 +15,8 @@ PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
 HEADEND_REQUIRED_FILES = (
     "ipsec/ipsec-intent.json",
     "ipsec/swanctl-connection.conf",
+    "ipsec/initiation-intent.json",
+    "ipsec/initiate-tunnel.sh",
     "routing/routing-intent.json",
     "routing/ip-route.commands.txt",
     "post-ipsec-nat/post-ipsec-nat-intent.json",
@@ -22,6 +24,11 @@ HEADEND_REQUIRED_FILES = (
     "post-ipsec-nat/nftables.remove.nft",
     "post-ipsec-nat/nftables-state.json",
     "post-ipsec-nat/activation-manifest.json",
+    "outside-nat/outside-nat-intent.json",
+    "outside-nat/nftables.apply.nft",
+    "outside-nat/nftables.remove.nft",
+    "outside-nat/nftables-state.json",
+    "outside-nat/activation-manifest.json",
 )
 
 HEADEND_STATE_ROOT = Path("var") / "lib" / "rpdb-headend" / "customers"
@@ -143,20 +150,30 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     report["customer_name"] = bundle.customer_name
 
     swanctl_text = bundle.text_payloads["ipsec/swanctl-connection.conf"]
+    initiate_script_text = bundle.text_payloads["ipsec/initiate-tunnel.sh"]
     route_text = bundle.text_payloads["routing/ip-route.commands.txt"]
     nft_apply_text = bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]
     nft_remove_text = bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]
+    outside_nft_apply_text = bundle.text_payloads["outside-nat/nftables.apply.nft"]
+    outside_nft_remove_text = bundle.text_payloads["outside-nat/nftables.remove.nft"]
     ipsec_intent = bundle.json_payloads["ipsec/ipsec-intent.json"]
+    initiation_intent = bundle.json_payloads["ipsec/initiation-intent.json"]
     routing_intent = bundle.json_payloads["routing/routing-intent.json"]
     nat_intent = bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"]
     activation_manifest = bundle.json_payloads["post-ipsec-nat/activation-manifest.json"]
     nft_state = bundle.json_payloads["post-ipsec-nat/nftables-state.json"]
+    outside_nat_intent = bundle.json_payloads["outside-nat/outside-nat-intent.json"]
+    outside_activation_manifest = bundle.json_payloads["outside-nat/activation-manifest.json"]
+    outside_nft_state = bundle.json_payloads["outside-nat/nftables-state.json"]
 
     text_checks = {
         "ipsec/swanctl-connection.conf": swanctl_text,
+        "ipsec/initiate-tunnel.sh": initiate_script_text,
         "routing/ip-route.commands.txt": route_text,
         "post-ipsec-nat/nftables.apply.nft": nft_apply_text,
         "post-ipsec-nat/nftables.remove.nft": nft_remove_text,
+        "outside-nat/nftables.apply.nft": outside_nft_apply_text,
+        "outside-nat/nftables.remove.nft": outside_nft_remove_text,
     }
 
     for relative_name, payload in text_checks.items():
@@ -186,17 +203,70 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
             "swanctl-connection.conf renders an unsupported non-ike PSK secret section"
         )
 
+    initiation = ipsec_intent.get("initiation") or {}
+    start_action = str(initiation_intent.get("swanctl_start_action") or "").strip()
+    if initiation and initiation != initiation_intent:
+        comparable_intent = {
+            key: initiation_intent.get(key)
+            for key in initiation
+        }
+        if comparable_intent != initiation:
+            report["errors"].append("ipsec initiation intent does not match ipsec-intent.json")
+    if initiation_intent.get("mode") == "bidirectional":
+        if not initiation_intent.get("headend_can_initiate"):
+            report["errors"].append("bidirectional IPsec requires headend_can_initiate=true")
+        if not initiation_intent.get("customer_can_initiate"):
+            report["errors"].append("bidirectional IPsec requires customer_can_initiate=true")
+    if initiation_intent.get("traffic_can_start_tunnel") and "trap" not in start_action:
+        report["errors"].append(
+            "traffic-triggered tunnel initiation requires swanctl start_action to include trap"
+        )
+    if initiation_intent.get("bring_up_on_apply") and "start" not in start_action:
+        report["errors"].append(
+            "head-end bring-up on apply requires swanctl start_action to include start"
+        )
+    expected_start_action = f"start_action = {start_action}"
+    if start_action and expected_start_action not in swanctl_text:
+        report["errors"].append(
+            f"swanctl-connection.conf missing rendered initiation action: {expected_start_action}"
+        )
+    if initiation_intent.get("customer_can_initiate"):
+        expected_remote = f"remote_addrs = {ipsec_intent.get('peer_public_ip')}"
+        if expected_remote not in swanctl_text:
+            report["errors"].append(
+                "customer-initiated tunnel bring-up requires swanctl remote_addrs to match the peer"
+            )
+    if initiation_intent.get("headend_can_initiate"):
+        if "swanctl --initiate --child" not in initiate_script_text:
+            report["errors"].append(
+                "head-end initiation script must call swanctl --initiate --child"
+            )
+        if str(initiation_intent.get("child") or "") not in initiate_script_text:
+            report["errors"].append("head-end initiation script must target the rendered child name")
+
     route_lines = _executable_lines(route_text)
     nft_apply_lines = _executable_lines(nft_apply_text)
     nft_remove_lines = _executable_lines(nft_remove_text)
+    outside_nft_apply_lines = _executable_lines(outside_nft_apply_text)
+    outside_nft_remove_lines = _executable_lines(outside_nft_remove_text)
     report["details"]["route_command_count"] = len(route_lines)
     report["details"]["post_ipsec_nat_command_count"] = int(activation_manifest.get("apply_command_count") or 0)
     report["details"]["post_ipsec_nat_rollback_command_count"] = int(activation_manifest.get("rollback_command_count") or 0)
+    report["details"]["outside_nat_command_count"] = int(outside_activation_manifest.get("apply_command_count") or 0)
+    report["details"]["outside_nat_rollback_command_count"] = int(outside_activation_manifest.get("rollback_command_count") or 0)
     report["details"]["ipsec_ike_version"] = ipsec_intent.get("ike_version")
+    report["details"]["ipsec_initiation_mode"] = initiation_intent.get("mode")
+    report["details"]["ipsec_start_action"] = initiation_intent.get("swanctl_start_action")
+    report["details"]["headend_can_initiate"] = initiation_intent.get("headend_can_initiate")
+    report["details"]["customer_can_initiate"] = initiation_intent.get("customer_can_initiate")
     report["details"]["post_ipsec_nat_mapping_strategy"] = nat_intent.get("mapping_strategy")
     report["details"]["post_ipsec_nat_command_model"] = nat_intent.get("rendered_command_model")
     report["details"]["post_ipsec_nat_activation_backend"] = activation_manifest.get("backend")
     report["details"]["post_ipsec_nat_table_name"] = activation_manifest.get("table_name")
+    report["details"]["outside_nat_mapping_strategy"] = outside_nat_intent.get("mapping_strategy")
+    report["details"]["outside_nat_command_model"] = outside_nat_intent.get("rendered_command_model")
+    report["details"]["outside_nat_activation_backend"] = outside_activation_manifest.get("backend")
+    report["details"]["outside_nat_table_name"] = outside_activation_manifest.get("table_name")
 
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")
@@ -279,6 +349,25 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         if "dnat to" not in nft_payload or "snat to" not in nft_payload:
             report["errors"].append("post-IPsec NAT nftables artifacts must include DNAT and SNAT statements")
 
+    if bool(outside_nat_intent.get("enabled")):
+        if outside_activation_manifest.get("backend") != "nftables" or outside_nft_state.get("backend") != "nftables":
+            report["errors"].append(
+                "outside NAT must use nftables activation artifacts"
+            )
+        if not outside_nft_apply_lines:
+            report["errors"].append(
+                "outside NAT is enabled in the intent, but nftables.apply.nft contains no executable nftables state"
+            )
+        if not outside_nft_remove_lines:
+            report["errors"].append(
+                "outside NAT is enabled in the intent, but nftables.remove.nft contains no executable nftables state"
+            )
+        outside_nft_payload = "\n".join([*outside_nft_apply_lines, *outside_nft_remove_lines]).lower()
+        if "iptables" in outside_nft_payload or "iptables-restore" in outside_nft_payload:
+            report["errors"].append("outside NAT nftables artifacts must not contain iptables fallback commands")
+        if "dnat to" not in outside_nft_payload or "snat to" not in outside_nft_payload:
+            report["errors"].append("outside NAT nftables artifacts must include DNAT and SNAT statements")
+
     report["valid"] = not report["errors"]
     return report
 
@@ -291,6 +380,8 @@ def build_install_layout(headend_root: Path, customer_name: str) -> dict[str, Pa
         "customer_root": customer_root,
         "artifacts_root": customer_root / "artifacts",
         "swanctl_conf": resolved_root / SWANCTL_CONF_ROOT / f"{customer_name}.conf",
+        "ipsec_initiation_intent": customer_root / "ipsec" / "initiation-intent.json",
+        "ipsec_initiate_script": customer_root / "ipsec" / "initiate-tunnel.sh",
         "route_commands": customer_root / "routing" / "ip-route.commands.txt",
         "route_apply_script": customer_root / "routing" / "apply-routes.sh",
         "route_remove_script": customer_root / "routing" / "remove-routes.sh",
@@ -300,6 +391,12 @@ def build_install_layout(headend_root: Path, customer_name: str) -> dict[str, Pa
         "activation_manifest": customer_root / "post-ipsec-nat" / "activation-manifest.json",
         "nat_apply_script": customer_root / "post-ipsec-nat" / "apply-post-ipsec-nat.sh",
         "nat_remove_script": customer_root / "post-ipsec-nat" / "remove-post-ipsec-nat.sh",
+        "outside_nft_apply": customer_root / "outside-nat" / "nftables.apply.nft",
+        "outside_nft_remove": customer_root / "outside-nat" / "nftables.remove.nft",
+        "outside_nft_state": customer_root / "outside-nat" / "nftables-state.json",
+        "outside_activation_manifest": customer_root / "outside-nat" / "activation-manifest.json",
+        "outside_nat_apply_script": customer_root / "outside-nat" / "apply-outside-nat.sh",
+        "outside_nat_remove_script": customer_root / "outside-nat" / "remove-outside-nat.sh",
         "master_apply_script": customer_root / "apply-headend-customer.sh",
         "master_remove_script": customer_root / "remove-headend-customer.sh",
         "state_json": customer_root / "install-state.json",
@@ -372,9 +469,11 @@ def _render_master_apply_script(layout: dict[str, Path], customer_name: str) -> 
             "  printf '\\ninclude conf.d/rpdb-customers/*.conf\\n' >> \"${SWANCTL_MAIN}\"",
             'fi',
             'bash "${CUSTOMER_ROOT}/routing/apply-routes.sh"',
+            'bash "${CUSTOMER_ROOT}/outside-nat/apply-outside-nat.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/apply-post-ipsec-nat.sh"',
             'if command -v swanctl >/dev/null 2>&1 && systemctl is-active --quiet strongswan; then',
             '  swanctl --load-all',
+            '  bash "${CUSTOMER_ROOT}/ipsec/initiate-tunnel.sh"',
             'elif command -v swanctl >/dev/null 2>&1; then',
             '  echo "strongswan is not active; staged config remains at ${SWANCTL_CONF}"',
             'else',
@@ -396,6 +495,7 @@ def _render_master_remove_script(layout: dict[str, Path], customer_name: str) ->
             'rm -f "${SWANCTL_CONF}"',
             'bash "${CUSTOMER_ROOT}/routing/remove-routes.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/remove-post-ipsec-nat.sh"',
+            'bash "${CUSTOMER_ROOT}/outside-nat/remove-outside-nat.sh"',
             'if command -v swanctl >/dev/null 2>&1 && systemctl is-active --quiet strongswan; then',
             '  swanctl --load-all',
             'elif command -v swanctl >/dev/null 2>&1; then',
@@ -430,28 +530,49 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         shutil.copy2(path, destination)
 
     _write_text(layout["swanctl_conf"], bundle.text_payloads["ipsec/swanctl-connection.conf"])
+    _write_json(layout["ipsec_initiation_intent"], bundle.json_payloads["ipsec/initiation-intent.json"])
+    _write_text(layout["ipsec_initiate_script"], bundle.text_payloads["ipsec/initiate-tunnel.sh"])
     _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route.commands.txt"])
     _write_text(layout["nft_apply"], bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"])
     _write_text(layout["nft_remove"], bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"])
     _write_json(layout["nft_state"], bundle.json_payloads["post-ipsec-nat/nftables-state.json"])
     _write_json(layout["activation_manifest"], bundle.json_payloads["post-ipsec-nat/activation-manifest.json"])
+    _write_text(layout["outside_nft_apply"], bundle.text_payloads["outside-nat/nftables.apply.nft"])
+    _write_text(layout["outside_nft_remove"], bundle.text_payloads["outside-nat/nftables.remove.nft"])
+    _write_json(layout["outside_nft_state"], bundle.json_payloads["outside-nat/nftables-state.json"])
+    _write_json(layout["outside_activation_manifest"], bundle.json_payloads["outside-nat/activation-manifest.json"])
 
     route_remove_lines = _derive_route_remove_lines(bundle.text_payloads["routing/ip-route.commands.txt"])
     nat_enabled = bool(bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"].get("enabled"))
+    outside_nat_enabled = bool(bundle.json_payloads["outside-nat/outside-nat-intent.json"].get("enabled"))
 
     route_apply_script = _render_shell_script(_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"]) or ["true"])
     route_remove_script = _render_shell_script(route_remove_lines or ["true"])
     nat_apply_script = _render_nft_apply_script(nat_enabled)
     nat_remove_script = _render_nft_remove_script(nat_enabled)
+    outside_nat_apply_script = _render_nft_apply_script(outside_nat_enabled)
+    outside_nat_remove_script = _render_nft_remove_script(outside_nat_enabled)
 
     _write_text(layout["route_apply_script"], route_apply_script)
     _write_text(layout["route_remove_script"], route_remove_script)
     _write_text(layout["nat_apply_script"], nat_apply_script)
     _write_text(layout["nat_remove_script"], nat_remove_script)
+    _write_text(layout["outside_nat_apply_script"], outside_nat_apply_script)
+    _write_text(layout["outside_nat_remove_script"], outside_nat_remove_script)
     _write_text(layout["master_apply_script"], _render_master_apply_script(layout, bundle.customer_name))
     _write_text(layout["master_remove_script"], _render_master_remove_script(layout, bundle.customer_name))
 
-    for key in ("route_apply_script", "route_remove_script", "nat_apply_script", "nat_remove_script", "master_apply_script", "master_remove_script"):
+    for key in (
+        "route_apply_script",
+        "route_remove_script",
+        "nat_apply_script",
+        "nat_remove_script",
+        "outside_nat_apply_script",
+        "outside_nat_remove_script",
+        "ipsec_initiate_script",
+        "master_apply_script",
+        "master_remove_script",
+    ):
         _make_executable(layout[key])
 
     state = {
@@ -465,6 +586,10 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         "post_ipsec_nat_command_count": int(
             bundle.json_payloads["post-ipsec-nat/activation-manifest.json"].get("apply_command_count") or 0
         ),
+        "outside_nat_command_count": int(
+            bundle.json_payloads["outside-nat/activation-manifest.json"].get("apply_command_count") or 0
+        ),
+        "ipsec_initiation": bundle.json_payloads["ipsec/initiation-intent.json"],
         "paths": {name: str(path) for name, path in layout.items()},
     }
     _write_json(layout["state_json"], state)
@@ -475,10 +600,13 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         "installed": True,
         "state_json": str(layout["state_json"]),
         "swanctl_conf": str(layout["swanctl_conf"]),
+        "ipsec_initiate_script": str(layout["ipsec_initiate_script"]),
         "route_apply_script": str(layout["route_apply_script"]),
         "route_remove_script": str(layout["route_remove_script"]),
         "post_ipsec_nat_apply_script": str(layout["nat_apply_script"]),
         "post_ipsec_nat_remove_script": str(layout["nat_remove_script"]),
+        "outside_nat_apply_script": str(layout["outside_nat_apply_script"]),
+        "outside_nat_remove_script": str(layout["outside_nat_remove_script"]),
         "master_apply_script": str(layout["master_apply_script"]),
         "master_remove_script": str(layout["master_remove_script"]),
     }
@@ -494,15 +622,23 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
 
     for key in (
         "swanctl_conf",
+        "ipsec_initiation_intent",
+        "ipsec_initiate_script",
         "route_commands",
         "nft_apply",
         "nft_remove",
         "nft_state",
         "activation_manifest",
+        "outside_nft_apply",
+        "outside_nft_remove",
+        "outside_nft_state",
+        "outside_activation_manifest",
         "route_apply_script",
         "route_remove_script",
         "nat_apply_script",
         "nat_remove_script",
+        "outside_nat_apply_script",
+        "outside_nat_remove_script",
         "master_apply_script",
         "master_remove_script",
         "state_json",
@@ -520,6 +656,20 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
         if installed_route_text != bundle.text_payloads["routing/ip-route.commands.txt"]:
             report["errors"].append(f"installed route commands do not match bundle: {layout['route_commands']}")
 
+    if layout["ipsec_initiate_script"].exists():
+        installed_initiate_script = layout["ipsec_initiate_script"].read_text(encoding="utf-8")
+        if installed_initiate_script != bundle.text_payloads["ipsec/initiate-tunnel.sh"]:
+            report["errors"].append(
+                f"installed IPsec initiate script does not match bundle: {layout['ipsec_initiate_script']}"
+            )
+
+    if layout["ipsec_initiation_intent"].exists():
+        installed_initiation_intent = _load_json(layout["ipsec_initiation_intent"])
+        if installed_initiation_intent != bundle.json_payloads["ipsec/initiation-intent.json"]:
+            report["errors"].append(
+                f"installed IPsec initiation intent does not match bundle: {layout['ipsec_initiation_intent']}"
+            )
+
     if layout["nft_apply"].exists():
         installed_nft_apply = layout["nft_apply"].read_text(encoding="utf-8")
         if installed_nft_apply != bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]:
@@ -529,6 +679,20 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
         installed_nft_remove = layout["nft_remove"].read_text(encoding="utf-8")
         if installed_nft_remove != bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]:
             report["errors"].append(f"installed nftables remove file does not match bundle: {layout['nft_remove']}")
+
+    if layout["outside_nft_apply"].exists():
+        installed_outside_nft_apply = layout["outside_nft_apply"].read_text(encoding="utf-8")
+        if installed_outside_nft_apply != bundle.text_payloads["outside-nat/nftables.apply.nft"]:
+            report["errors"].append(
+                f"installed outside NAT nftables apply file does not match bundle: {layout['outside_nft_apply']}"
+            )
+
+    if layout["outside_nft_remove"].exists():
+        installed_outside_nft_remove = layout["outside_nft_remove"].read_text(encoding="utf-8")
+        if installed_outside_nft_remove != bundle.text_payloads["outside-nat/nftables.remove.nft"]:
+            report["errors"].append(
+                f"installed outside NAT nftables remove file does not match bundle: {layout['outside_nft_remove']}"
+            )
 
     if layout["state_json"].exists():
         state = _load_json(layout["state_json"])

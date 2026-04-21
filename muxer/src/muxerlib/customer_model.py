@@ -42,6 +42,7 @@ class Transport:
 class Selectors:
     local_subnets: List[str]
     remote_subnets: List[str]
+    remote_host_cidrs: Optional[List[str]] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,16 @@ class DynamicProvisioning:
 
 
 @dataclass(frozen=True)
+class IpsecInitiation:
+    mode: str = "bidirectional"
+    headend_can_initiate: bool = True
+    customer_can_initiate: bool = True
+    traffic_can_start_tunnel: bool = True
+    bring_up_on_apply: bool = True
+    swanctl_start_action: str = "trap|start"
+
+
+@dataclass(frozen=True)
 class Ipsec:
     auto: str = ""
     ike_version: str = ""
@@ -122,6 +133,7 @@ class Ipsec:
     vti_routing: str = ""
     vti_shared: str = ""
     bidirectional_secret: Optional[bool] = None
+    initiation: Optional[IpsecInitiation] = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +160,22 @@ class PostIpsecNat:
 
 
 @dataclass(frozen=True)
+class OutsideNat:
+    enabled: bool
+    mode: str = "disabled"
+    mapping_strategy: str = ""
+    translated_subnets: Optional[List[str]] = None
+    real_subnets: Optional[List[str]] = None
+    host_mappings: Optional[List[HostMapping]] = None
+    customer_sources: Optional[List[str]] = None
+    interface: str = ""
+    output_mark: str = ""
+    tcp_mss_clamp: Optional[int] = None
+    route_via: str = ""
+    route_dev: str = ""
+
+
+@dataclass(frozen=True)
 class Customer:
     id: int
     name: str
@@ -161,6 +189,7 @@ class Customer:
     dynamic_provisioning: Optional[DynamicProvisioning] = None
     ipsec: Optional[Ipsec] = None
     post_ipsec_nat: Optional[PostIpsecNat] = None
+    outside_nat: Optional[OutsideNat] = None
 
 
 @dataclass(frozen=True)
@@ -252,6 +281,65 @@ def _normalized_ike_version(value: Any) -> str:
     return aliases[normalized]
 
 
+def _normalized_swanctl_start_action(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    normalized = str(value).strip().lower().replace(" ", "")
+    if normalized == "start|trap":
+        normalized = "trap|start"
+    allowed = {"none", "start", "trap", "trap|start"}
+    if normalized not in allowed:
+        raise ValueError(f"unsupported swanctl_start_action {value!r}")
+    return normalized
+
+
+def _normalize_ipsec_initiation(value: Any) -> Optional[IpsecInitiation]:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("customer.ipsec.initiation expected mapping")
+
+    mode = str(value.get("mode") or "bidirectional").strip().lower().replace("-", "_")
+    allowed_modes = {"bidirectional", "headend_only", "customer_only", "responder_only"}
+    if mode not in allowed_modes:
+        raise ValueError(f"unsupported customer.ipsec.initiation.mode {value.get('mode')!r}")
+
+    default_headend = mode in {"bidirectional", "headend_only"}
+    default_customer = mode in {"bidirectional", "customer_only", "responder_only"}
+    headend_can_initiate = bool(value.get("headend_can_initiate", default_headend))
+    customer_can_initiate = bool(value.get("customer_can_initiate", default_customer))
+    traffic_can_start_tunnel = bool(value.get("traffic_can_start_tunnel", mode != "headend_only"))
+    bring_up_on_apply = bool(value.get("bring_up_on_apply", headend_can_initiate))
+    swanctl_start_action = _normalized_swanctl_start_action(value.get("swanctl_start_action"))
+    if not swanctl_start_action:
+        if bring_up_on_apply and traffic_can_start_tunnel:
+            swanctl_start_action = "trap|start"
+        elif bring_up_on_apply:
+            swanctl_start_action = "start"
+        elif traffic_can_start_tunnel:
+            swanctl_start_action = "trap"
+        else:
+            swanctl_start_action = "none"
+
+    if mode == "bidirectional" and (not headend_can_initiate or not customer_can_initiate):
+        raise ValueError("customer.ipsec.initiation.mode=bidirectional requires both endpoints to initiate")
+    if bring_up_on_apply and not headend_can_initiate:
+        raise ValueError("customer.ipsec.initiation.bring_up_on_apply requires headend_can_initiate")
+    if bring_up_on_apply and "start" not in swanctl_start_action:
+        raise ValueError("customer.ipsec.initiation.bring_up_on_apply requires swanctl_start_action with start")
+    if traffic_can_start_tunnel and "trap" not in swanctl_start_action:
+        raise ValueError("customer.ipsec.initiation.traffic_can_start_tunnel requires swanctl_start_action with trap")
+
+    return IpsecInitiation(
+        mode=mode,
+        headend_can_initiate=headend_can_initiate,
+        customer_can_initiate=customer_can_initiate,
+        traffic_can_start_tunnel=traffic_can_start_tunnel,
+        bring_up_on_apply=bring_up_on_apply,
+        swanctl_start_action=swanctl_start_action,
+    )
+
+
 def _validated_cidr(value: Any, path: str, *, prefixlen: int | None = None) -> str:
     text = str(_require(value, path))
     try:
@@ -282,6 +370,16 @@ def _parse_host_mappings(value: Any, path: str) -> Optional[List[HostMapping]]:
     return mappings or None
 
 
+def _as_optional_host_cidr_list(value: Any, path: str) -> Optional[List[str]]:
+    items = _as_optional_list(value)
+    if not items:
+        return None
+    return [
+        _validated_cidr(item, f"{path}[{idx}]", prefixlen=32)
+        for idx, item in enumerate(items)
+    ]
+
+
 def _ensure_same_prefix_size(real_subnets: List[str], translated_subnets: List[str], path: str) -> None:
     if len(real_subnets) != len(translated_subnets):
         raise ValueError(
@@ -301,11 +399,10 @@ def _address_in_any_subnet(ip_text: str, subnet_texts: List[str]) -> bool:
     return any(address in ipaddress.ip_network(subnet_text, strict=False) for subnet_text in subnet_texts)
 
 
-def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
+def _normalize_nat_mapping_fields(doc: Dict[str, Any], path: str) -> Dict[str, Any]:
     translated_subnets = _as_list(doc.get("translated_subnets"))
     real_subnets = _as_list(doc.get("real_subnets"))
-    core_subnets = _as_list(doc.get("core_subnets"))
-    host_mappings = _parse_host_mappings(doc.get("host_mappings"), "customer.post_ipsec_nat.host_mappings")
+    host_mappings = _parse_host_mappings(doc.get("host_mappings"), f"{path}.host_mappings")
 
     raw_mode = str(doc.get("mode") or "").strip()
     raw_strategy = str(doc.get("mapping_strategy") or "").strip()
@@ -316,70 +413,106 @@ def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
         mapping_strategy = "explicit_host_map"
 
     if mapping_strategy == "one_to_one" and host_mappings:
-        raise ValueError("customer.post_ipsec_nat one_to_one mapping does not use host_mappings")
+        raise ValueError(f"{path} one_to_one mapping does not use host_mappings")
 
     if mapping_strategy == "one_to_one":
         if not real_subnets or not translated_subnets:
             raise ValueError(
-                "customer.post_ipsec_nat.mapping_strategy=one_to_one requires real_subnets and translated_subnets"
+                f"{path}.mapping_strategy=one_to_one requires real_subnets and translated_subnets"
             )
-        _ensure_same_prefix_size(real_subnets, translated_subnets, "customer.post_ipsec_nat")
+        _ensure_same_prefix_size(real_subnets, translated_subnets, path)
         if raw_mode and mode != "netmap":
-            raise ValueError("customer.post_ipsec_nat one_to_one mapping requires mode=netmap")
+            raise ValueError(f"{path} one_to_one mapping requires mode=netmap")
         mode = "netmap"
 
     if mapping_strategy == "explicit_host_map":
         if not host_mappings:
             raise ValueError(
-                "customer.post_ipsec_nat.mapping_strategy=explicit_host_map requires host_mappings"
+                f"{path}.mapping_strategy=explicit_host_map requires host_mappings"
             )
         if not translated_subnets:
             raise ValueError(
-                "customer.post_ipsec_nat.mapping_strategy=explicit_host_map requires translated_subnets"
+                f"{path}.mapping_strategy=explicit_host_map requires translated_subnets"
             )
         translated_seen: set[str] = set()
         real_seen: set[str] = set()
         for idx, host_mapping in enumerate(host_mappings):
             if host_mapping.real_ip in real_seen:
                 raise ValueError(
-                    f"customer.post_ipsec_nat.host_mappings[{idx}].real_ip is duplicated"
+                    f"{path}.host_mappings[{idx}].real_ip is duplicated"
                 )
             if host_mapping.translated_ip in translated_seen:
                 raise ValueError(
-                    f"customer.post_ipsec_nat.host_mappings[{idx}].translated_ip is duplicated"
+                    f"{path}.host_mappings[{idx}].translated_ip is duplicated"
                 )
             real_seen.add(host_mapping.real_ip)
             translated_seen.add(host_mapping.translated_ip)
 
             if real_subnets and not _address_in_any_subnet(host_mapping.real_ip, real_subnets):
                 raise ValueError(
-                    f"customer.post_ipsec_nat.host_mappings[{idx}].real_ip is outside real_subnets"
+                    f"{path}.host_mappings[{idx}].real_ip is outside real_subnets"
                 )
             if not _address_in_any_subnet(host_mapping.translated_ip, translated_subnets):
                 raise ValueError(
-                    f"customer.post_ipsec_nat.host_mappings[{idx}].translated_ip is outside translated_subnets"
+                    f"{path}.host_mappings[{idx}].translated_ip is outside translated_subnets"
                 )
         if raw_mode and mode != "explicit_map":
-            raise ValueError("customer.post_ipsec_nat explicit host mappings require mode=explicit_map")
+            raise ValueError(f"{path} explicit host mappings require mode=explicit_map")
         mode = "explicit_map"
 
     if mode == "explicit_map":
         if not host_mappings:
-            raise ValueError("customer.post_ipsec_nat mode=explicit_map requires host_mappings")
+            raise ValueError(f"{path} mode=explicit_map requires host_mappings")
         if not translated_subnets:
-            raise ValueError("customer.post_ipsec_nat mode=explicit_map requires translated_subnets")
+            raise ValueError(f"{path} mode=explicit_map requires translated_subnets")
         if not mapping_strategy:
             mapping_strategy = "explicit_host_map"
 
+    return {
+        "mode": mode,
+        "mapping_strategy": mapping_strategy,
+        "translated_subnets": translated_subnets,
+        "real_subnets": real_subnets,
+        "host_mappings": host_mappings,
+    }
+
+
+def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
+    mapping = _normalize_nat_mapping_fields(doc, "customer.post_ipsec_nat")
+    core_subnets = _as_list(doc.get("core_subnets"))
+
     return PostIpsecNat(
         enabled=bool(doc.get("enabled")),
-        mode=mode,
-        mapping_strategy=mapping_strategy,
-        translated_subnets=translated_subnets or None,
+        mode=mapping["mode"],
+        mapping_strategy=mapping["mapping_strategy"],
+        translated_subnets=mapping["translated_subnets"] or None,
         translated_source_ip=str(doc.get("translated_source_ip") or ""),
-        real_subnets=real_subnets or None,
-        host_mappings=host_mappings,
+        real_subnets=mapping["real_subnets"] or None,
+        host_mappings=mapping["host_mappings"],
         core_subnets=core_subnets or None,
+        interface=str(doc.get("interface") or ""),
+        output_mark=str(doc.get("output_mark") or ""),
+        tcp_mss_clamp=(
+            int(doc["tcp_mss_clamp"])
+            if doc.get("tcp_mss_clamp") is not None
+            else None
+        ),
+        route_via=str(doc.get("route_via") or ""),
+        route_dev=str(doc.get("route_dev") or ""),
+    )
+
+
+def _normalize_outside_nat(doc: Dict[str, Any]) -> OutsideNat:
+    mapping = _normalize_nat_mapping_fields(doc, "customer.outside_nat")
+    customer_sources = _as_list(doc.get("customer_sources"))
+    return OutsideNat(
+        enabled=bool(doc.get("enabled")),
+        mode=mapping["mode"],
+        mapping_strategy=mapping["mapping_strategy"],
+        translated_subnets=mapping["translated_subnets"] or None,
+        real_subnets=mapping["real_subnets"] or None,
+        host_mappings=mapping["host_mappings"],
+        customer_sources=customer_sources or None,
         interface=str(doc.get("interface") or ""),
         output_mark=str(doc.get("output_mark") or ""),
         tcp_mss_clamp=(
@@ -469,6 +602,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     dynamic_provisioning = customer.get("dynamic_provisioning")
     ipsec = customer.get("ipsec") or {}
     post_ipsec_nat = customer.get("post_ipsec_nat")
+    outside_nat = customer.get("outside_nat")
 
     return CustomerSource(
         schema_version=int(_require(raw.get("schema_version"), "schema_version")),
@@ -504,6 +638,10 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                 ),
                 remote_subnets=_as_list(
                     _require(selectors.get("remote_subnets"), "customer.selectors.remote_subnets")
+                ),
+                remote_host_cidrs=_as_optional_host_cidr_list(
+                    selectors.get("remote_host_cidrs"),
+                    "customer.selectors.remote_host_cidrs",
                 ),
             ),
             backend=(
@@ -570,6 +708,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     vti_routing=_as_yes_no(ipsec.get("vti_routing")),
                     vti_shared=_as_yes_no(ipsec.get("vti_shared")),
                     bidirectional_secret=ipsec.get("bidirectional_secret"),
+                    initiation=_normalize_ipsec_initiation(ipsec.get("initiation")),
                 )
                 if isinstance(ipsec, dict) and ipsec
                 else None
@@ -577,6 +716,11 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
             post_ipsec_nat=(
                 _normalize_post_ipsec_nat(post_ipsec_nat)
                 if isinstance(post_ipsec_nat, dict)
+                else None
+            ),
+            outside_nat=(
+                _normalize_outside_nat(outside_nat)
+                if isinstance(outside_nat, dict)
                 else None
             ),
         ),

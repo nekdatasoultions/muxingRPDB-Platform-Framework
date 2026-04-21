@@ -360,6 +360,7 @@ def build_modules_from_variables(
     default_natd = defaults.get("natd_rewrite", {}) or {}
     default_ipsec = defaults.get("ipsec", {}) or {}
     default_post_ipsec_nat = defaults.get("post_ipsec_nat", {}) or {}
+    default_outside_nat = defaults.get("outside_nat", {}) or {}
     customers = vars_doc.get("customers", []) or []
 
     modules: List[Dict[str, Any]] = []
@@ -395,6 +396,10 @@ def build_modules_from_variables(
         post_ipsec_nat_cfg = _merge_dict(default_post_ipsec_nat, customer.get("post_ipsec_nat", {}) or {})
         if post_ipsec_nat_cfg:
             module["post_ipsec_nat"] = post_ipsec_nat_cfg
+
+        outside_nat_cfg = _merge_dict(default_outside_nat, customer.get("outside_nat", {}) or {})
+        if outside_nat_cfg:
+            module["outside_nat"] = outside_nat_cfg
 
         if "mark" in customer:
             module["mark"] = customer["mark"]

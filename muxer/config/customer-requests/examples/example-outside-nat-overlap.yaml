@@ -1,0 +1,52 @@
+schema_version: 1
+customer:
+  name: example-outside-nat-overlap
+  peer:
+    public_ip: 203.0.113.55
+    remote_id: 203.0.113.55
+    psk_secret_ref: aws-secretsmanager:/example/rpdb/customer/psk
+  selectors:
+    # This is the customer-visible far-end space. The customer routes this
+    # across the VPN instead of the real outside network behind the head end.
+    local_subnets:
+      - 10.0.2.0/28
+    # This may overlap with other customers. It is scoped to this tunnel.
+    remote_subnets:
+      - 10.200.60.0/24
+    # These are the actual customer hosts expected to source traffic.
+    remote_host_cidrs:
+      - 10.200.60.88/32
+      - 10.200.60.2/32
+      - 10.200.60.3/32
+      - 10.200.60.65/32
+  ipsec:
+    ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+    esp_policies:
+      - aes256-sha256
+    dpddelay: 30s
+    dpdtimeout: 120s
+    dpdaction: restart
+    replay_protection: true
+    clear_df_bit: true
+    initiation:
+      mode: bidirectional
+      headend_can_initiate: true
+      customer_can_initiate: true
+      traffic_can_start_tunnel: true
+      bring_up_on_apply: true
+      swanctl_start_action: trap|start
+  outside_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    # Real local/core network behind the VPN head end.
+    real_subnets:
+      - 198.51.100.80/28
+    # Customer-selected translated far-end network carried in the VPN selectors.
+    translated_subnets:
+      - 10.0.2.0/28
+  post_ipsec_nat:
+    enabled: false
+    mode: disabled

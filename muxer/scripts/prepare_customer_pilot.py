@@ -323,6 +323,7 @@ def _build_readiness_report(
     peer_doc = customer_doc.get("peer") or {}
     selectors_doc = customer_doc.get("selectors") or {}
     backend_doc = customer_doc.get("backend") or {}
+    ipsec_doc = module.get("ipsec") or {}
     allocation_plan = allocation_summary.get("allocation_plan") or {}
     transport_doc = customer_doc.get("transport") or {}
     exclusive_resources = allocation_summary.get("exclusive_resources") or []
@@ -363,6 +364,9 @@ def _build_readiness_report(
             "peer_ip": peer_doc.get("public_ip"),
             "local_subnets": selectors_doc.get("local_subnets") or [],
             "remote_subnets": selectors_doc.get("remote_subnets") or [],
+            "remote_host_cidrs": selectors_doc.get("remote_host_cidrs") or [],
+            "outside_nat_enabled": bool((customer_doc.get("outside_nat") or {}).get("enabled")),
+            "ipsec_initiation": ipsec_doc.get("initiation") or {},
         },
         "allocated_resources": {
             "customer_id": customer_id,

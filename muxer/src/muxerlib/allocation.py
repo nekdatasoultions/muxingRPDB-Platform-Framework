@@ -517,7 +517,7 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
         "backend": backend_doc,
     }
 
-    for optional_key in ("protocols", "natd_rewrite", "post_ipsec_nat"):
+    for optional_key in ("protocols", "natd_rewrite", "post_ipsec_nat", "outside_nat"):
         optional_doc = customer_doc.get(optional_key)
         if isinstance(optional_doc, dict) and optional_doc:
             rendered_customer[optional_key] = copy.deepcopy(optional_doc)

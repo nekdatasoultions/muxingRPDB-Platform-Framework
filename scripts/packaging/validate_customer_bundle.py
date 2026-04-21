@@ -46,6 +46,8 @@ REQUIRED_MUXER_FILES = [
 REQUIRED_HEADEND_FILES = [
     "headend/ipsec/ipsec-intent.json",
     "headend/ipsec/swanctl-connection.conf",
+    "headend/ipsec/initiation-intent.json",
+    "headend/ipsec/initiate-tunnel.sh",
     "headend/routing/routing-intent.json",
     "headend/routing/ip-route.commands.txt",
     "headend/post-ipsec-nat/post-ipsec-nat-intent.json",
@@ -53,13 +55,21 @@ REQUIRED_HEADEND_FILES = [
     "headend/post-ipsec-nat/nftables.remove.nft",
     "headend/post-ipsec-nat/nftables-state.json",
     "headend/post-ipsec-nat/activation-manifest.json",
+    "headend/outside-nat/outside-nat-intent.json",
+    "headend/outside-nat/nftables.apply.nft",
+    "headend/outside-nat/nftables.remove.nft",
+    "headend/outside-nat/nftables-state.json",
+    "headend/outside-nat/activation-manifest.json",
 ]
 
 HEADEND_TEXT_FILES = [
     "headend/ipsec/swanctl-connection.conf",
+    "headend/ipsec/initiate-tunnel.sh",
     "headend/routing/ip-route.commands.txt",
     "headend/post-ipsec-nat/nftables.apply.nft",
     "headend/post-ipsec-nat/nftables.remove.nft",
+    "headend/outside-nat/nftables.apply.nft",
+    "headend/outside-nat/nftables.remove.nft",
 ]
 
 MUXER_TEXT_FILES = [

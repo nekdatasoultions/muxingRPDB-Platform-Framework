@@ -111,6 +111,14 @@ Required:
 - `local_subnets`
 - `remote_subnets`
 
+Optional:
+
+- `remote_host_cidrs`
+
+`remote_host_cidrs` tracks the concrete `/32` customer hosts that are expected
+to use the tunnel when `remote_subnets` is a broader or overlapping customer
+encryption domain.
+
 ### `customer.backend`
 
 Optional section.
@@ -201,6 +209,27 @@ Optional per-customer IPsec overrides:
 - `vti_routing`
 - `vti_shared`
 - `bidirectional_secret`
+- `initiation`
+
+`initiation` is the explicit tunnel bring-up contract. The default platform
+intent is bidirectional:
+
+```yaml
+ipsec:
+  initiation:
+    mode: bidirectional
+    headend_can_initiate: true
+    customer_can_initiate: true
+    traffic_can_start_tunnel: true
+    bring_up_on_apply: true
+    swanctl_start_action: trap|start
+```
+
+This means the generated head-end config installs traffic-trigger trap
+policies and also actively initiates the CHILD_SA when the connection is
+loaded. A customer can still initiate from their side because the generated
+head-end connection is loaded as a responder with the customer peer address,
+remote ID, PSK, and traffic selectors.
 
 Current repo note:
 
@@ -210,6 +239,9 @@ Current repo note:
 - repo-only validation checks that rendered fields such as IKE version, policy
   lists, replay protection, DF-bit behavior, DPD, encapsulation, MOBIKE, and
   fragmentation are represented in the staged head-end bundle
+- repo-only validation checks that bidirectional initiation renders
+  `start_action = trap|start`, an initiation intent, and a head-end
+  `swanctl --initiate --child` helper
 
 ### `customer.post_ipsec_nat`
 
@@ -249,9 +281,43 @@ Target NAT intent:
 
 Current repo note:
 
-- one-to-one netmap intent renders deterministic `NETMAP` commands
-- explicit host mappings render deterministic `DNAT` and `SNAT` commands
+- one-to-one netmap intent renders deterministic nftables maps
+- explicit host mappings render deterministic nftables `DNAT` and `SNAT` state
 - staged head-end validation checks the expected command model before install
+
+### `customer.outside_nat`
+
+Optional for the customer source, but when present it must include:
+
+- `enabled`
+
+Use `outside_nat` when the real local/core network behind the VPN head end must
+be presented to the customer as a different customer-selected subnet.
+
+Useful fields include:
+
+- `mapping_strategy`
+- `translated_subnets`
+- `real_subnets`
+- `host_mappings`
+- `customer_sources`
+- `interface`
+- `output_mark`
+- `tcp_mss_clamp`
+- `route_via`
+- `route_dev`
+
+Important meaning:
+
+- `selectors.local_subnets` is the customer-visible far-end selector
+- `outside_nat.translated_subnets` should match that customer-visible selector
+- `outside_nat.real_subnets` is the real local/core subnet behind the head end
+- `selectors.remote_host_cidrs` scopes NAT to concrete customer hosts when set
+- `selectors.remote_subnets` remains the broader customer encryption domain
+
+Detailed model:
+
+- [HEADEND_OUTSIDE_NAT_AND_OVERLAP_MODEL.md](HEADEND_OUTSIDE_NAT_AND_OVERLAP_MODEL.md)
 
 ## Secret Handling
 

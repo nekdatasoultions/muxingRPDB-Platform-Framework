@@ -47,12 +47,56 @@
         "$ref": "#/$defs/cidr"
       }
     },
+    "host_cidr_array": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/host_cidr"
+      }
+    },
     "string_array": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "ipsec_initiation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "bidirectional",
+            "headend_only",
+            "customer_only",
+            "responder_only"
+          ]
+        },
+        "headend_can_initiate": {
+          "type": "boolean"
+        },
+        "customer_can_initiate": {
+          "type": "boolean"
+        },
+        "traffic_can_start_tunnel": {
+          "type": "boolean"
+        },
+        "bring_up_on_apply": {
+          "type": "boolean"
+        },
+        "swanctl_start_action": {
+          "type": "string",
+          "enum": [
+            "none",
+            "start",
+            "trap",
+            "trap|start",
+            "start|trap"
+          ]
+        }
       }
     },
     "peer": {
@@ -89,6 +133,9 @@
         },
         "remote_subnets": {
           "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "remote_host_cidrs": {
+          "$ref": "#/$defs/host_cidr_array"
         }
       }
     },
@@ -344,6 +391,9 @@
         },
         "bidirectional_secret": {
           "type": "boolean"
+        },
+        "initiation": {
+          "$ref": "#/$defs/ipsec_initiation"
         }
       }
     },
@@ -430,6 +480,69 @@
         }
       }
     },
+    "outside_nat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "netmap",
+            "explicit_map"
+          ]
+        },
+        "mapping_strategy": {
+          "type": "string",
+          "enum": [
+            "one_to_one",
+            "explicit_host_map"
+          ]
+        },
+        "translated_subnets": {
+          "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "real_subnets": {
+          "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "host_mappings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/host_mapping"
+          }
+        },
+        "customer_sources": {
+          "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "interface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_mark": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]+\\/0x[0-9a-fA-F]+$"
+        },
+        "tcp_mss_clamp": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 65535
+        },
+        "route_via": {
+          "$ref": "#/$defs/ipv4"
+        },
+        "route_dev": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "customer": {
       "type": "object",
       "additionalProperties": false,
@@ -473,6 +586,9 @@
         },
         "post_ipsec_nat": {
           "$ref": "#/$defs/post_ipsec_nat"
+        },
+        "outside_nat": {
+          "$ref": "#/$defs/outside_nat"
         }
       }
     }

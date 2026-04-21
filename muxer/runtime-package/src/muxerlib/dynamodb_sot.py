@@ -138,6 +138,7 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
         "protocols": copy.deepcopy(module.get("protocols") or {}),
         "natd_rewrite": copy.deepcopy(module.get("natd_rewrite") or {}),
         "post_ipsec_nat": copy.deepcopy(module.get("post_ipsec_nat") or {}),
+        "outside_nat": copy.deepcopy(module.get("outside_nat") or {}),
         "customer_class": str(customer.get("customer_class") or ""),
     }
 
@@ -261,6 +262,8 @@ def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_a
         original["natd_rewrite"] = copy.deepcopy(module["natd_rewrite"])
     if module.get("post_ipsec_nat"):
         original["post_ipsec_nat"] = copy.deepcopy(module["post_ipsec_nat"])
+    if module.get("outside_nat"):
+        original["outside_nat"] = copy.deepcopy(module["outside_nat"])
 
     ipsec_cfg = copy.deepcopy(module.get("ipsec") or {})
     if ipsec_cfg:

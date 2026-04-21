@@ -19,11 +19,22 @@ defaults:
     initiator_inner_ip: ""
 
   ipsec:
-    auto: start
+    auto: trap|start
     dpddelay: 10s
     dpdtimeout: 120s
     dpdaction: restart
+    initiation:
+      mode: bidirectional
+      headend_can_initiate: true
+      customer_can_initiate: true
+      traffic_can_start_tunnel: true
+      bring_up_on_apply: true
+      swanctl_start_action: trap|start
 
   post_ipsec_nat:
+    enabled: false
+    mode: disabled
+
+  outside_nat:
     enabled: false
     mode: disabled

@@ -53,6 +53,8 @@ with:
 - [Resource allocation model](../muxer/docs/RESOURCE_ALLOCATION_MODEL.md)
 - [Translation and bridge scale decisions](../muxer/docs/TRANSLATION_AND_BRIDGE_SCALE_DECISIONS.md)
 - [nftables batch render model](../muxer/docs/NFTABLES_BATCH_RENDER_MODEL.md)
+- [Head-end outside NAT and overlap model](../muxer/docs/HEADEND_OUTSIDE_NAT_AND_OVERLAP_MODEL.md)
+- [Bidirectional IPsec initiation](../muxer/docs/BIDIRECTIONAL_IPSEC_INITIATION.md)
 
 ## What Was Removed From Active Docs
 
