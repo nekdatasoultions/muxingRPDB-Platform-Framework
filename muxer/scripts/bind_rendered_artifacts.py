@@ -23,6 +23,11 @@ from muxerlib.environment_binding import (
 )
 
 
+def _write_text_lf(path: Path, payload: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
+
+
 def main() -> int:
     repo_muxer_dir = Path(__file__).resolve().parents[1]
 
@@ -79,7 +84,7 @@ def main() -> int:
     for path in iter_text_files(out_dir):
         original_text = path.read_text(encoding="utf-8")
         replaced_text, missing = replace_placeholders(original_text, bindings)
-        path.write_text(replaced_text, encoding="utf-8", newline="\n")
+        _write_text_lf(path, replaced_text)
         relative_name = str(path.relative_to(out_dir))
         report["files"][relative_name] = {
             "replaced": original_text != replaced_text,
@@ -88,10 +93,9 @@ def main() -> int:
         if missing:
             report["unresolved"][relative_name] = missing
 
-    (out_dir / "binding-report.json").write_text(
+    _write_text_lf(
+        out_dir / "binding-report.json",
         json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
 
     if report["unresolved"] and not args.allow_unresolved:

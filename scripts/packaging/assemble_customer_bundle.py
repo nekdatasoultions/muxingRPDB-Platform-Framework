@@ -32,7 +32,8 @@ def _copy_tree_contents(source_dir: Path, destination_dir: Path) -> int:
 
 def _write_placeholder(path: Path, title: str, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(f"# {title}\n\n{body}\n")
 
 
 def _load_json(path: Path) -> dict:
@@ -174,11 +175,8 @@ def main() -> int:
             "headend_dir": str(headend_input_dir) if headend_input_dir else None,
         },
     }
-    (bundle_dir / "bundle-metadata.json").write_text(
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    with (bundle_dir / "bundle-metadata.json").open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
 
     manifest_path = bundle_dir / "manifest.txt"
     sha_path = bundle_dir / "sha256sums.txt"

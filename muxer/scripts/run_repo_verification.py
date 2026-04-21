@@ -54,17 +54,20 @@ def _run_python_json(code: str, *, pythonpath: Path | None = None, extra_env: di
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(yaml.safe_dump(payload, sort_keys=False))
 
 
 def _write_text(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload if payload.endswith("\n") else payload + "\n")
 
 
 def _generated_files_with_crlf(root: Path, suffixes: set[str]) -> list[str]:
@@ -1192,17 +1195,16 @@ package_dir.mkdir(parents=True, exist_ok=True)
 )
 swanctl_conf = root / "headend" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "customer.conf"
 swanctl_conf.parent.mkdir(parents=True, exist_ok=True)
-swanctl_conf.write_text(
-    "connections { }\n"
-    "secrets {\n"
-    "    ike-customer-psk {\n"
-    "        id-1 = 198.51.100.10\n"
-    "        secret = \"resolved-via-secret-store\"\n"
-    "    }\n"
-    "}\n",
-    encoding="utf-8",
-    newline="\n",
-)
+with swanctl_conf.open("w", encoding="utf-8", newline="\n") as handle:
+    handle.write(
+        "connections { }\n"
+        "secrets {\n"
+        "    ike-customer-psk {\n"
+        "        id-1 = 198.51.100.10\n"
+        "        secret = \"resolved-via-secret-store\"\n"
+        "    }\n"
+        "}\n"
+    )
 
 
 class Completed:

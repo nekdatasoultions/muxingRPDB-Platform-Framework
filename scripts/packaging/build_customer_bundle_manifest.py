@@ -48,8 +48,10 @@ def build_bundle_manifest(bundle_dir: Path, manifest_path: Path, sha_path: Path)
         manifest_lines.append(f"{relative_path}\t{size}")
         sha_lines.append(f"{_sha256(path)}  {relative_path}")
 
-    manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8", newline="\n")
-    sha_path.write_text("\n".join(sha_lines) + "\n", encoding="utf-8", newline="\n")
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(manifest_lines) + "\n")
+    with sha_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(sha_lines) + "\n")
     return len(files)
 
 

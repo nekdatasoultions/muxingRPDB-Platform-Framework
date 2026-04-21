@@ -22,10 +22,12 @@ from muxerlib.customer_model import parse_customer_source
 def _write_artifact(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(payload, dict):
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     else:
         text = str(payload)
-        path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text if text.endswith("\n") else text + "\n")
 
 
 def main() -> int:

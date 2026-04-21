@@ -58,7 +58,8 @@ def main() -> int:
         payload = render_passthrough_nft_script(model)
 
     if args.out:
-        Path(args.out).resolve().write_text(payload, encoding="utf-8", newline="\n")
+        with Path(args.out).resolve().open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
     else:
         print(payload, end="")
 

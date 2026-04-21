@@ -245,7 +245,8 @@ def _inject_live_headend_secret(
     )
     if replaced == original:
         raise RuntimeError(f"prepared head-end swanctl config did not contain a PSK secret line: {swanctl_conf}")
-    swanctl_conf.write_text(replaced, encoding="utf-8", newline="\n")
+    with swanctl_conf.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(replaced)
 
     report = {
         "secret_ref": secret_ref,
