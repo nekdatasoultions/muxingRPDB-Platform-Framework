@@ -2598,6 +2598,8 @@ print(
         raise SystemExit("head-end customer apply/remove must tolerate inactive standby strongSwan services")
     if "strongswan is not active; staged config remains" not in headend_customer_lib_text:
         raise SystemExit("head-end customer apply must stage configs when standby strongSwan is inactive")
+    if "head-end initiate did not complete; customer config remains loaded" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must not fail deployment when the peer is not yet responding")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
     if "include conf.d/rpdb-customers/*.conf" not in headend_customer_lib_text:
@@ -2616,6 +2618,7 @@ print(
         {
             "source": str(REPO_ROOT / "scripts" / "deployment" / "headend_customer_lib.py"),
             "apply_stages_when_strongswan_inactive": True,
+            "peer_initiate_failure_is_non_fatal": True,
             "remove_tolerates_inactive_strongswan": True,
             "customer_swanctl_include_enforced": True,
             "post_ipsec_nat_apply_replaces_existing_table": True,
