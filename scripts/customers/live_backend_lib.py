@@ -243,6 +243,143 @@ def delete_typed_item(region: str, table_name: str, key: dict[str, Any]) -> None
         raise RuntimeError((completed.stderr or completed.stdout).strip() or "AWS delete-item failed")
 
 
+def scan_typed_items_by_customer(region: str, table_name: str, customer_name: str) -> list[dict[str, Any]]:
+    """Return DynamoDB items whose customer_name attribute matches customer_name."""
+
+    names_path = _write_temp_json({"#cn": "customer_name"})
+    values_path = _write_temp_json({":customer": {"S": customer_name}})
+    try:
+        items: list[dict[str, Any]] = []
+        exclusive_start_key: dict[str, Any] | None = None
+        while True:
+            args = [
+                "dynamodb",
+                "scan",
+                "--region",
+                region,
+                "--table-name",
+                table_name,
+                "--filter-expression",
+                "#cn = :customer",
+                "--expression-attribute-names",
+                f"file://{names_path}",
+                "--expression-attribute-values",
+                f"file://{values_path}",
+                "--consistent-read",
+                "--output",
+                "json",
+            ]
+            start_key_path: Path | None = None
+            if exclusive_start_key:
+                start_key_path = _write_temp_json(exclusive_start_key)
+                args.extend(["--exclusive-start-key", f"file://{start_key_path}"])
+            try:
+                payload = _run_aws_json(args)
+            finally:
+                if start_key_path is not None:
+                    try:
+                        start_key_path.unlink()
+                    except OSError:
+                        pass
+            for item in payload.get("Items") or []:
+                if isinstance(item, dict):
+                    items.append(item)
+            exclusive_start_key = payload.get("LastEvaluatedKey")
+            if not exclusive_start_key:
+                return items
+    finally:
+        for path in (names_path, values_path):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+def customer_key(region: str, customer_table: str, customer_name: str) -> dict[str, Any]:
+    customer_item = serialize_plain_item({"customer_name": customer_name})
+    return extract_key(customer_item, table_key_names(region, customer_table))
+
+
+def inspect_customer_backend_records(
+    *,
+    region: str,
+    customer_table: str,
+    allocation_table: str,
+    customer_name: str,
+) -> dict[str, Any]:
+    key = customer_key(region, customer_table, customer_name)
+    customer_item = get_typed_item(region, customer_table, key)
+    allocation_items = scan_typed_items_by_customer(region, allocation_table, customer_name)
+    return {
+        "customer_key": key,
+        "customer_item": customer_item,
+        "customer_present": customer_item is not None,
+        "allocation_items": allocation_items,
+        "allocation_count": len(allocation_items),
+    }
+
+
+def delete_customer_backend_records(
+    *,
+    region: str,
+    customer_table: str,
+    allocation_table: str,
+    customer_name: str,
+) -> dict[str, Any]:
+    """Delete one customer's SoT record and allocation reservations.
+
+    Allocation records are removed before the customer SoT item so a partial
+    failure leaves the authoritative customer record available for retry.
+    """
+
+    before = inspect_customer_backend_records(
+        region=region,
+        customer_table=customer_table,
+        allocation_table=allocation_table,
+        customer_name=customer_name,
+    )
+    allocation_key_names = table_key_names(region, allocation_table)
+    deleted_allocations: list[dict[str, Any]] = []
+    for item in before["allocation_items"]:
+        key = extract_key(item, allocation_key_names)
+        delete_typed_item(region, allocation_table, key)
+        deleted_allocations.append(
+            {
+                "key": key,
+                "resource_key": (key.get("resource_key") or {}).get("S"),
+            }
+        )
+
+    customer_deleted = False
+    if before["customer_present"]:
+        delete_typed_item(region, customer_table, before["customer_key"])
+        customer_deleted = True
+
+    after = inspect_customer_backend_records(
+        region=region,
+        customer_table=customer_table,
+        allocation_table=allocation_table,
+        customer_name=customer_name,
+    )
+    errors: list[str] = []
+    if after["customer_present"]:
+        errors.append("customer SoT item still exists after delete")
+    if after["allocation_count"]:
+        errors.append("customer allocation records still exist after delete")
+    return {
+        "status": "removed" if not errors else "remove_failed",
+        "errors": errors,
+        "customer_key": before["customer_key"],
+        "customer_deleted": customer_deleted,
+        "deleted_allocations": deleted_allocations,
+        "deleted_allocation_count": len(deleted_allocations),
+        "remaining": {
+            "customer_present": after["customer_present"],
+            "allocation_count": after["allocation_count"],
+        },
+    }
+
+
 def load_customer_backend_payloads(package_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     customer_item = json.loads((package_dir / "customer-ddb-item.json").read_text(encoding="utf-8"))
     allocation_items = json.loads((package_dir / "allocation-ddb-items.json").read_text(encoding="utf-8"))
