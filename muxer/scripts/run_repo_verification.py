@@ -2735,6 +2735,10 @@ print(
         raise SystemExit("muxer customer apply must invoke the live muxer runtime customer apply path")
     if "python3 /etc/muxer/src/muxctl.py remove-customer" not in muxer_customer_lib_text:
         raise SystemExit("muxer customer remove must invoke the live muxer runtime customer remove path")
+    if 'conntrack -D -p udp -s "${PEER_IP}" --dport "${PORT}"' not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer apply/remove must clear customer-scoped UDP conntrack state")
+    if 'conntrack -D -p udp -d "${PEER_IP}" --sport "${PORT}"' not in muxer_customer_lib_text:
+        raise SystemExit("muxer customer apply/remove must clear customer-scoped UDP return conntrack state")
     if 'Path("etc") / "muxer" / "config" / "customer-modules"' not in muxer_customer_lib_text:
         raise SystemExit("muxer customer modules must install under the runtime config/customer-modules inventory")
     if 'nft list table "${NFT_FAMILY}" "${NFT_TABLE}"' not in muxer_customer_lib_text:
