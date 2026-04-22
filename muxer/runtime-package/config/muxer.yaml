@@ -93,6 +93,15 @@ nftables:
     nat_table_name: muxer_passthrough_nat
     state_root: /var/lib/rpdb-muxer/nftables
 
+# Passive UDP/500 and UDP/4500 observation for dynamic NAT-T promotion.
+# This listener writes JSONL only; it does not program packet steering.
+nat_t_listener:
+  enabled: true
+  capture_interface: public_if
+  event_log: /var/log/rpdb/muxer-events.jsonl
+  bpf_filter: udp and (port 500 or port 4500)
+  inbound_only: false
+
 # Experimental payload bridge for forced 4500->500 customers.
 experimental:
   nfqueue_ike_bridge:

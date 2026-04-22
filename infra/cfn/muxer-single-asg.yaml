@@ -529,6 +529,9 @@ Resources:
             systemctl enable ${MuxerServiceName} || true
             systemctl restart amazon-ssm-agent || true
             systemctl restart ${MuxerServiceName}
+            if systemctl list-unit-files | grep -q '^rpdb-nat-t-listener.service'; then
+              systemctl enable --now rpdb-nat-t-listener.service || true
+            fi
             printf '%s\n' "$DESIRED_STATE" >"$STATE_FILE"
             EOF
             chmod 0755 /usr/local/sbin/muxer-local-converge.sh

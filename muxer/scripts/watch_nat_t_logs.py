@@ -73,6 +73,38 @@ def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _resolve_environment_path(repo_root: Path, environment: str | None) -> Path | None:
+    value = str(environment or "").strip()
+    if not value:
+        return None
+    raw = Path(value)
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append((repo_root / raw).resolve())
+        if raw.suffix.lower() not in {".yaml", ".yml"}:
+            candidates.append(
+                (repo_root / "muxer" / "config" / "deployment-environments" / f"{value}.yaml").resolve()
+            )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _environment_log_files(repo_root: Path, environment: str | None) -> list[Path]:
+    environment_path = _resolve_environment_path(repo_root, environment)
+    if environment_path is None:
+        return []
+    document = _load_yaml(environment_path)
+    log_source = ((document.get("nat_t_watcher") or {}).get("log_source") or {})
+    if str(log_source.get("type") or "file").strip() != "file":
+        return []
+    log_path = str(log_source.get("path") or "").strip()
+    return [Path(log_path)] if log_path else []
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -490,7 +522,12 @@ def main() -> int:
             "promotion provisioning."
         )
     )
-    parser.add_argument("--log-file", action="append", required=True, help="Muxer log file or JSONL event file")
+    parser.add_argument(
+        "--log-file",
+        action="append",
+        default=[],
+        help="Muxer log file or JSONL event file. Defaults to environment nat_t_watcher.log_source.path when available.",
+    )
     parser.add_argument("--customer-request", action="append", default=[], help="Customer request YAML to watch")
     parser.add_argument(
         "--customer-request-root",
@@ -529,7 +566,12 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print watcher summary as JSON")
     args = parser.parse_args()
 
-    log_files = [Path(path).resolve() for path in args.log_file]
+    raw_log_files = [Path(path) for path in args.log_file]
+    if not raw_log_files:
+        raw_log_files = _environment_log_files(repo_root, args.environment)
+    if not raw_log_files:
+        parser.error("--log-file is required unless --environment defines nat_t_watcher.log_source.path")
+    log_files = [path.resolve() for path in raw_log_files]
     request_paths = _discover_request_paths(
         [Path(path) for path in args.customer_request],
         [Path(path) for path in args.customer_request_root],

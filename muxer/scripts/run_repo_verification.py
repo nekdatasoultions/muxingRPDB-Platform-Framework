@@ -267,6 +267,7 @@ def main() -> int:
         str(RUNTIME_ROOT / "src" / "muxerlib" / "cli.py"),
         str(RUNTIME_ROOT / "src" / "muxerlib" / "dataplane.py"),
         str(RUNTIME_ROOT / "src" / "muxerlib" / "modes.py"),
+        str(RUNTIME_ROOT / "src" / "nat_t_event_listener.py"),
         str(MUXER_DIR / "runtime-package" / "src" / "muxerlib" / "nftables.py"),
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
@@ -876,45 +877,141 @@ def main() -> int:
         },
     )
 
-    # Step 3f: verify automated NAT-T log watching can detect UDP/4500,
+    # Step 3f: verify the live muxer runtime now contains the NAT-T event
+    # producer, not only the repo-side watcher/consumer.
+    listener_source = RUNTIME_ROOT / "src" / "nat_t_event_listener.py"
+    listener_unit = RUNTIME_ROOT / "systemd" / "rpdb-nat-t-listener.service"
+    installer_path = RUNTIME_ROOT / "scripts" / "install-local.sh"
+    listener_self_test = _run_json(["python", str(listener_source), "--self-test", "--json"])
+    if not listener_self_test.get("valid"):
+        raise SystemExit("NAT-T runtime listener self-test failed")
+    listener_text = listener_source.read_text(encoding="utf-8")
+    listener_unit_text = listener_unit.read_text(encoding="utf-8")
+    installer_text = installer_path.read_text(encoding="utf-8")
+    single_muxer_template_text = (REPO_ROOT / "infra" / "cfn" / "muxer-single-asg.yaml").read_text(
+        encoding="utf-8"
+    )
+    cluster_muxer_template_text = (REPO_ROOT / "infra" / "cfn" / "muxer-cluster.yaml").read_text(
+        encoding="utf-8"
+    )
+    live_apply_lib_text = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(
+        encoding="utf-8"
+    )
+    rpdb_empty_environment_text = (
+        MUXER_DIR / "config" / "deployment-environments" / "rpdb-empty-live.yaml"
+    ).read_text(encoding="utf-8")
+    muxer_runtime_config_text = (RUNTIME_ROOT / "config" / "muxer.yaml").read_text(encoding="utf-8")
+    required_listener_tokens = {
+        "listener_source": [
+            "rpdb-muxer-nat-t-listener",
+            "/var/log/rpdb/muxer-events.jsonl",
+            "tcpdump",
+            "observed_dport",
+            "observed_peer",
+        ],
+        "listener_unit": [
+            "ExecStart=/usr/bin/python3 /etc/muxer/src/nat_t_event_listener.py",
+            "Restart=always",
+        ],
+        "installer": [
+            "rpdb-nat-t-listener.service",
+            "/etc/systemd/system/rpdb-nat-t-listener.service",
+        ],
+        "single_muxer_template": [
+            "systemctl enable --now rpdb-nat-t-listener.service",
+        ],
+        "cluster_muxer_template": [
+            "systemctl enable --now rpdb-nat-t-listener.service",
+        ],
+        "ssh_live_apply": [
+            "nat_t_event_listener.py",
+            "rpdb-nat-t-listener.service",
+            "/var/log/rpdb/muxer-events.jsonl",
+            "systemctl restart rpdb-nat-t-listener.service",
+            "systemctl is-active --quiet rpdb-nat-t-listener.service",
+        ],
+        "runtime_config": [
+            "nat_t_listener:",
+            "event_log: /var/log/rpdb/muxer-events.jsonl",
+            "bpf_filter: udp and (port 500 or port 4500)",
+        ],
+        "deployment_environment": [
+            "nat_t_watcher:",
+            "path: /var/log/rpdb/muxer-events.jsonl",
+        ],
+    }
+    token_sources = {
+        "listener_source": listener_text,
+        "listener_unit": listener_unit_text,
+        "installer": installer_text,
+        "single_muxer_template": single_muxer_template_text,
+        "cluster_muxer_template": cluster_muxer_template_text,
+        "ssh_live_apply": live_apply_lib_text,
+        "runtime_config": muxer_runtime_config_text,
+        "deployment_environment": rpdb_empty_environment_text,
+    }
+    for source_name, tokens in required_listener_tokens.items():
+        text = token_sources[source_name]
+        for token in tokens:
+            if token not in text:
+                raise SystemExit(f"NAT-T runtime listener contract missing {source_name} token: {token}")
+    record_step(
+        "muxer_nat_t_runtime_listener_contract",
+        {
+            "listener_source": str(listener_source),
+            "listener_unit": str(listener_unit),
+            "installer": str(installer_path),
+            "event_log": "/var/log/rpdb/muxer-events.jsonl",
+            "self_test": listener_self_test,
+            "fresh_single_muxer_enables_service": True,
+            "fresh_cluster_muxer_enables_service": True,
+            "ssh_live_apply_syncs_service": True,
+            "runtime_uses_iptables": False,
+        },
+    )
+
+    # Step 3g: verify automated NAT-T log watching can detect UDP/4500,
     # correlate it to a customer request, and launch the one-file provisioning
     # workflow without touching live systems.
     watcher_root = BUILD_ROOT / "ntw"
     if watcher_root.exists():
         shutil.rmtree(watcher_root)
     watcher_root.mkdir(parents=True, exist_ok=True)
-    watcher_log = watcher_root / "l.jsonl"
-    _write_text(
-        watcher_log,
-        "\n".join(
-            [
-                json.dumps(
-                    {
-                        "observed_peer": "3.237.201.84",
-                        "observed_protocol": "udp",
-                        "observed_dport": 500,
-                        "observed_at": "2026-04-15T22:45:00Z",
-                    },
-                    sort_keys=True,
-                ),
-                json.dumps(
-                    {
-                        "observed_peer": "3.237.201.84",
-                        "observed_protocol": "udp",
-                        "observed_dport": 4500,
-                        "observed_at": "2026-04-15T22:45:02Z",
-                    },
-                    sort_keys=True,
-                ),
-            ]
-        ),
-    )
     watcher_env_path = watcher_root / "e.yaml"
-    _build_staged_live_environment(
+    watcher_env_doc = _build_staged_live_environment(
         watcher_env_path,
         name="repo-verification-phase8-watcher",
         root=watcher_root / "roots",
     )
+    watcher_log = Path(str(watcher_env_doc["nat_t_watcher"]["log_source"]["path"]))
+    watcher_tcpdump_log = watcher_root / "tcpdump.txt"
+    _write_text(
+        watcher_tcpdump_log,
+        "\n".join(
+            [
+                "2026-04-15 22:45:00.000000 IP 3.237.201.84.500 > 172.31.33.150.500: UDP, length 292",
+                "2026-04-15 22:45:02.000000 IP 3.237.201.84.4500 > 172.31.33.150.4500: UDP, length 108",
+                "2026-04-15 22:45:03.000000 IP 172.31.33.150.4500 > 3.237.201.84.4500: UDP, length 108",
+            ]
+        ),
+    )
+    listener_emit_report = _run_json(
+        [
+            "python",
+            str(RUNTIME_ROOT / "src" / "nat_t_event_listener.py"),
+            "--input-file",
+            str(watcher_tcpdump_log),
+            "--event-log",
+            str(watcher_log),
+            "--interface",
+            "ens5",
+            "--local-address",
+            "172.31.33.150",
+            "--json",
+        ]
+    )
+    if listener_emit_report.get("emitted") != 2 or listener_emit_report.get("ignored") != 1:
+        raise SystemExit("NAT-T runtime listener did not emit the expected watcher JSONL events")
     watcher_command = [
         "python",
         str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
@@ -926,8 +1023,6 @@ def main() -> int:
             / "migrated"
             / "vpn-customer-stage1-15-cust-0004.yaml"
         ),
-        "--log-file",
-        str(watcher_log),
         "--out-dir",
         str(watcher_root / "o"),
         "--state-file",
@@ -962,9 +1057,11 @@ def main() -> int:
             "detected_customer": detected["customer_name"],
             "observation": detected["observation"],
             "environment_file": str(watcher_env_path),
+            "environment_log_source": str(watcher_log),
             "deploy_mode": provisioning["mode"],
             "deploy_status": provisioning_json["status"],
             "live_apply": provisioning_json["live_apply"],
+            "listener_emit_report": listener_emit_report,
             "second_pass_detected_count": second_pass["detected_count"],
             "watch_summary": watcher_report["out_dir"] + "/watch-summary.json",
         },

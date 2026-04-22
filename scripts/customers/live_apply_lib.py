@@ -847,20 +847,26 @@ def _prepare_muxer_root(
 
 
 def _prepare_muxer_runtime_root(journal: list[dict[str, Any]], *, apply_dir: Path) -> dict[str, Any]:
-    runtime_source = REPO_ROOT / "muxer" / "runtime-package" / "src"
+    runtime_package_root = REPO_ROOT / "muxer" / "runtime-package"
+    runtime_source = runtime_package_root / "src"
+    runtime_systemd = runtime_package_root / "systemd"
     if not runtime_source.is_dir():
         raise RuntimeError(f"muxer runtime source is missing: {runtime_source}")
+    if not runtime_systemd.is_dir():
+        raise RuntimeError(f"muxer runtime systemd directory is missing: {runtime_systemd}")
 
     runtime_root = apply_dir / "pr"
     if runtime_root.exists():
         shutil.rmtree(runtime_root)
     destination = runtime_root / "etc" / "muxer" / "src"
+    systemd_destination = runtime_root / "etc" / "muxer" / "systemd"
     shutil.copytree(
         runtime_source,
         destination,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    for script in ("muxctl.py", "mux_trace.py", "ike_nat_bridge.py"):
+    shutil.copytree(runtime_systemd, systemd_destination)
+    for script in ("muxctl.py", "mux_trace.py", "ike_nat_bridge.py", "nat_t_event_listener.py"):
         script_path = destination / script
         if script_path.exists():
             try:
@@ -870,9 +876,11 @@ def _prepare_muxer_runtime_root(journal: list[dict[str, Any]], *, apply_dir: Pat
 
     payload = {
         "runtime_source": repo_relative(runtime_source),
+        "runtime_systemd": repo_relative(runtime_systemd),
         "runtime_root": repo_relative(runtime_root),
         "destination": repo_relative(destination),
-        "relative_paths": ["etc/muxer/src"],
+        "systemd_destination": repo_relative(systemd_destination),
+        "relative_paths": ["etc/muxer/src", "etc/muxer/systemd"],
     }
     _record_structured(
         journal,
@@ -884,7 +892,8 @@ def _prepare_muxer_runtime_root(journal: list[dict[str, Any]], *, apply_dir: Pat
         **payload,
         "root": runtime_root,
         "destination_path": destination,
-        "relative_paths_obj": [Path("etc") / "muxer" / "src"],
+        "systemd_destination_path": systemd_destination,
+        "relative_paths_obj": [Path("etc") / "muxer" / "src", Path("etc") / "muxer" / "systemd"],
     }
 
 
@@ -1201,13 +1210,24 @@ def _sync_muxer_runtime(
 
     validation_script = " && ".join(
         [
-            "chmod +x /etc/muxer/src/muxctl.py /etc/muxer/src/mux_trace.py /etc/muxer/src/ike_nat_bridge.py 2>/dev/null || true",
+            "chmod +x /etc/muxer/src/muxctl.py /etc/muxer/src/mux_trace.py /etc/muxer/src/ike_nat_bridge.py /etc/muxer/src/nat_t_event_listener.py 2>/dev/null || true",
             "test -x /etc/muxer/src/muxctl.py",
-            "python3 -m py_compile /etc/muxer/src/muxctl.py /etc/muxer/src/muxerlib/*.py",
+            "test -x /etc/muxer/src/nat_t_event_listener.py",
+            "test -f /etc/muxer/systemd/rpdb-nat-t-listener.service",
+            "python3 -m py_compile /etc/muxer/src/muxctl.py /etc/muxer/src/nat_t_event_listener.py /etc/muxer/src/muxerlib/*.py",
             "grep -q 'dnat to ip saddr map' /etc/muxer/src/muxerlib/nftables.py",
             "grep -q 'snat to ip saddr . ip daddr map' /etc/muxer/src/muxerlib/nftables.py",
             "! grep -q 'ipv4_addr : verdict' /etc/muxer/src/muxerlib/nftables.py",
             "! grep -q 'vmap @udp500_dnat' /etc/muxer/src/muxerlib/nftables.py",
+            "grep -q 'rpdb-muxer-nat-t-listener' /etc/muxer/src/nat_t_event_listener.py",
+            "grep -q '/var/log/rpdb/muxer-events.jsonl' /etc/muxer/src/nat_t_event_listener.py",
+            "grep -q 'ExecStart=/usr/bin/python3 /etc/muxer/src/nat_t_event_listener.py' /etc/muxer/systemd/rpdb-nat-t-listener.service",
+            "python3 /etc/muxer/src/nat_t_event_listener.py --self-test --json >/tmp/rpdb-nat-t-listener-self-test.json",
+            "install -m 0644 /etc/muxer/systemd/rpdb-nat-t-listener.service /etc/systemd/system/rpdb-nat-t-listener.service",
+            "systemctl daemon-reload",
+            "systemctl enable rpdb-nat-t-listener.service",
+            "systemctl restart rpdb-nat-t-listener.service",
+            "systemctl is-active --quiet rpdb-nat-t-listener.service",
         ]
     )
     validate_result = run_remote_command(

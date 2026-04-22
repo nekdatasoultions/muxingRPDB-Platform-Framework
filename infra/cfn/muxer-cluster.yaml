@@ -456,6 +456,9 @@ Resources:
           elif systemctl list-unit-files | grep -q "^${MuxerServiceName}.service"; then
             systemctl enable --now "${MuxerServiceName}.service" || true
           fi
+          if systemctl list-unit-files | grep -q '^rpdb-nat-t-listener.service'; then
+            systemctl enable --now rpdb-nat-t-listener.service || true
+          fi
 
   InitialEipAssociation:
     Type: AWS::EC2::EIPAssociation
@@ -700,6 +703,9 @@ Resources:
             systemctl enable --now muxingplus-ha.service || true
           elif systemctl list-unit-files | grep -q "^${MuxerServiceName}.service"; then
             systemctl enable --now "${MuxerServiceName}.service" || true
+          fi
+          if systemctl list-unit-files | grep -q '^rpdb-nat-t-listener.service'; then
+            systemctl enable --now rpdb-nat-t-listener.service || true
           fi
 
 Outputs:
