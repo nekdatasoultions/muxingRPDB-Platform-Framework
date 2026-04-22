@@ -10,6 +10,7 @@ customer:
     local_subnets:
       - 172.31.54.39/32
       - 194.138.36.80/28
+      - 10.128.4.2/32
     remote_subnets:
       - 10.129.3.0/24
     remote_host_cidrs:
@@ -36,7 +37,7 @@ customer:
     fragmentation: true
     clear_df_bit: true
   post_ipsec_nat:
-    enabled: true
+    enabled: false
     mode: netmap
     translated_subnets:
       - 172.30.0.64/27
@@ -46,3 +47,13 @@ customer:
       - 172.31.54.39/32
       - 194.138.36.80/28
     tcp_mss_clamp: 1360
+  outside_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 194.138.36.86/32
+    translated_subnets:
+      - 10.128.4.2/32
+    route_via: 172.31.63.44
+    route_dev: ens36
