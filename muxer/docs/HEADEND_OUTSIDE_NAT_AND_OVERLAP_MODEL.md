@@ -120,9 +120,11 @@ each tunnel has its own peer, selectors, SA state, marks, routes, and artifacts.
 
 The scoped customer-side ranges expected to use the tunnel. These may be `/32`
 hosts or smaller CIDR blocks, but every value must be contained by one of the
-declared `remote_subnets`. When present, generated IPsec artifacts use these as
-the effective remote traffic selectors, and generated outside NAT artifacts
-scope NAT to these values instead of the whole overlapping remote subnet.
+declared `remote_subnets`. Generated IPsec artifacts still use
+`remote_subnets` as the effective remote traffic selectors. Generated outside
+NAT, routing, and accounting artifacts use `remote_host_cidrs` to scope the
+actual customer-side CIDRs that belong to this customer inside the broader
+encryption domain.
 
 ## Generated Head-End Behavior
 
@@ -141,10 +143,11 @@ customer host -> translated local IP -> DNAT to real local/core IP
 real local/core IP -> customer host -> SNAT to translated local IP
 ```
 
-When `remote_host_cidrs` is present, the generated strongSwan connection also
-uses those scoped CIDRs as `remote_ts`. That keeps overlapping customer domains
-from installing broad `/24` XFRM policies when only selected hosts or sub-ranges
-should use that specific tunnel.
+When `remote_host_cidrs` is present, the generated strongSwan connection still
+uses `remote_subnets` as `remote_ts`. The scoped host/range list is carried as
+customer-specific routing/NAT intent so the platform can account for the actual
+CIDRs used inside an overlapping encryption domain without changing the
+customer-visible selectors.
 
 The staged head-end apply wrapper installs outside NAT before post-IPsec NAT:
 
@@ -172,7 +175,8 @@ independently.
 The repo validates that:
 
 - `remote_host_cidrs` are valid CIDRs contained by `remote_subnets`
-- generated `swanctl remote_ts` uses `remote_host_cidrs` when present
+- generated `swanctl remote_ts` uses `remote_subnets`, even when
+  `remote_host_cidrs` is present
 - outside NAT one-to-one mappings have matching subnet sizes
 - outside NAT explicit host mappings stay inside declared translated subnets
 - generated outside NAT artifacts use nftables

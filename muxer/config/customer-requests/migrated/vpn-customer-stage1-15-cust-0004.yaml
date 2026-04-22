@@ -11,6 +11,8 @@ customer:
       - 172.31.54.39/32
       - 194.138.36.80/28
     remote_subnets:
+      - 10.129.3.0/24
+    remote_host_cidrs:
       - 10.129.3.154/32
   ipsec:
     auto: start

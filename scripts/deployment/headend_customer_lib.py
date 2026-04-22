@@ -263,10 +263,13 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         )
     if selector_intent.get("remote_host_cidrs"):
         report["details"]["effective_remote_ts_source"] = selector_intent.get("effective_remote_ts_source")
-        if selector_intent.get("effective_remote_ts_source") != "remote_host_cidrs":
+        report["details"]["scoped_customer_cidrs"] = selector_intent.get("scoped_customer_cidrs") or []
+        if selector_intent.get("effective_remote_ts_source") != "remote_subnets":
             report["errors"].append(
-                "remote_host_cidrs are present but not selected as effective remote traffic selectors"
+                "remote_host_cidrs must not override the customer encryption-domain remote_subnets"
             )
+        if selector_intent.get("scoped_customer_cidrs") != selector_intent.get("remote_host_cidrs"):
+            report["errors"].append("remote_host_cidrs must be preserved as scoped customer CIDRs")
 
     route_lines = _executable_lines(route_text)
     nft_apply_lines = _executable_lines(nft_apply_text)
