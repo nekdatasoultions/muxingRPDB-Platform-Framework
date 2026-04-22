@@ -1,0 +1,13 @@
+[Unit]
+Description=RPDB NAT-T Event Listener (UDP/500 and UDP/4500 JSONL)
+After=network-online.target muxer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /etc/muxer/src/nat_t_event_listener.py --config /etc/muxer/config/muxer.yaml
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 [Unit]
-Description=MUXER Router (per-customer IPIP + static iptables)
+Description=RPDB Muxer Router (customer-scoped GRE/IPIP + nftables)
 After=network-online.target
 Wants=network-online.target
 

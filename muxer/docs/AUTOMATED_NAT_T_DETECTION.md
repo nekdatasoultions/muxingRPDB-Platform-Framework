@@ -4,13 +4,20 @@
 
 NAT-T promotion should not depend on an operator manually noticing UDP/4500.
 
-The RPDB workflow now has an automated detector that can watch muxer log events,
-correlate them to dynamic customer requests, write a reviewed NAT-T observation
-event, and launch the repo-only provisioning package workflow.
+The RPDB workflow has two pieces:
 
-The detector still has `live_apply: false`. It prepares the package and audit
-artifacts. Applying that package to live muxer, DynamoDB, or VPN head-end
-systems remains a separately approved deployment step.
+- the muxer runtime listener emits packet observations to JSONL
+- the repo/control-plane watcher consumes those observations and can launch the
+  customer provisioning workflow
+
+The runtime listener is packaged in `muxer/runtime-package` as
+`nat_t_event_listener.py` plus `rpdb-nat-t-listener.service`. It passively reads
+UDP/500 and UDP/4500 with `tcpdump` and writes
+`/var/log/rpdb/muxer-events.jsonl`. It does not program firewall state and does
+not call iptables.
+
+The watcher can run in dry-run/package mode or, when explicitly approved by the
+deployment environment, call the one-command deploy orchestrator.
 
 ## Detection Flow
 
@@ -21,13 +28,14 @@ systems remains a separately approved deployment step.
    - ESP/50 enabled
    - UDP/4500 disabled
    - non-NAT backend pool
-3. The watcher reads muxer log events.
-4. The watcher records UDP/500 from the customer peer.
-5. If UDP/4500 later appears from the same peer, the watcher writes an
+3. The muxer runtime listener writes JSONL muxer events.
+4. The watcher reads muxer log events.
+5. The watcher records UDP/500 from the customer peer.
+6. If UDP/4500 later appears from the same peer, the watcher writes an
    observation event.
-6. The watcher can call `provision_customer_end_to_end.py` with that
-   observation event.
-7. The resulting package is a NAT-T promotion package with audit, readiness,
+7. The watcher can call the customer deploy orchestrator with that observation
+   event.
+8. The resulting package is a NAT-T promotion package with audit, readiness,
    bundle validation, and double verification.
 
 ## Supported Log Event Shapes
@@ -39,11 +47,14 @@ The watcher supports JSONL events:
 {"observed_peer":"3.237.201.84","observed_protocol":"udp","observed_dport":4500,"observed_at":"2026-04-15T22:45:02Z"}
 ```
 
-It also supports iptables-style log lines that include at least:
+For legacy/test parsing only, the watcher still understands log lines shaped
+like historical firewall logs:
 
 ```text
 PROTO=UDP SRC=3.237.201.84 DPT=4500
 ```
+
+The RPDB runtime listener does not produce those legacy lines.
 
 ## One-Shot Verification Command
 
@@ -62,18 +73,23 @@ python muxer\scripts\watch_nat_t_logs.py `
 
 ## Continuous Watch Command
 
-Use this form when the muxer runtime is ready to run the detector as a service:
+Use this form after the muxer runtime listener is installed and writing
+`/var/log/rpdb/muxer-events.jsonl`:
 
 ```powershell
 python muxer\scripts\watch_nat_t_logs.py `
   --customer-request-root muxer\config\customer-requests\migrated `
-  --log-file C:\path\to\muxer-nat-t-events.jsonl `
-  --state-file C:\path\to\nat-t-watcher-state.json `
-  --out-dir C:\path\to\nat-t-watcher-output `
-  --package-root C:\path\to\customer-provisioning `
+  --environment rpdb-empty-live `
+  --state-file build\nat-t-watcher\state\state.json `
+  --out-dir build\nat-t-watcher\out `
+  --package-root build\nat-t-watcher\packages `
   --run-provisioning `
   --follow
 ```
+
+When `--environment` defines `nat_t_watcher.log_source.path`, the watcher uses
+that path automatically. You can still pass `--log-file` explicitly for lab
+tests or staged replay.
 
 The command above is still repo/package automation only. It does not apply the
 generated package live.
@@ -86,8 +102,10 @@ generated package live.
 - UDP/4500 must be observed from the same peer inside the configured
   observation window.
 - Duplicate detections reuse state and do not create a second promotion event.
-- The provisioning package remains `live_apply: false`.
-- Live apply requires a separate deployment plan, backups, and approval.
+- The runtime listener must be installed as `rpdb-nat-t-listener.service`.
+- Runtime listener output must be JSONL at `/var/log/rpdb/muxer-events.jsonl`.
+- Live apply requires backups, environment approval, and explicit operator
+  approval.
 
 ## Generated Artifacts
 

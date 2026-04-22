@@ -33,6 +33,11 @@ Important boundary:
 - the runtime now also includes a batched `nftables` classification backend and
   review renderer via:
   - [render_nft_passthrough.py](./scripts/render_nft_passthrough.py)
+- the runtime includes a passive NAT-T event listener via:
+  - [nat_t_event_listener.py](./src/nat_t_event_listener.py)
+  - [rpdb-nat-t-listener.service](./systemd/rpdb-nat-t-listener.service)
+  This listener writes `/var/log/rpdb/muxer-events.jsonl` for the RPDB watcher.
+  It does not program firewall state and does not call iptables.
 - old `customers.variables.yaml` and `config/tunnels.d/` loading is legacy
   compatibility only and should never be the default path in this repo
 

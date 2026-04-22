@@ -43,6 +43,10 @@ if [[ -f "$TARGET_ROOT/systemd/ike-nat-bridge.service" ]]; then
   install -m 0644 "$TARGET_ROOT/systemd/ike-nat-bridge.service" /etc/systemd/system/ike-nat-bridge.service
 fi
 
+if [[ -f "$TARGET_ROOT/systemd/rpdb-nat-t-listener.service" ]]; then
+  install -m 0644 "$TARGET_ROOT/systemd/rpdb-nat-t-listener.service" /etc/systemd/system/rpdb-nat-t-listener.service
+fi
+
 find "$TARGET_ROOT/scripts" -type f -name "*.sh" -exec chmod 0755 {} \;
 find "$TARGET_ROOT/src" -type f -name "*.py" -exec chmod 0755 {} \;
 
@@ -54,3 +58,4 @@ echo "  1. configure customer_sot in $TARGET_ROOT/config/muxer.yaml"
 echo "  2. either stage customer-module files under $TARGET_ROOT/config/customer-modules or point at DynamoDB"
 echo "  3. systemctl enable muxer.service"
 echo "  4. systemctl start muxer.service"
+echo "  5. systemctl enable --now rpdb-nat-t-listener.service"
