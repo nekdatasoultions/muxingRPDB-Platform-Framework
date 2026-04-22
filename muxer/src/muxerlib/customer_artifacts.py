@@ -136,9 +136,8 @@ def _render_initiation_script(customer_name: str, initiation: Dict[str, Any]) ->
 
 
 def _effective_remote_ts(selectors: Dict[str, Any]) -> List[str]:
-    scoped = [str(value) for value in (selectors.get("remote_host_cidrs") or []) if str(value).strip()]
-    if scoped:
-        return scoped
+    # The encryption domain stays customer-declared. remote_host_cidrs is a
+    # platform-scoped routing/NAT inventory inside that broader domain.
     return [str(value) for value in (selectors.get("remote_subnets") or []) if str(value).strip()]
 
 
@@ -364,9 +363,8 @@ def _render_ipsec_intent(
             "remote_subnets": selectors.get("remote_subnets") or [],
             "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
             "effective_remote_ts": effective_remote_ts,
-            "effective_remote_ts_source": (
-                "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
-            ),
+            "effective_remote_ts_source": "remote_subnets",
+            "scoped_customer_cidrs": selectors.get("remote_host_cidrs") or [],
         },
     }
 
@@ -1136,9 +1134,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "remote_subnets": selectors.get("remote_subnets") or [],
                 "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
                 "effective_remote_ts": effective_remote_ts,
-                "effective_remote_ts_source": (
-                    "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
-                ),
+                "effective_remote_ts_source": "remote_subnets",
+                "scoped_customer_cidrs": selectors.get("remote_host_cidrs") or [],
             },
             "transport_binding": {
                 "fwmark": transport.get("mark"),

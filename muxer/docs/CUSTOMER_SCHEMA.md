@@ -121,9 +121,10 @@ encryption domain. The name is kept for compatibility, but entries may be `/32`
 hosts or smaller CIDR blocks such as `/28`. Every entry must be contained by
 one of the declared `remote_subnets`.
 
-When `remote_host_cidrs` is present, generated head-end IPsec artifacts use it
-as the effective remote traffic selector. That means `swanctl remote_ts` is
-rendered from the scoped CIDRs instead of the broader `remote_subnets`.
+Generated head-end IPsec artifacts keep `remote_subnets` as the effective
+remote traffic selector. That means `swanctl remote_ts` continues to represent
+the customer encryption domain, while `remote_host_cidrs` is preserved as
+platform-owned scoped routing, NAT, and accounting metadata inside that domain.
 
 ### `customer.backend`
 
@@ -318,8 +319,8 @@ Important meaning:
 - `selectors.local_subnets` is the customer-visible far-end selector
 - `outside_nat.translated_subnets` should match that customer-visible selector
 - `outside_nat.real_subnets` is the real local/core subnet behind the head end
-- `selectors.remote_host_cidrs` scopes NAT and effective IPsec remote selectors
-  to concrete customer hosts or smaller customer CIDRs when set
+- `selectors.remote_host_cidrs` scopes NAT, routing, and accounting to concrete
+  customer hosts or smaller customer CIDRs when set
 - `selectors.remote_subnets` remains the broader customer encryption domain
 
 Detailed model:
