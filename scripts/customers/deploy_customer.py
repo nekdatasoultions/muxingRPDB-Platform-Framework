@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import subprocess
 import sys
@@ -17,6 +18,11 @@ if str(MUXER_SRC) not in sys.path:
     sys.path.insert(0, str(MUXER_SRC))
 
 from muxerlib.customer_merge import load_yaml_file
+from customer_operation_lock import (
+    CustomerOperationLockError,
+    acquire_lock,
+    release_lock,
+)
 from live_apply_lib import execute_live_apply
 
 PLACEHOLDER_VALUES = {
@@ -338,6 +344,25 @@ def main() -> int:
     errors: list[str] = []
     dry_run_gate = None
     apply_result: dict[str, Any] | None = None
+    operation_lock: Path | None = None
+
+    if args.approve:
+        try:
+            operation_lock = acquire_lock(
+                REPO_ROOT,
+                customer_name,
+                owner="deploy_customer",
+                mode="approved-live-deploy",
+                detail={
+                    "customer_file": _repo_relative(customer_file),
+                    "environment": args.environment,
+                    "deploy_dir": _repo_relative(deploy_dir),
+                    "observation": _repo_relative(observation) if observation else None,
+                },
+            )
+            atexit.register(release_lock, operation_lock)
+        except CustomerOperationLockError as exc:
+            errors.append(str(exc))
 
     request_code, request_stdout, request_stderr = _validate_customer_request(customer_file)
     if request_code != 0:
@@ -457,6 +482,8 @@ def main() -> int:
         execution_plan["apply"] = apply_result
 
     _write_json(execution_plan_path, execution_plan)
+    release_lock(operation_lock)
+    operation_lock = None
 
     if args.json:
         print(json.dumps(execution_plan, indent=2, sort_keys=True))
