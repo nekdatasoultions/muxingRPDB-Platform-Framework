@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -85,6 +86,11 @@ def _ensure_repo_local_output(path: Path, repo_root: Path) -> None:
         raise ValueError(f"pilot output directory must be a generated repo-local path, not {relative.parts[0]}/")
 
 
+def _staged_headend_root(repo_root: Path, package_dir: Path) -> Path:
+    digest = hashlib.sha1(str(package_dir.resolve()).encode("utf-8")).hexdigest()[:12]
+    return repo_root / "build" / "pilot-he" / digest
+
+
 def _run_step(
     name: str,
     command: list[str],
@@ -131,7 +137,9 @@ def _run_double_verification(
 ) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     python = sys.executable
-    headend_root = bundle_dir.parent / "staged-headend"
+    headend_root = _staged_headend_root(repo_root, bundle_dir.parent)
+    if headend_root.exists():
+        shutil.rmtree(headend_root)
 
     _run_step(
         "validate_customer_source",
