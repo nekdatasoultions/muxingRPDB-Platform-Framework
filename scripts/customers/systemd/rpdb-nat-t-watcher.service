@@ -9,7 +9,7 @@ User=ec2-user
 Group=ec2-user
 Environment=RPDB_ENVIRONMENT=rpdb-empty-live
 WorkingDirectory=/home/ec2-user/rpdb
-ExecStart=/usr/bin/python3 scripts/customers/run_nat_t_watcher.py --environment ${RPDB_ENVIRONMENT} --follow --approve --json
+ExecStart=/usr/bin/python3 scripts/customers/run_nat_t_watcher.py --environment ${RPDB_ENVIRONMENT} --follow --approve
 Restart=always
 RestartSec=10
 
