@@ -163,7 +163,9 @@ def build_passthrough_nft_model(
         natd_rewrite_enabled, _natd_inner_ip = customer_natd_flags(module)
         backend_underlay_ip = str(module.get("backend_underlay_ip") or backend_ul_default).strip()
         headend_egress_sources = customer_headend_egress_sources(module, backend_underlay_ip)
-        nat_preroute_dst = backend_underlay_ip if udp4500 else public_ip
+        if translation_enabled and not backend_underlay_ip:
+            raise ValueError(f"{module.get('name')}: pass-through DNAT requires backend_underlay_ip")
+        nat_preroute_dst = backend_underlay_ip
 
         if udp500:
             _append_unique(udp500_accept_peers, peer)
