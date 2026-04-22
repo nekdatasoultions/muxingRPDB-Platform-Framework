@@ -93,6 +93,7 @@ customer:
       - 198.51.100.80/28
     translated_subnets:
       - 10.0.2.0/28
+    route_via: 172.31.63.44
 ```
 
 ## Selector Meaning
@@ -105,6 +106,16 @@ NAT is enabled, this should be the translated customer-visible subnet.
 `outside_nat.real_subnets`
 
 The real local/core subnet behind the head end.
+
+`outside_nat.route_via`
+
+Optional next hop for the real local/core subnet when that subnet is behind an
+upstream router instead of directly owned by the head-end clear-side interface.
+
+`outside_nat.route_dev`
+
+Optional interface override for the route to `outside_nat.real_subnets`. Omit
+it to use the environment's head-end clear-side interface.
 
 `outside_nat.translated_subnets`
 
