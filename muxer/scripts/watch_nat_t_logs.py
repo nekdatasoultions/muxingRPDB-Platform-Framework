@@ -439,6 +439,33 @@ def _run_customer_flow(
     }
 
 
+def _remove_planned_idempotency_key(
+    *,
+    state_keys: set[str],
+    customer_state: dict[str, Any],
+    idempotency_key: str,
+) -> None:
+    state_keys.discard(idempotency_key)
+    customer_state["planned_idempotency_keys"] = [
+        key
+        for key in customer_state.get("planned_idempotency_keys") or []
+        if str(key) != idempotency_key
+    ]
+
+
+def _provisioning_failed(provisioning: dict[str, Any] | None) -> bool:
+    if provisioning is None:
+        return False
+    if int(provisioning.get("returncode") or 0) != 0:
+        return True
+    payload = provisioning.get("json") or {}
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"blocked", "rolled_back", "failed"}:
+        return True
+    apply_status = str(((payload.get("apply") or {}).get("status")) or "").strip().lower()
+    return apply_status in {"blocked", "rolled_back", "failed"}
+
+
 def _run_command_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
     completed = subprocess.run(
         command,
@@ -543,6 +570,7 @@ def _run_pre_promotion_remove(
         "--environment",
         deployment_environment,
         "--approve",
+        "--skip-nat-t-watcher-cleanup",
         "--out-dir",
         str(output_dir / "approved"),
         "--json",
@@ -649,6 +677,24 @@ def _process_events(
             idempotency_key = build_nat_t_observation_idempotency_key(observation)
             observation_path = observations_dir / watch.name / f"{idempotency_key[:12]}.json"
             if idempotency_key in planned_keys:
+                if not observation_path.exists():
+                    _remove_planned_idempotency_key(
+                        state_keys=planned_keys,
+                        customer_state=cstate,
+                        idempotency_key=idempotency_key,
+                    )
+                else:
+                    ignored.append(
+                        {
+                            "reason": "already_detected",
+                            "customer_name": watch.name,
+                            "idempotency_key": idempotency_key,
+                            "observation": str(observation_path),
+                        }
+                    )
+                    continue
+
+            if idempotency_key in planned_keys:
                 ignored.append(
                     {
                         "reason": "already_detected",
@@ -676,6 +722,12 @@ def _process_events(
                     skip_if_already_nat=skip_if_already_nat,
                     allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
                 )
+                if _provisioning_failed(provisioning):
+                    _remove_planned_idempotency_key(
+                        state_keys=planned_keys,
+                        customer_state=cstate,
+                        idempotency_key=idempotency_key,
+                    )
             detected.append(
                 {
                     "customer_name": watch.name,

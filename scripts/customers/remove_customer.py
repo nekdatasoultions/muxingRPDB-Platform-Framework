@@ -465,6 +465,7 @@ def execute_live_remove(
     environment_doc: dict[str, Any],
     headend_family: str,
     out_dir: Path,
+    cleanup_nat_t_watcher: bool = True,
 ) -> dict[str, Any]:
     environment = environment_doc.get("environment") or {}
     region = str((environment.get("aws") or {}).get("region") or "").strip()
@@ -559,17 +560,29 @@ def execute_live_remove(
         if backend_result.get("status") != "removed":
             raise RuntimeError("backend removal failed: " + "; ".join(backend_result.get("errors") or []))
 
-        nat_t_cleanup = cleanup_nat_t_watcher_state(
-            customer_name=customer_name,
-            environment_doc=environment_doc,
-            out_dir=out_dir,
-        )
+        if cleanup_nat_t_watcher:
+            nat_t_cleanup = cleanup_nat_t_watcher_state(
+                customer_name=customer_name,
+                environment_doc=environment_doc,
+                out_dir=out_dir,
+            )
+        else:
+            nat_t_cleanup = {
+                "schema_version": 1,
+                "action": "cleanup_nat_t_watcher_state",
+                "customer_name": customer_name,
+                "status": "skipped",
+                "generated_at": utc_now(),
+                "reason": "skip_nat_t_watcher_cleanup_requested",
+                "errors": [],
+            }
+            write_json(out_dir / "nat-t-watcher-cleanup.json", nat_t_cleanup)
         journal.append(
             {
                 "recorded_at": utc_now(),
                 "action": "cleanup_nat_t_watcher_state",
                 "target": nat_t_cleanup.get("state_file"),
-                "success": nat_t_cleanup.get("status") == "cleaned",
+                "success": nat_t_cleanup.get("status") in {"cleaned", "not_configured", "skipped"},
                 "payload": nat_t_cleanup,
             }
         )
@@ -621,6 +634,11 @@ def main() -> int:
     parser.add_argument("--out-dir", help="Output directory for execution plan and removal journal")
     parser.add_argument("--dry-run", action="store_true", help="Plan only. This is the default.")
     parser.add_argument("--approve", action="store_true", help="Execute the approved live removal")
+    parser.add_argument(
+        "--skip-nat-t-watcher-cleanup",
+        action="store_true",
+        help="Do not clear local NAT-T watcher state/artifacts. Used by watcher-internal promotion flows.",
+    )
     parser.add_argument("--json", action="store_true", help="Print the execution plan or removal result as JSON")
     args = parser.parse_args()
 
@@ -646,6 +664,7 @@ def main() -> int:
                     "environment": args.environment,
                     "out_dir": repo_relative(out_dir),
                     "headend_family": args.headend_family,
+                    "skip_nat_t_watcher_cleanup": bool(args.skip_nat_t_watcher_cleanup),
                 },
             )
             atexit.register(release_lock, operation_lock)
@@ -770,7 +789,7 @@ def main() -> int:
             "remove_headend_customer_active",
             "remove_muxer_customer",
             "remove_backend_customer",
-            "cleanup_nat_t_watcher_state",
+            "cleanup_nat_t_watcher_state" if not args.skip_nat_t_watcher_cleanup else "skip_nat_t_watcher_cleanup",
             "write_remove_journal",
         ],
         "live_gate": {
@@ -796,6 +815,7 @@ def main() -> int:
             environment_doc=environment_doc or {},
             headend_family=headend_family,
             out_dir=out_dir,
+            cleanup_nat_t_watcher=not bool(args.skip_nat_t_watcher_cleanup),
         )
         execution_plan["status"] = remove_result.get("status")
         execution_plan["live_remove"] = remove_result.get("status") == "removed"
