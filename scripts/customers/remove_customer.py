@@ -8,6 +8,7 @@ import atexit
 import json
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -63,6 +64,12 @@ def repo_relative(path: Path) -> str:
         return path.resolve().relative_to(REPO_ROOT).as_posix()
     except ValueError:
         return str(path.resolve())
+
+
+def configured_repo_path(value: Any, default: str) -> Path:
+    text = str(value or default).strip()
+    raw = Path(text)
+    return raw if raw.is_absolute() else (REPO_ROOT / raw).resolve()
 
 
 def run_json(command: list[str]) -> tuple[int, dict[str, Any] | None, str, str]:
@@ -324,6 +331,95 @@ def headend_remove_command(customer_name: str) -> str:
     )
 
 
+def cleanup_nat_t_watcher_state(
+    *,
+    customer_name: str,
+    environment_doc: dict[str, Any],
+    out_dir: Path,
+) -> dict[str, Any]:
+    watcher = environment_doc.get("nat_t_watcher") or {}
+    if not watcher:
+        report = {
+            "schema_version": 1,
+            "action": "cleanup_nat_t_watcher_state",
+            "customer_name": customer_name,
+            "status": "not_configured",
+            "generated_at": utc_now(),
+            "errors": [],
+        }
+        write_json(out_dir / "nat-t-watcher-cleanup.json", report)
+        return report
+
+    state_file = configured_repo_path(watcher.get("state_root"), "build/nat-t-watcher/state") / "state.json"
+    output_root = configured_repo_path(watcher.get("output_root"), "build/nat-t-watcher/out")
+    package_root = configured_repo_path(watcher.get("package_root"), "build/nat-t-watcher/packages")
+    observation_dir = output_root / "observations" / customer_name
+    package_dir = package_root / customer_name
+
+    removed_customer_state = False
+    removed_customer_keys: list[str] = []
+    removed_global_keys: list[str] = []
+    idempotency_prefixes: set[str] = set()
+    errors: list[str] = []
+
+    if observation_dir.exists():
+        for observation_file in observation_dir.glob("*.json"):
+            idempotency_prefixes.add(observation_file.stem)
+
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            customers = state.setdefault("customers", {})
+            customer_state = customers.pop(customer_name, None)
+            if isinstance(customer_state, dict):
+                removed_customer_state = True
+                removed_customer_keys = [
+                    str(key)
+                    for key in customer_state.get("planned_idempotency_keys") or []
+                    if str(key).strip()
+                ]
+
+            keys_to_remove = set(removed_customer_keys)
+            planned_keys = [str(key) for key in state.get("planned_idempotency_keys") or []]
+            retained_keys: list[str] = []
+            for key in planned_keys:
+                if key in keys_to_remove or any(key.startswith(prefix) for prefix in idempotency_prefixes):
+                    removed_global_keys.append(key)
+                else:
+                    retained_keys.append(key)
+            state["planned_idempotency_keys"] = sorted(retained_keys)
+            write_json(state_file, state)
+        except Exception as exc:
+            errors.append(f"failed to update NAT-T watcher state {repo_relative(state_file)}: {exc}")
+
+    removed_artifacts: list[str] = []
+    for artifact_dir in (observation_dir, package_dir):
+        if not artifact_dir.exists():
+            continue
+        try:
+            shutil.rmtree(artifact_dir)
+            removed_artifacts.append(repo_relative(artifact_dir))
+        except Exception as exc:
+            errors.append(f"failed to remove NAT-T watcher artifact {repo_relative(artifact_dir)}: {exc}")
+
+    report = {
+        "schema_version": 1,
+        "action": "cleanup_nat_t_watcher_state",
+        "customer_name": customer_name,
+        "status": "blocked" if errors else "cleaned",
+        "generated_at": utc_now(),
+        "state_file": repo_relative(state_file),
+        "state_file_present": state_file.exists(),
+        "removed_customer_state": removed_customer_state,
+        "removed_customer_idempotency_keys": sorted(set(removed_customer_keys)),
+        "removed_global_idempotency_keys": sorted(set(removed_global_keys)),
+        "removed_artifacts": removed_artifacts,
+        "errors": errors,
+    }
+    write_json(out_dir / "nat-t-watcher-cleanup.json", report)
+    return report
+
+
 def build_touch_plan(
     *,
     environment_doc: dict[str, Any],
@@ -339,6 +435,13 @@ def build_touch_plan(
         "customer_name": customer_name,
         "customer_sot_table": datastores.get("customer_sot_table"),
         "allocation_table": datastores.get("allocation_table"),
+        "nat_t_watcher_state": repo_relative(
+            configured_repo_path(
+                ((environment_doc.get("nat_t_watcher") or {}).get("state_root")),
+                "build/nat-t-watcher/state",
+            )
+            / "state.json"
+        ),
         "customer_present": backend.get("customer_present"),
         "allocation_count": backend.get("allocation_count"),
         "headend_family": headend_family,
@@ -456,6 +559,23 @@ def execute_live_remove(
         if backend_result.get("status") != "removed":
             raise RuntimeError("backend removal failed: " + "; ".join(backend_result.get("errors") or []))
 
+        nat_t_cleanup = cleanup_nat_t_watcher_state(
+            customer_name=customer_name,
+            environment_doc=environment_doc,
+            out_dir=out_dir,
+        )
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "cleanup_nat_t_watcher_state",
+                "target": nat_t_cleanup.get("state_file"),
+                "success": nat_t_cleanup.get("status") == "cleaned",
+                "payload": nat_t_cleanup,
+            }
+        )
+        if nat_t_cleanup.get("status") == "blocked":
+            raise RuntimeError("NAT-T watcher cleanup failed: " + "; ".join(nat_t_cleanup.get("errors") or []))
+
         result = {
             "schema_version": 1,
             "action": "remove_customer",
@@ -464,6 +584,7 @@ def execute_live_remove(
             "generated_at": utc_now(),
             "headend_family": headend_family,
             "backend": backend_result,
+            "nat_t_watcher_cleanup": nat_t_cleanup,
             "journal": repo_relative(out_dir / "remove-journal.json"),
         }
         write_json(out_dir / "remove-journal.json", {"schema_version": 1, "customer_name": customer_name, "steps": journal})
@@ -649,6 +770,7 @@ def main() -> int:
             "remove_headend_customer_active",
             "remove_muxer_customer",
             "remove_backend_customer",
+            "cleanup_nat_t_watcher_state",
             "write_remove_journal",
         ],
         "live_gate": {
@@ -663,6 +785,7 @@ def main() -> int:
             "execution_plan": repo_relative(out_dir / "execution-plan.json"),
             "remove_journal": repo_relative(out_dir / "remove-journal.json"),
             "remove_result": repo_relative(out_dir / "remove-result.json"),
+            "nat_t_watcher_cleanup": repo_relative(out_dir / "nat-t-watcher-cleanup.json"),
         },
     }
     write_json(out_dir / "execution-plan.json", execution_plan)
