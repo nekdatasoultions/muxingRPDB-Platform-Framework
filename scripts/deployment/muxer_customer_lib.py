@@ -320,6 +320,21 @@ def _render_nft_remove_script() -> str:
     )
 
 
+def _muxer_conntrack_cleanup_lines() -> list[str]:
+    return [
+        'if [ -z "${ROOT}" ] && command -v conntrack >/dev/null 2>&1 && [ -f "${MODULE_JSON}" ]; then',
+        '  PEER_IP="$(python3 -c \'import json,sys; d=json.load(open(sys.argv[1])); p=d.get("peer") or {}; v=str(d.get("peer_ip") or p.get("public_ip") or "").split("/")[0].strip(); print(v)\' "${MODULE_JSON}")"',
+        '  if [ -n "${PEER_IP}" ]; then',
+        '    for PORT in 500 4500; do',
+        '      conntrack -D -p udp -s "${PEER_IP}" --dport "${PORT}" >/dev/null 2>&1 || true',
+        '      conntrack -D -p udp -d "${PEER_IP}" --sport "${PORT}" >/dev/null 2>&1 || true',
+        '    done',
+        '    echo "cleared_muxer_conntrack_peer=${PEER_IP}"',
+        "  fi",
+        "fi",
+    ]
+
+
 def _render_master_apply_script(customer_name: str) -> str:
     customer_root = f"/{MUXER_STATE_ROOT.as_posix()}/{customer_name}"
     module_json = f"/{MUXER_MODULE_ROOT.as_posix()}/{customer_name}/customer-module.json"
@@ -338,6 +353,7 @@ def _render_master_apply_script(customer_name: str) -> str:
             '  python3 /etc/muxer/src/muxctl.py flush',
             f"  python3 /etc/muxer/src/muxctl.py apply-customer {quoted_customer}",
             "fi",
+            *_muxer_conntrack_cleanup_lines(),
         ]
     )
 
@@ -356,6 +372,7 @@ def _render_master_remove_script(customer_name: str) -> str:
             '  python3 /etc/muxer/src/muxctl.py flush',
             f"  python3 /etc/muxer/src/muxctl.py remove-customer {quoted_customer}",
             "fi",
+            *_muxer_conntrack_cleanup_lines(),
             'bash "${CUSTOMER_ROOT}/firewall/remove-firewall.sh"',
             'bash "${CUSTOMER_ROOT}/routing/remove-routing.sh"',
             'bash "${CUSTOMER_ROOT}/tunnel/remove-tunnel.sh"',
