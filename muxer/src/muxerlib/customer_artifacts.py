@@ -928,6 +928,8 @@ def _render_outside_nat_intent(
         "tcp_mss_clamp": outside_nat.get("tcp_mss_clamp"),
         "route_via": outside_nat.get("route_via"),
         "route_dev": outside_nat.get("route_dev"),
+        "deferred": bool(outside_nat.get("deferred")),
+        "defer_reason": outside_nat.get("defer_reason"),
         "rendered_command_model": command_model,
         "rendered_command_count": int(manifest.get("apply_command_count") or 0),
         "activation_manifest": {
@@ -939,6 +941,43 @@ def _render_outside_nat_intent(
             "fallback_policy": manifest.get("fallback_policy"),
         },
     }
+
+
+def _is_dynamic_nat_t_initial_headend(
+    customer: Dict[str, Any],
+    backend: Dict[str, Any],
+    dynamic_provisioning: Dict[str, Any],
+) -> bool:
+    if not bool(dynamic_provisioning.get("enabled")):
+        return False
+    mode = str(dynamic_provisioning.get("mode") or "nat_t_auto_promote").strip()
+    if mode != "nat_t_auto_promote":
+        return False
+    customer_class = str(customer.get("customer_class") or "").strip().lower().replace("_", "-")
+    backend_cluster = str(backend.get("cluster") or "").strip().lower().replace("_", "-")
+    return customer_class in {"strict-non-nat", "non-nat"} or backend_cluster in {"non-nat"}
+
+
+def _effective_headend_outside_nat(
+    customer: Dict[str, Any],
+    backend: Dict[str, Any],
+    dynamic_provisioning: Dict[str, Any],
+    outside_nat: Dict[str, Any],
+) -> Dict[str, Any]:
+    if bool(outside_nat.get("enabled")) and _is_dynamic_nat_t_initial_headend(
+        customer,
+        backend,
+        dynamic_provisioning,
+    ):
+        # The initial dynamic package runs on the non-NAT head end only to
+        # observe UDP/4500. NAT-head-end clear-side routes are applied after
+        # promotion, when the NAT package is rendered against the NAT backend.
+        deferred = dict(outside_nat)
+        deferred["enabled"] = False
+        deferred["deferred"] = True
+        deferred["defer_reason"] = "dynamic_nat_t_initial_non_nat"
+        return deferred
+    return outside_nat
 
 
 def _render_clear_route_command(subnet: str, outside_nat: Dict[str, Any]) -> str:
@@ -1233,10 +1272,17 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     transport = module.get("transport") or {}
     backend = module.get("backend") or {}
     protocols = module.get("protocols") or {}
+    dynamic_provisioning = module.get("dynamic_provisioning") or {}
     ipsec = module.get("ipsec") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
-    outside_nat = module.get("outside_nat") or {}
+    raw_outside_nat = module.get("outside_nat") or {}
     customer_name = str(customer.get("name") or "")
+    outside_nat = _effective_headend_outside_nat(
+        customer,
+        backend,
+        dynamic_provisioning,
+        raw_outside_nat,
+    )
     peer_public_ip = str(peer.get("public_ip") or "").strip()
     peer_public_cidr = f"{peer_public_ip}/32" if peer_public_ip and "/" not in peer_public_ip else peer_public_ip
     overlay = transport.get("overlay") or {}
@@ -1332,6 +1378,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             },
             "outside_nat": {
                 "enabled": bool(outside_nat.get("enabled")),
+                "deferred": bool(outside_nat.get("deferred")),
+                "defer_reason": outside_nat.get("defer_reason"),
                 "presented_local_subnets": outside_nat.get("translated_subnets") or selectors.get("local_subnets") or [],
                 "real_local_subnets": outside_nat.get("real_subnets") or [],
                 "customer_sources": _outside_nat_customer_sources(outside_nat, selectors),
