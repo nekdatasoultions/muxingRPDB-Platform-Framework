@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import re
 import shlex
@@ -20,6 +21,11 @@ if str(MUXER_SRC) not in sys.path:
 
 from muxerlib.customer_merge import load_yaml_file
 
+from customer_operation_lock import (
+    CustomerOperationLockError,
+    acquire_lock,
+    release_lock,
+)
 from live_access_lib import (
     build_ssh_access_context,
     cleanup_ssh_access_context,
@@ -485,6 +491,24 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     errors: list[str] = []
+    operation_lock: Path | None = None
+    if args.approve:
+        try:
+            operation_lock = acquire_lock(
+                REPO_ROOT,
+                customer_name,
+                owner="remove_customer",
+                mode="approved-live-remove",
+                detail={
+                    "environment": args.environment,
+                    "out_dir": repo_relative(out_dir),
+                    "headend_family": args.headend_family,
+                },
+            )
+            atexit.register(release_lock, operation_lock)
+        except CustomerOperationLockError as exc:
+            errors.append(str(exc))
+
     env_code, env_validation, env_stdout, env_stderr = environment_validation(
         args.environment,
         allow_live_apply=True,
@@ -652,6 +676,8 @@ def main() -> int:
         for error in execution_plan.get("errors") or []:
             print(f"  error: {error}")
 
+    release_lock(operation_lock)
+    operation_lock = None
     return 0 if not execution_plan.get("errors") and execution_plan.get("status") in {"ready_to_remove", "removed"} else 1
 
 
