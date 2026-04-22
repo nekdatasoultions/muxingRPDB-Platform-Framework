@@ -20,7 +20,11 @@ import yaml
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+CUSTOMERS_DIR = Path(__file__).resolve().parents[2] / "scripts" / "customers"
+if str(CUSTOMERS_DIR) not in sys.path:
+    sys.path.insert(0, str(CUSTOMERS_DIR))
 
+from customer_operation_lock import is_lock_active, read_lock
 from muxerlib.dynamic_provisioning import (
     build_nat_t_observation_idempotency_key,
     normalize_nat_t_observation_event,
@@ -624,6 +628,18 @@ def _process_events(
                         continue
             if int(cstate.get("udp4500_count") or 0) < watch.confirmation_packets:
                 ignored.append({"reason": "confirmation_threshold_not_met", "customer_name": watch.name, "event": event})
+                continue
+
+            active_lock = read_lock(repo_root, watch.name)
+            if is_lock_active(active_lock):
+                ignored.append(
+                    {
+                        "reason": "customer_operation_lock_active",
+                        "customer_name": watch.name,
+                        "lock": active_lock,
+                        "event": event,
+                    }
+                )
                 continue
 
             observation = normalize_nat_t_observation_event(
