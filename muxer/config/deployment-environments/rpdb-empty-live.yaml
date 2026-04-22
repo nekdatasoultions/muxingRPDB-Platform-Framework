@@ -115,7 +115,6 @@ customer_requests:
     - muxer/config/customer-requests/migrated
     - muxer/config/customer-requests/examples
   blocked_customers:
-    - legacy-cust0003
     - vpn-customer-stage1-15-cust-0003
 
 owners:

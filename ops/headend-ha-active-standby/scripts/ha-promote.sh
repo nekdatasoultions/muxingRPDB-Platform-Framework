@@ -25,6 +25,19 @@ run_local_script_if_exists "$SCRIPT_DIR/ha-conntrack-promote.sh"
 systemctl start "$HA_IPSEC_SERVICE"
 log "promote: started $HA_IPSEC_SERVICE"
 
+CUSTOMER_ROOT="${RPDB_HEADEND_CUSTOMER_ROOT:-/var/lib/rpdb-headend/customers}"
+if [[ -d "$CUSTOMER_ROOT" ]]; then
+  shopt -s nullglob
+  for customer_dir in "$CUSTOMER_ROOT"/*; do
+    apply_script="$customer_dir/apply-headend-customer.sh"
+    if [[ -x "$apply_script" ]]; then
+      RPDB_HEADEND_APPLY_RUNTIME=true bash "$apply_script"
+      log "promote: activated staged customer $(basename "$customer_dir")"
+    fi
+  done
+  shopt -u nullglob
+fi
+
 if [[ "$HA_IPSEC_SERVICE" == "strongswan" ]] && command -v swanctl >/dev/null 2>&1; then
   swanctl --load-all
   log "promote: loaded strongSwan connection state via swanctl --load-all"

@@ -35,6 +35,41 @@ head-end profile.
 - This is not the final model.
 - Dynamic NAT-T selection remains separate from outside NAT intent.
 - Operators should still not select NAT-T or non-NAT in the customer request.
+- Customer 4 currently needs `outside_nat.route_via: 172.31.63.44` and
+  `outside_nat.route_dev: ens36` because direct routing to
+  `194.138.36.86/32` made the NAT head end ARP on `ens36` instead of sending
+  traffic to the clear-side router.
+
+## Customer 4 GRE/NAT-T Lessons
+
+This plan was written before the customer-scoped GRE transport path was fixed.
+The working live path now proves that GRE and IPsec can be correct while the
+clear-side route is still wrong:
+
+- Customer 4 NAT-T promotion installed a per-customer GRE transport between
+  the muxer and NAT head end.
+- The muxer forwarded UDP/4500 ESP-in-UDP from the customer into the NAT
+  head-end path.
+- The NAT head end installed the IPsec Child SAs and decrypted protected
+  traffic.
+- Traffic for `10.128.4.2/32` matched the outside-NAT translated selector.
+- The translated real destination `194.138.36.86/32` failed when rendered as
+  `ip route replace 194.138.36.86/32 dev ens36`.
+- The failure mode was ARP, not GRE: the head end sent ARP requests for
+  `194.138.36.86` on `ens36` and received no reply.
+- Replacing that route with
+  `ip route replace 194.138.36.86/32 via 172.31.63.44 dev ens36` restored
+  successful customer-to-core ping.
+
+Dynamic routing therefore has two independent responsibilities:
+
+- derive the customer-scoped GRE return route for IPsec transport packets
+- derive the clear-side route for outside-NAT real subnets after decryption
+
+Validation must test both. A green GRE interface, loaded swanctl connection,
+and nonzero Child SA counters are necessary but not sufficient; the generated
+package must also prove that real protected destinations route through the
+correct clear-side next hop and do not create direct ARP-only host routes.
 
 ## Target State
 
@@ -57,6 +92,8 @@ Platform/environment profiles should contain placement and routing facts:
 - per-head-end route next-hop defaults
 - outside NAT next-hop policy
 - return-path route policy
+- customer-scoped GRE transport defaults and overlay next-hop policy
+- clear-side route ownership rules for translated outside-NAT real subnets
 - validation probes for selected head-end reachability
 
 Provisioning should derive final routing this way:
@@ -82,6 +119,10 @@ The profile should support:
 - interface used for outside NAT real-subnet reachability
 - next-hop used for outside NAT real-subnet reachability
 - optional route table or policy name
+- GRE return interface and overlay next-hop derivation for the selected
+  customer transport
+- explicit policy for whether a real subnet is directly connected or must use
+  a clear-side next hop
 - validation probe source
 - validation probe targets
 
@@ -90,6 +131,8 @@ Validation:
 - environment examples validate
 - missing route profile blocks customers that require outside NAT
 - non-outside-NAT customers do not require outside NAT route profile fields
+- a host route such as `194.138.36.86/32 dev ens36` is rejected when the
+  profile says the subnet must route via `172.31.63.44`
 
 ### Step 2: Move route derivation into provisioning
 
@@ -101,9 +144,14 @@ Validation:
 
 - Customer 4 dry-run with NAT-T observation renders the NAT head-end route
   through the NAT head-end route profile
+- Customer 4 dry-run renders
+  `ip route replace 194.138.36.86/32 via 172.31.63.44 dev ens36`, not a direct
+  `dev ens36` route
 - Customer 4 dry-run without observation starts non-NAT and does not require a
   NAT route profile until promotion
 - generated head-end route artifacts contain the selected route next hop
+- generated head-end route artifacts still contain the customer-scoped GRE
+  return route for the observed peer public IP
 - generated customer request artifacts do not require `route_via` or
   `route_dev`
 
@@ -117,6 +165,9 @@ Validation:
 - initial non-NAT package is clean
 - NAT-T observation produces a NAT package
 - NAT package contains NAT head-end route commands
+- NAT package reuses the GRE transport fixes: muxer table routes to the
+  customer GRE interface, NAT head end returns transport traffic through the
+  GRE overlay, and clear-side routes are derived separately
 - stale non-NAT route assumptions do not carry into NAT package output
 
 ### Step 4: Add hard validation gates
@@ -128,6 +179,12 @@ Validation:
 - outside NAT customer without required selected head-end profile fails
   dry-run clearly
 - outside NAT customer with selected profile passes dry-run
+- generated route commands cannot install a direct clear-side route when the
+  selected profile requires a next hop
+- validation probes include route lookup checks for each outside-NAT real
+  subnet and reject ARP-only failures where the next hop is missing
+- validation probes include GRE/IPsec and clear-side route checks as separate
+  results so a GRE fix cannot hide a post-decrypt routing failure
 - generated artifacts remain `nftables` only
 - no `iptables` or `iptables-restore` fallback is introduced
 

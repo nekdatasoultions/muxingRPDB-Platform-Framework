@@ -74,6 +74,195 @@ def _run_json(command: list[str]) -> tuple[int, dict[str, Any] | None, str, str]
     return completed.returncode, payload, completed.stdout, completed.stderr
 
 
+def _run_aws_json(command: list[str]) -> dict[str, Any]:
+    completed = subprocess.run(
+        ["aws", *command],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout).strip() or "AWS CLI command failed")
+    return json.loads(completed.stdout or "{}")
+
+
+def _module_to_customer_source(module: dict[str, Any]) -> dict[str, Any]:
+    customer = dict(module.get("customer") or {})
+    source_customer = {
+        "id": customer.get("id"),
+        "name": customer.get("name"),
+        "customer_class": customer.get("customer_class"),
+        "peer": module.get("peer") or {},
+        "selectors": module.get("selectors") or {},
+        "transport": module.get("transport") or {},
+    }
+    for key in (
+        "backend",
+        "protocols",
+        "natd_rewrite",
+        "dynamic_provisioning",
+        "ipsec",
+        "post_ipsec_nat",
+        "outside_nat",
+    ):
+        value = module.get(key)
+        if value not in (None, {}, []):
+            source_customer[key] = value
+    return {
+        "schema_version": int(module.get("schema_version") or 1),
+        "customer": source_customer,
+    }
+
+
+def _write_live_existing_source_root(
+    *,
+    environment_doc: dict[str, Any],
+    deploy_dir: Path,
+    exclude_customer: str,
+) -> Path | None:
+    environment = environment_doc.get("environment") or {}
+    region = str((environment.get("aws") or {}).get("region") or "").strip()
+    datastores = environment_doc.get("datastores") or {}
+    if str(datastores.get("mode") or "").strip() != "dynamodb":
+        return None
+    customer_table = str(datastores.get("customer_sot_table") or "").strip()
+    if not region or not customer_table:
+        return None
+
+    live_root = deploy_dir / "live-existing-sources"
+    live_root.mkdir(parents=True, exist_ok=True)
+    names_path = live_root / "ddb-projection-names.json"
+    names_path.write_text(json.dumps({"#cn": "customer_name", "#cj": "customer_json"}) + "\n", encoding="utf-8")
+
+    items: list[dict[str, Any]] = []
+    exclusive_start_key: dict[str, Any] | None = None
+    while True:
+        command = [
+            "dynamodb",
+            "scan",
+            "--region",
+            region,
+            "--table-name",
+            customer_table,
+            "--projection-expression",
+            "#cn,#cj",
+            "--expression-attribute-names",
+            f"file://{names_path}",
+            "--consistent-read",
+            "--output",
+            "json",
+        ]
+        start_path: Path | None = None
+        if exclusive_start_key:
+            start_path = live_root / "ddb-exclusive-start-key.json"
+            start_path.write_text(json.dumps(exclusive_start_key) + "\n", encoding="utf-8")
+            command.extend(["--exclusive-start-key", f"file://{start_path}"])
+        try:
+            payload = _run_aws_json(command)
+        finally:
+            if start_path is not None:
+                start_path.unlink(missing_ok=True)
+        items.extend(item for item in payload.get("Items") or [] if isinstance(item, dict))
+        exclusive_start_key = payload.get("LastEvaluatedKey")
+        if not exclusive_start_key:
+            break
+
+    written = 0
+    for item in items:
+        customer_name = str((item.get("customer_name") or {}).get("S") or "").strip()
+        if not customer_name or customer_name == exclude_customer:
+            continue
+        module_text = str((item.get("customer_json") or {}).get("S") or "").strip()
+        if not module_text:
+            continue
+        source_doc = _module_to_customer_source(json.loads(module_text))
+        safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in customer_name)
+        source_path = live_root / safe_name / "customer.yaml"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(json.dumps(source_doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written += 1
+
+    return live_root if written else None
+
+
+def _ddb_string_attribute(item: dict[str, Any], name: str) -> str:
+    value = item.get(name)
+    if not isinstance(value, dict):
+        return ""
+    if "S" in value:
+        return str(value.get("S") or "")
+    if "N" in value:
+        return str(value.get("N") or "")
+    if "BOOL" in value:
+        return str(bool(value.get("BOOL"))).lower()
+    return ""
+
+
+def _validate_live_allocation_keys(
+    *,
+    environment_doc: dict[str, Any],
+    package_dir: Path,
+    customer_name: str,
+) -> list[str]:
+    environment = environment_doc.get("environment") or {}
+    region = str((environment.get("aws") or {}).get("region") or "").strip()
+    datastores = environment_doc.get("datastores") or {}
+    if str(datastores.get("mode") or "").strip() != "dynamodb":
+        return []
+    allocation_table = str(datastores.get("allocation_table") or "").strip()
+    allocation_items_path = package_dir / "allocation-ddb-items.json"
+    if not region or not allocation_table or not allocation_items_path.exists():
+        return []
+
+    allocation_items = json.loads(allocation_items_path.read_text(encoding="utf-8"))
+    if not isinstance(allocation_items, list):
+        return [f"{allocation_items_path} must contain a JSON array"]
+
+    errors: list[str] = []
+    for item in allocation_items:
+        if not isinstance(item, dict):
+            continue
+        resource_key = _ddb_string_attribute(item, "resource_key").strip()
+        if not resource_key:
+            continue
+        expected_customer = _ddb_string_attribute(item, "customer_name").strip() or customer_name
+        payload = _run_aws_json(
+            [
+                "dynamodb",
+                "get-item",
+                "--region",
+                region,
+                "--table-name",
+                allocation_table,
+                "--key",
+                json.dumps({"resource_key": {"S": resource_key}}),
+                "--consistent-read",
+                "--output",
+                "json",
+            ]
+        )
+        existing = payload.get("Item")
+        if not isinstance(existing, dict):
+            continue
+        existing_customer = _ddb_string_attribute(existing, "customer_name").strip()
+        if existing_customer and existing_customer == expected_customer:
+            continue
+        owner = existing_customer or "<unknown customer>"
+        errors.append(
+            f"allocation resource {resource_key!r} is already allocated to {owner} "
+            f"in {allocation_table}; planned customer was {expected_customer}"
+        )
+    return errors
+
+
+def _default_existing_source_roots() -> list[Path]:
+    return [
+        REPO_ROOT / "muxer" / "config" / "customer-sources" / "examples",
+        REPO_ROOT / "muxer" / "config" / "customer-sources" / "migrated",
+    ]
+
+
 def _environment_validation(
     environment: str, *, allow_live_apply: bool = False
 ) -> tuple[int, dict[str, Any] | None, str, str]:
@@ -383,30 +572,60 @@ def main() -> int:
     package_report = None
     target_selection = None
     if not errors:
-        command = [
-            sys.executable,
-            "muxer/scripts/provision_customer_end_to_end.py",
-            str(customer_file),
-            "--out-dir",
-            str(package_dir),
-            "--json",
-        ]
-        if observation:
-            command.extend(["--observation", str(observation)])
-        package_code, package_report, package_stdout, package_stderr = _run_json(command)
-        if package_code != 0 or not package_report or package_report.get("status") != "ready_for_review":
-            errors.append(f"repo-only package provisioning failed: {package_stderr or package_stdout}".strip())
-        else:
-            target_selection = _target_selection(
-                environment_doc=environment_doc or {},
-                readiness=package_report.get("readiness") or {},
+        try:
+            live_existing_root = (
+                _write_live_existing_source_root(
+                    environment_doc=environment_doc or {},
+                    deploy_dir=deploy_dir,
+                    exclude_customer=customer_name,
+                )
+                if environment_doc
+                else None
             )
-            dry_run_gate = _evaluate_dry_run_gate(
-                environment_doc=environment_doc,
-                target_selection=target_selection,
-                package_report=package_report,
-            )
-            errors.extend(dry_run_gate.get("errors") or [])
+        except Exception as exc:
+            errors.append(f"live allocation inventory snapshot failed: {exc}")
+            live_existing_root = None
+
+        if not errors:
+            command = [
+                sys.executable,
+                "muxer/scripts/provision_customer_end_to_end.py",
+                str(customer_file),
+                "--out-dir",
+                str(package_dir),
+                "--json",
+            ]
+            if observation:
+                command.extend(["--observation", str(observation)])
+            for root in _default_existing_source_roots():
+                command.extend(["--existing-source-root", str(root)])
+            if live_existing_root is not None:
+                command.extend(["--existing-source-root", str(live_existing_root)])
+            package_code, package_report, package_stdout, package_stderr = _run_json(command)
+            if package_code != 0 or not package_report or package_report.get("status") != "ready_for_review":
+                errors.append(f"repo-only package provisioning failed: {package_stderr or package_stdout}".strip())
+            else:
+                try:
+                    errors.extend(
+                        _validate_live_allocation_keys(
+                            environment_doc=environment_doc or {},
+                            package_dir=package_dir,
+                            customer_name=customer_name,
+                        )
+                    )
+                except Exception as exc:
+                    errors.append(f"live allocation preflight failed: {exc}")
+                if not errors:
+                    target_selection = _target_selection(
+                        environment_doc=environment_doc or {},
+                        readiness=package_report.get("readiness") or {},
+                    )
+                    dry_run_gate = _evaluate_dry_run_gate(
+                        environment_doc=environment_doc,
+                        target_selection=target_selection,
+                        package_report=package_report,
+                    )
+                    errors.extend(dry_run_gate.get("errors") or [])
 
     status = "dry_run_ready" if not errors else "blocked"
     execution_plan = _build_execution_plan(

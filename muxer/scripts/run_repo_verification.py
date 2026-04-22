@@ -2901,6 +2901,10 @@ print(
         raise SystemExit("head-end customer apply/remove must tolerate inactive standby strongSwan services")
     if "strongswan is not active; staged config remains" not in headend_customer_lib_text:
         raise SystemExit("head-end customer apply must stage configs when standby strongSwan is inactive")
+    if "head-end is standby; staged config remains" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must stage customer payloads without activating standby dataplane")
+    if "RPDB_HEADEND_APPLY_RUNTIME" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must allow HA promotion to activate staged payloads")
     if "head-end initiate did not complete; customer config remains loaded" not in headend_customer_lib_text:
         raise SystemExit("head-end customer apply must not fail deployment when the peer is not yet responding")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
@@ -2911,6 +2915,11 @@ print(
         raise SystemExit("head-end post-IPsec NAT apply must detect an existing customer nftables table")
     if 'nft delete table "${NFT_FAMILY}" "${NFT_TABLE}"' not in headend_customer_lib_text:
         raise SystemExit("head-end post-IPsec NAT apply must replace existing customer nftables table before loading")
+    ha_promote_text = (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
+        encoding="utf-8"
+    )
+    if "RPDB_HEADEND_APPLY_RUNTIME=true" not in ha_promote_text:
+        raise SystemExit("HA promote must activate staged RPDB customer dataplane payloads")
     vpn_headend_template_text = (REPO_ROOT / "infra" / "cfn" / "vpn-headend-unit.yaml").read_text(
         encoding="utf-8"
     )
@@ -2925,10 +2934,10 @@ print(
             "remove_tolerates_inactive_strongswan": True,
             "customer_swanctl_include_enforced": True,
             "post_ipsec_nat_apply_replaces_existing_table": True,
+            "standby_dataplane_activation_deferred": True,
             "ha_promote_loads_swanctl": "swanctl --load-all"
-            in (REPO_ROOT / "ops" / "headend-ha-active-standby" / "scripts" / "ha-promote.sh").read_text(
-                encoding="utf-8"
-            ),
+            in ha_promote_text,
+            "ha_promote_activates_staged_customers": "RPDB_HEADEND_APPLY_RUNTIME=true" in ha_promote_text,
         },
     )
 

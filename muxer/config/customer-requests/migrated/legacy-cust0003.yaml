@@ -1,0 +1,28 @@
+schema_version: 1
+
+customer:
+  name: legacy-cust0003
+  peer:
+    public_ip: 166.213.153.41
+    remote_id: 166.213.153.41
+    psk_secret_ref: /muxingrpdb/dev/customers/legacy-cust0003/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+      - 172.30.0.90/32
+    remote_subnets:
+      - 10.129.4.12/32
+      - 192.168.1.59/32
+  ipsec:
+    auto: start
+    remote_id: 166.213.153.41
+    ike_version: ikev2
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    vti_routing: no
+    vti_shared: yes
+  post_ipsec_nat:
+    enabled: false
+    mode: disabled

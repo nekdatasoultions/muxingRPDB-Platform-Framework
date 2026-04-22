@@ -20,7 +20,6 @@ from muxerlib.customer_merge import load_yaml_file
 ENVIRONMENT_ROOT = REPO_ROOT / "muxer" / "config" / "deployment-environments"
 DEFAULT_SCHEMA = REPO_ROOT / "muxer" / "config" / "schema" / "deployment-environment.schema.json"
 REQUIRED_BLOCKED_CUSTOMERS = {
-    "legacy-cust0003",
     "vpn-customer-stage1-15-cust-0003",
 }
 FORBIDDEN_TARGET_MARKERS = (
