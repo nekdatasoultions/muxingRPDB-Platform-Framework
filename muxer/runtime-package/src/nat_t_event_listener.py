@@ -28,7 +28,7 @@ import yaml
 DEFAULT_CONFIG = Path("/etc/muxer/config/muxer.yaml")
 DEFAULT_EVENT_LOG = Path("/var/log/rpdb/muxer-events.jsonl")
 DEFAULT_BPF_FILTER = "udp and (port 500 or port 4500)"
-TCPDUMP_IP_RE = re.compile(r"(?:^|\s)IP\s+(?P<src>\S+)\s+>\s+(?P<dst>[^:]+):\s+UDP\b")
+TCPDUMP_IP_RE = re.compile(r"(?:^|\s)IP\s+(?P<src>\S+)\s+>\s+(?P<dst>[^:]+):")
 
 
 def utc_now() -> str:
@@ -244,8 +244,10 @@ def self_test() -> dict[str, Any]:
     local_addresses = {"172.31.33.150", "23.20.31.151"}
     samples = [
         "2026-04-21 22:01:01.000000 IP 198.51.100.10.500 > 172.31.33.150.500: UDP, length 292",
-        "2026-04-21 22:01:02.000000 IP 198.51.100.10.4500 > 172.31.33.150.4500: UDP, length 108",
-        "2026-04-21 22:01:03.000000 IP 172.31.33.150.4500 > 198.51.100.10.4500: UDP, length 108",
+        "2026-04-21 22:01:02.000000 IP 198.51.100.10.500 > 172.31.33.150.500: isakmp: parent_sa ikev2_init[I]",
+        "2026-04-21 22:01:03.000000 IP 198.51.100.10.4500 > 172.31.33.150.4500: NONESP-encap: isakmp: child_sa ikev2_auth[I]",
+        "2026-04-21 22:01:04.000000 IP 198.51.100.10.4500 > 172.31.33.150.4500: UDP-encap: ESP(spi=0x00000001,seq=0x00000001), length 108",
+        "2026-04-21 22:01:05.000000 IP 172.31.33.150.4500 > 198.51.100.10.4500: UDP, length 108",
     ]
     events = [
         parse_tcpdump_line(line, interface="ens5", local_addresses=local_addresses)
@@ -255,9 +257,9 @@ def self_test() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "action": "nat_t_event_listener_self_test",
-        "valid": len(emitted) == 2 and [event["observed_dport"] for event in emitted] == [500, 4500],
+        "valid": len(emitted) == 4 and [event["observed_dport"] for event in emitted] == [500, 500, 4500, 4500],
         "emitted_count": len(emitted),
-        "ignored_local_source": events[2] is None,
+        "ignored_local_source": events[4] is None,
         "observed_dports": [event["observed_dport"] for event in emitted],
         "uses_iptables": False,
         "capture_source": "tcpdump-passive",
