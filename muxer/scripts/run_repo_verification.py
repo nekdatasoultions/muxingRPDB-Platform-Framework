@@ -2779,19 +2779,38 @@ print(
             import sys
             from muxerlib.nftables import build_passthrough_nft_model, render_passthrough_nft_script
 
-            module = {
-                "name": "contract-nat-t-customer",
-                "id": 4,
-                "peer_ip": "203.0.113.4/32",
-                "backend_underlay_ip": "172.31.40.222",
-                "protocols": {
-                    "udp500": True,
-                    "udp4500": True,
-                    "esp50": True,
-                    "force_rewrite_4500_to_500": False,
+            nonnat_peer = "203.0.113.44"
+            nat_t_peer = "203.0.113.45"
+            nonnat_headend = "172.31.40.223"
+            nat_t_headend = "172.31.40.222"
+            modules = [
+                {
+                    "name": "contract-non-nat-customer",
+                    "id": 4,
+                    "peer_ip": f"{nonnat_peer}/32",
+                    "backend_underlay_ip": nonnat_headend,
+                    "protocols": {
+                        "udp500": True,
+                        "udp4500": False,
+                        "esp50": True,
+                        "force_rewrite_4500_to_500": False,
+                    },
+                    "headend_egress_sources": [nonnat_headend],
                 },
-                "headend_egress_sources": ["172.31.40.222"],
-            }
+                {
+                    "name": "contract-nat-t-customer",
+                    "id": 5,
+                    "peer_ip": f"{nat_t_peer}/32",
+                    "backend_underlay_ip": nat_t_headend,
+                    "protocols": {
+                        "udp500": True,
+                        "udp4500": True,
+                        "esp50": True,
+                        "force_rewrite_4500_to_500": False,
+                    },
+                    "headend_egress_sources": [nat_t_headend],
+                },
+            ]
             global_cfg = {
                 "public_ip": "23.20.31.151",
                 "interfaces": {
@@ -2817,16 +2836,33 @@ print(
                 },
             }
             model = build_passthrough_nft_model(
-                [module],
+                modules,
                 global_cfg,
                 render_mode="nftables-live-pass-through",
             )
             script = render_passthrough_nft_script(model)
+            translation_maps = (model.get("translation") or {}).get("maps") or {}
+            muxer_identities = {
+                global_cfg["public_ip"],
+                global_cfg["interfaces"]["public_private_ip"],
+            }
+            dnat_values = []
+            for map_name in ("udp500_dnat", "udp4500_dnat", "esp_dnat"):
+                dnat_values.extend((translation_maps.get(map_name) or {}).values())
             checks = {
                 "dnat_uses_address_map": "dnat to ip saddr map @udp500_dnat" in script,
                 "snat_uses_concat_address_map": "snat to ip saddr . ip daddr map @udp500_snat" in script,
                 "dnat_map_type_is_address": "type ipv4_addr : ipv4_addr" in script,
                 "snat_map_type_is_concat_address": "type ipv4_addr . ipv4_addr : ipv4_addr" in script,
+                "strict_non_nat_udp500_dnat_targets_headend": (translation_maps.get("udp500_dnat") or {}).get(nonnat_peer) == f"dnat to {nonnat_headend}",
+                "strict_non_nat_esp_dnat_targets_headend": (translation_maps.get("esp_dnat") or {}).get(nonnat_peer) == f"dnat to {nonnat_headend}",
+                "nat_t_udp500_dnat_targets_headend": (translation_maps.get("udp500_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
+                "nat_t_udp4500_dnat_targets_headend": (translation_maps.get("udp4500_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
+                "nat_t_esp_dnat_targets_headend": (translation_maps.get("esp_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
+                "no_pass_through_dnat_targets_muxer_identity": all(
+                    str(value).replace("dnat to ", "").strip() not in muxer_identities
+                    for value in dnat_values
+                ),
                 "no_verdict_nat_maps": "type ipv4_addr : verdict" not in script,
                 "no_dnat_statements_inside_map": ": dnat to" not in script,
                 "no_snat_statements_inside_map": ": snat to" not in script,

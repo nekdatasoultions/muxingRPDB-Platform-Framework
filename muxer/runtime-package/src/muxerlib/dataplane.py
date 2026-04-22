@@ -397,7 +397,9 @@ def derive_passthrough_dataplane(
     transport = derive_customer_transport(module, muxer_doc)
     udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
     nat_preroute_targets = [public_priv_ip, public_ip] if public_priv_ip != public_ip else [public_ip]
-    nat_preroute_dst = transport["backend_underlay_ip"] if udp4500 else public_ip
+    nat_preroute_dst = str(transport["backend_underlay_ip"] or "").strip()
+    if nat_rewrite and not nat_preroute_dst:
+        raise ValueError(f"{module.get('name')}: pass-through DNAT requires backend_underlay_ip")
 
     return {
         "customer_class": "strict_non_nat" if strict_non_nat_customer(module) else "nat_t_or_custom",
