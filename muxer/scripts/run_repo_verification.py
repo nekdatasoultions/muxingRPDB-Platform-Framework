@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -130,27 +131,112 @@ def _resolve_repo_path(path_like: str) -> Path:
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
 
-def _assert_headend_edge_return_route(
+def _assert_headend_transport_and_identity(
     package_dir: Path,
     *,
     customer_name: str,
     peer_public_ip: str,
-    muxer_public_private_ip: str,
-    headend_public_iface: str,
+    headend_public_ip: str,
 ) -> str:
     peer_public_cidr = peer_public_ip if "/" in peer_public_ip else f"{peer_public_ip}/32"
-    expected_route = (
-        f"ip route replace {peer_public_cidr} via {muxer_public_private_ip} "
-        f"dev {headend_public_iface} onlink"
-    )
+    bundle_dir = package_dir / "bundle"
+    customer_module_path = bundle_dir / "customer" / "customer-module.json"
+    if not customer_module_path.exists():
+        raise SystemExit(f"{customer_name} customer module is missing: {customer_module_path}")
+    customer_module = json.loads(customer_module_path.read_text(encoding="utf-8"))
+    transport = customer_module.get("transport") or {}
+    overlay = transport.get("overlay") or {}
+    interface = str(transport.get("interface") or "").strip()
+    mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
+    router_overlay_ip = str(overlay.get("router_ip") or "").strip()
+    mux_overlay_host = str(ipaddress.ip_interface(mux_overlay_ip).ip) if mux_overlay_ip else ""
+    tunnel_key = str(transport.get("tunnel_key") or "").strip()
+    tunnel_ttl = str(transport.get("tunnel_ttl") or "").strip()
+    expected_route = f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {interface}"
     route_path = package_dir / "bundle" / "headend" / "routing" / "ip-route.commands.txt"
     if not route_path.exists():
         raise SystemExit(f"{customer_name} head-end route artifact is missing: {route_path}")
     route_text = route_path.read_text(encoding="utf-8")
     if expected_route not in route_text:
         raise SystemExit(
-            f"{customer_name} head-end route artifact is missing muxer edge return route: {expected_route}"
+            f"{customer_name} head-end route artifact is missing GRE muxer edge return route: {expected_route}"
         )
+
+    transport_intent_path = bundle_dir / "headend" / "transport" / "transport-intent.json"
+    transport_apply_path = bundle_dir / "headend" / "transport" / "apply-transport.sh"
+    transport_remove_path = bundle_dir / "headend" / "transport" / "remove-transport.sh"
+    public_identity_intent_path = bundle_dir / "headend" / "public-identity" / "public-identity-intent.json"
+    public_identity_apply_path = bundle_dir / "headend" / "public-identity" / "apply-public-identity.sh"
+    public_identity_remove_path = bundle_dir / "headend" / "public-identity" / "remove-public-identity.sh"
+    for path in (
+        transport_intent_path,
+        transport_apply_path,
+        transport_remove_path,
+        public_identity_intent_path,
+        public_identity_apply_path,
+        public_identity_remove_path,
+    ):
+        if not path.exists():
+            raise SystemExit(f"{customer_name} head-end transport/public identity artifact is missing: {path}")
+
+    transport_intent = json.loads(transport_intent_path.read_text(encoding="utf-8"))
+    if not transport_intent.get("enabled"):
+        raise SystemExit(f"{customer_name} head-end transport intent is not enabled")
+    if transport_intent.get("type") != "gre":
+        raise SystemExit(f"{customer_name} head-end transport intent is not GRE")
+    expected_transport_values = {
+        "interface": interface,
+        "tunnel_key": tunnel_key,
+        "tunnel_ttl": tunnel_ttl,
+        "router_overlay_ip": router_overlay_ip,
+        "mux_overlay_ip": mux_overlay_ip,
+        "mux_overlay_host": mux_overlay_host,
+        "peer_public_cidr": peer_public_cidr,
+    }
+    for key, expected_value in expected_transport_values.items():
+        if str(transport_intent.get(key) or "") != expected_value:
+            raise SystemExit(
+                f"{customer_name} head-end transport intent {key} mismatch: expected {expected_value}"
+            )
+
+    transport_script_text = "\n".join(
+        [
+            transport_apply_path.read_text(encoding="utf-8"),
+            transport_remove_path.read_text(encoding="utf-8"),
+        ]
+    )
+    for required_fragment in (
+        'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+        'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
+        'ip link set "$IFNAME" up',
+        'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',
+        'ip link del "$IFNAME" 2>/dev/null || true',
+    ):
+        if required_fragment not in transport_script_text:
+            raise SystemExit(f"{customer_name} head-end transport scripts missing: {required_fragment}")
+
+    public_identity_intent = json.loads(public_identity_intent_path.read_text(encoding="utf-8"))
+    expected_public_cidr = f"{headend_public_ip}/32"
+    if public_identity_intent.get("public_ip") != headend_public_ip:
+        raise SystemExit(f"{customer_name} public identity IP mismatch")
+    if public_identity_intent.get("cidr") != expected_public_cidr:
+        raise SystemExit(f"{customer_name} public identity CIDR mismatch")
+    if public_identity_intent.get("device") != "lo":
+        raise SystemExit(f"{customer_name} public identity must bind on lo")
+    public_identity_script_text = "\n".join(
+        [
+            public_identity_apply_path.read_text(encoding="utf-8"),
+            public_identity_remove_path.read_text(encoding="utf-8"),
+        ]
+    )
+    if 'ip addr replace "$PUBLIC_CIDR" dev "$DEVICE"' not in public_identity_script_text:
+        raise SystemExit(f"{customer_name} public identity apply script does not add the loopback /32")
+    if "Shared head-end public identity is retained on customer removal." not in public_identity_script_text:
+        raise SystemExit(f"{customer_name} public identity remove script must retain the shared /32")
+    banned = "iptables"
+    generated_payload = "\n".join([route_text, transport_script_text, public_identity_script_text]).lower()
+    if banned in generated_payload or "iptables-restore" in generated_payload:
+        raise SystemExit(f"{customer_name} generated head-end transport artifacts contain iptables tokens")
     return expected_route
 
 
@@ -699,6 +785,13 @@ def main() -> int:
         raise SystemExit("Customer 2 dry-run did not select non-NAT head end")
     if ((customer2_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 2 dry-run gate did not report dry_run_ready")
+    customer2_package_dir = _resolve_repo_path(str((customer2_deploy.get("package") or {}).get("package_dir") or ""))
+    customer2_edge_return_route = _assert_headend_transport_and_identity(
+        customer2_package_dir,
+        customer_name="legacy-cust0002",
+        peer_public_ip="166.213.153.39",
+        headend_public_ip="23.20.31.151",
+    )
 
     customer4_deploy = _run_json(
         [
@@ -737,12 +830,11 @@ def main() -> int:
     if ((customer4_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 4 NAT-T dry-run gate did not report dry_run_ready")
     customer4_package_dir = _resolve_repo_path(str((customer4_deploy.get("package") or {}).get("package_dir") or ""))
-    customer4_edge_return_route = _assert_headend_edge_return_route(
+    customer4_edge_return_route = _assert_headend_transport_and_identity(
         customer4_package_dir,
         customer_name="vpn-customer-stage1-15-cust-0004",
         peer_public_ip="3.237.201.84",
-        muxer_public_private_ip="172.31.33.150",
-        headend_public_iface="ens34",
+        headend_public_ip="23.20.31.151",
     )
     customer4_swanctl = (
         customer4_package_dir / "bundle" / "headend" / "ipsec" / "swanctl-connection.conf"
@@ -865,6 +957,7 @@ def main() -> int:
             "customer2_status": customer2_deploy["status"],
             "customer2_headend_family": customer2_deploy["selected_targets"]["headend_family"],
             "customer2_gate": customer2_deploy["dry_run_gate"]["status"],
+            "customer2_edge_return_route": customer2_edge_return_route,
             "customer4_status": customer4_deploy["status"],
             "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
             "customer4_gate": customer4_deploy["dry_run_gate"]["status"],
