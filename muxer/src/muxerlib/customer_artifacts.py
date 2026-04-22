@@ -941,6 +941,14 @@ def _render_outside_nat_intent(
     }
 
 
+def _render_clear_route_command(subnet: str, outside_nat: Dict[str, Any]) -> str:
+    route_via = str(outside_nat.get("route_via") or "").strip()
+    route_dev = str(outside_nat.get("route_dev") or "").strip() or "${HEADEND_CLEAR_IFACE}"
+    if route_via:
+        return f"ip route replace {subnet} via {route_via} dev {route_dev}"
+    return f"ip route replace {subnet} dev {route_dev}"
+
+
 def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     customer = module.get("customer") or {}
     peer = module.get("peer") or {}
@@ -1090,7 +1098,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     route_commands = [
         "# Customer-scoped head-end routes",
         *[
-            f"ip route replace {subnet} dev ${'{HEADEND_CLEAR_IFACE}'}"
+            _render_clear_route_command(str(subnet), outside_nat if bool(outside_nat.get("enabled")) else {})
             for subnet in clear_route_subnets
         ],
     ]

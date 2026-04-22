@@ -319,6 +319,10 @@ Important meaning:
 - `selectors.local_subnets` is the customer-visible far-end selector
 - `outside_nat.translated_subnets` should match that customer-visible selector
 - `outside_nat.real_subnets` is the real local/core subnet behind the head end
+- `outside_nat.route_via` sends those real subnets to an upstream router when
+  they are not directly owned on the head-end clear-side interface
+- `outside_nat.route_dev` overrides the clear-side interface name for those
+  routes; omit it to use the environment's head-end clear interface
 - `selectors.remote_host_cidrs` scopes NAT, routing, and accounting to concrete
   customer hosts or smaller customer CIDRs when set
 - `selectors.remote_subnets` remains the broader customer encryption domain

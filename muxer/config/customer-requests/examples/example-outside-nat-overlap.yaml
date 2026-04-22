@@ -46,6 +46,9 @@ customer:
     # Real local/core network behind the VPN head end.
     real_subnets:
       - 198.51.100.80/28
+    # Optional upstream router for real local/core space when it is not
+    # directly owned on the head-end clear-side interface.
+    route_via: 172.31.63.44
     # Customer-selected translated far-end network carried in the VPN selectors.
     translated_subnets:
       - 10.0.2.0/28
