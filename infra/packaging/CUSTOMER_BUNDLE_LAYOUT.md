@@ -40,6 +40,14 @@ carry these files:
 
 - `headend/ipsec/ipsec-intent.json`
 - `headend/ipsec/swanctl-connection.conf`
+- `headend/ipsec/initiation-intent.json`
+- `headend/ipsec/initiate-tunnel.sh`
+- `headend/transport/transport-intent.json`
+- `headend/transport/apply-transport.sh`
+- `headend/transport/remove-transport.sh`
+- `headend/public-identity/public-identity-intent.json`
+- `headend/public-identity/apply-public-identity.sh`
+- `headend/public-identity/remove-public-identity.sh`
 - `headend/routing/routing-intent.json`
 - `headend/routing/ip-route.commands.txt`
 - `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
@@ -47,6 +55,11 @@ carry these files:
 - `headend/post-ipsec-nat/nftables.remove.nft`
 - `headend/post-ipsec-nat/nftables-state.json`
 - `headend/post-ipsec-nat/activation-manifest.json`
+- `headend/outside-nat/outside-nat-intent.json`
+- `headend/outside-nat/nftables.apply.nft`
+- `headend/outside-nat/nftables.remove.nft`
+- `headend/outside-nat/nftables-state.json`
+- `headend/outside-nat/activation-manifest.json`
 
 ## Recommended Contents
 

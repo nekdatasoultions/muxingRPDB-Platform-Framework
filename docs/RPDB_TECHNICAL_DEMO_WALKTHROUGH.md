@@ -866,8 +866,8 @@ def _render_muxer_firewall_nftables(customer_name: str, snat_coverage: Dict[str,
 },
 ```
 
-Head-end artifacts include swanctl config, routes, edge return path, and
-post-IPsec NAT:
+Head-end artifacts include swanctl config, public-identity loopback intent,
+customer GRE transport, routes, edge return path, and post-IPsec NAT:
 
 ```python
 route_commands = [
@@ -880,9 +880,8 @@ route_commands = [
 if peer_public_cidr:
     route_commands.extend(
         [
-            "# Return IPsec transport traffic through the muxer edge",
-            f"ip route replace {peer_public_cidr} via ${'{MUXER_PUBLIC_PRIVATE_IP}'} "
-            f"dev ${'{HEADEND_PUBLIC_IFACE}'} onlink",
+            "# Return IPsec transport traffic through the customer-scoped GRE path to the muxer edge",
+            f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {transport_interface}",
         ]
     )
 ```
@@ -1047,11 +1046,15 @@ Primary file:
 scripts/deployment/headend_customer_lib.py
 ```
 
-The head-end installer writes swanctl config, route commands, and post-IPsec
-NAT nftables artifacts:
+The head-end installer writes swanctl config, public identity, GRE transport,
+route commands, and post-IPsec NAT nftables artifacts:
 
 ```python
 _write_text(layout["swanctl_conf"], bundle.text_payloads["ipsec/swanctl-connection.conf"])
+_write_json(layout["public_identity_intent"], bundle.json_payloads["public-identity/public-identity-intent.json"])
+_write_text(layout["public_identity_apply_script"], bundle.text_payloads["public-identity/apply-public-identity.sh"])
+_write_json(layout["transport_intent"], bundle.json_payloads["transport/transport-intent.json"])
+_write_text(layout["transport_apply_script"], bundle.text_payloads["transport/apply-transport.sh"])
 _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route.commands.txt"])
 _write_text(layout["nft_apply"], bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"])
 _write_text(layout["nft_remove"], bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"])
@@ -1059,11 +1062,14 @@ _write_json(layout["nft_state"], bundle.json_payloads["post-ipsec-nat/nftables-s
 _write_json(layout["activation_manifest"], bundle.json_payloads["post-ipsec-nat/activation-manifest.json"])
 ```
 
-The head-end master apply sequence applies routes, applies post-IPsec NAT, and
+The head-end master apply sequence ensures the shared public identity exists,
+creates the customer GRE transport, applies routes, applies post-IPsec NAT, and
 reloads strongSwan if it is active:
 
 ```python
 [
+    'bash "${CUSTOMER_ROOT}/public-identity/apply-public-identity.sh"',
+    'bash "${CUSTOMER_ROOT}/transport/apply-transport.sh"',
     'bash "${CUSTOMER_ROOT}/routing/apply-routes.sh"',
     'bash "${CUSTOMER_ROOT}/post-ipsec-nat/apply-post-ipsec-nat.sh"',
     'if command -v swanctl >/dev/null 2>&1 && systemctl is-active --quiet strongswan; then',
@@ -1199,7 +1205,8 @@ valid UDP/4500 signal from the same peer, RPDB builds a promoted NAT-T package
 and selects the NAT head-end family automatically.
 
 The muxer receives a customer-scoped RPDB rule, per-customer route table, GRE
-tunnel, and nftables artifact. The VPN head-end receives swanctl config, routes,
+tunnel, and nftables artifact. The VPN head-end receives swanctl config, the
+shared public identity loopback, the matching customer GRE transport, routes,
 edge return path, and post-IPsec NAT nftables maps. The runtime path is
 nftables-based, not iptables-based.
 

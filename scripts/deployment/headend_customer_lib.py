@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
 import shutil
 from dataclasses import dataclass
@@ -17,6 +18,12 @@ HEADEND_REQUIRED_FILES = (
     "ipsec/swanctl-connection.conf",
     "ipsec/initiation-intent.json",
     "ipsec/initiate-tunnel.sh",
+    "transport/transport-intent.json",
+    "transport/apply-transport.sh",
+    "transport/remove-transport.sh",
+    "public-identity/public-identity-intent.json",
+    "public-identity/apply-public-identity.sh",
+    "public-identity/remove-public-identity.sh",
     "routing/routing-intent.json",
     "routing/ip-route.commands.txt",
     "post-ipsec-nat/post-ipsec-nat-intent.json",
@@ -151,6 +158,10 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
 
     swanctl_text = bundle.text_payloads["ipsec/swanctl-connection.conf"]
     initiate_script_text = bundle.text_payloads["ipsec/initiate-tunnel.sh"]
+    transport_apply_text = bundle.text_payloads["transport/apply-transport.sh"]
+    transport_remove_text = bundle.text_payloads["transport/remove-transport.sh"]
+    public_identity_apply_text = bundle.text_payloads["public-identity/apply-public-identity.sh"]
+    public_identity_remove_text = bundle.text_payloads["public-identity/remove-public-identity.sh"]
     route_text = bundle.text_payloads["routing/ip-route.commands.txt"]
     nft_apply_text = bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"]
     nft_remove_text = bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"]
@@ -158,6 +169,8 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     outside_nft_remove_text = bundle.text_payloads["outside-nat/nftables.remove.nft"]
     ipsec_intent = bundle.json_payloads["ipsec/ipsec-intent.json"]
     initiation_intent = bundle.json_payloads["ipsec/initiation-intent.json"]
+    transport_intent = bundle.json_payloads["transport/transport-intent.json"]
+    public_identity_intent = bundle.json_payloads["public-identity/public-identity-intent.json"]
     routing_intent = bundle.json_payloads["routing/routing-intent.json"]
     nat_intent = bundle.json_payloads["post-ipsec-nat/post-ipsec-nat-intent.json"]
     activation_manifest = bundle.json_payloads["post-ipsec-nat/activation-manifest.json"]
@@ -169,6 +182,10 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     text_checks = {
         "ipsec/swanctl-connection.conf": swanctl_text,
         "ipsec/initiate-tunnel.sh": initiate_script_text,
+        "transport/apply-transport.sh": transport_apply_text,
+        "transport/remove-transport.sh": transport_remove_text,
+        "public-identity/apply-public-identity.sh": public_identity_apply_text,
+        "public-identity/remove-public-identity.sh": public_identity_remove_text,
         "routing/ip-route.commands.txt": route_text,
         "post-ipsec-nat/nftables.apply.nft": nft_apply_text,
         "post-ipsec-nat/nftables.remove.nft": nft_remove_text,
@@ -181,6 +198,11 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         if unresolved:
             report["errors"].append(
                 f"headend file has unresolved placeholders: {relative_name} -> {', '.join(unresolved)}"
+            )
+        lowered = payload.lower()
+        if "iptables" in lowered or "iptables-restore" in lowered:
+            report["errors"].append(
+                f"headend file contains banned runtime token: {relative_name}"
             )
 
     for relative_name, payload in bundle.json_payloads.items():
@@ -272,11 +294,21 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
             report["errors"].append("remote_host_cidrs must be preserved as scoped customer CIDRs")
 
     route_lines = _executable_lines(route_text)
+    transport_apply_lines = _executable_lines(transport_apply_text)
+    transport_remove_lines = _executable_lines(transport_remove_text)
+    public_identity_apply_lines = _executable_lines(public_identity_apply_text)
+    public_identity_remove_lines = _executable_lines(public_identity_remove_text)
     nft_apply_lines = _executable_lines(nft_apply_text)
     nft_remove_lines = _executable_lines(nft_remove_text)
     outside_nft_apply_lines = _executable_lines(outside_nft_apply_text)
     outside_nft_remove_lines = _executable_lines(outside_nft_remove_text)
     report["details"]["route_command_count"] = len(route_lines)
+    report["details"]["headend_transport_enabled"] = transport_intent.get("enabled")
+    report["details"]["headend_transport_interface"] = transport_intent.get("interface")
+    report["details"]["headend_transport_type"] = transport_intent.get("type")
+    report["details"]["headend_transport_peer_route"] = transport_intent.get("peer_public_cidr")
+    report["details"]["public_identity_enabled"] = public_identity_intent.get("enabled")
+    report["details"]["public_identity_cidr"] = public_identity_intent.get("cidr")
     report["details"]["post_ipsec_nat_command_count"] = int(activation_manifest.get("apply_command_count") or 0)
     report["details"]["post_ipsec_nat_rollback_command_count"] = int(activation_manifest.get("rollback_command_count") or 0)
     report["details"]["outside_nat_command_count"] = int(outside_activation_manifest.get("apply_command_count") or 0)
@@ -295,6 +327,72 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     report["details"]["outside_nat_activation_backend"] = outside_activation_manifest.get("backend")
     report["details"]["outside_nat_table_name"] = outside_activation_manifest.get("table_name")
 
+    module_transport = (bundle.customer_module.get("transport") or {})
+    module_overlay = module_transport.get("overlay") or {}
+    if not transport_intent.get("enabled"):
+        report["errors"].append("head-end transport intent must be enabled for customer-scoped GRE return path")
+    if transport_intent.get("type") != "gre":
+        report["errors"].append("head-end transport intent must use GRE")
+    transport_expectations = {
+        "interface": module_transport.get("interface"),
+        "tunnel_key": module_transport.get("tunnel_key"),
+        "tunnel_ttl": module_transport.get("tunnel_ttl"),
+        "router_overlay_ip": module_overlay.get("router_ip"),
+        "mux_overlay_ip": module_overlay.get("mux_ip"),
+    }
+    for key, expected in transport_expectations.items():
+        if expected not in (None, "") and str(transport_intent.get(key)) != str(expected):
+            report["errors"].append(
+                f"head-end transport intent {key} does not match customer module transport"
+            )
+    mux_overlay_ip = str(transport_intent.get("mux_overlay_ip") or "").strip()
+    if mux_overlay_ip:
+        expected_mux_overlay_host = str(ipaddress.ip_interface(mux_overlay_ip).ip)
+        if transport_intent.get("mux_overlay_host") != expected_mux_overlay_host:
+            report["errors"].append("head-end transport intent mux_overlay_host does not match mux_overlay_ip")
+    transport_payload = "\n".join([*transport_apply_lines, *transport_remove_lines])
+    for expected_fragment in (
+        'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+        'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
+        'ip link set "$IFNAME" up',
+        'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',
+        'ip route del "$PEER_CIDR" dev "$IFNAME" 2>/dev/null || true',
+        'ip link del "$IFNAME" 2>/dev/null || true',
+    ):
+        if expected_fragment not in transport_payload:
+            report["errors"].append(
+                f"head-end transport scripts missing required GRE operation: {expected_fragment}"
+            )
+
+    if not public_identity_intent.get("enabled"):
+        report["errors"].append("public identity intent must be enabled for RPDB head-end IPsec identity")
+    public_identity_cidr = str(public_identity_intent.get("cidr") or "").strip()
+    public_identity_ip = str(public_identity_intent.get("public_ip") or "").strip()
+    public_identity_device = str(public_identity_intent.get("device") or "").strip()
+    if public_identity_cidr:
+        try:
+            parsed_public_identity = ipaddress.ip_interface(public_identity_cidr)
+        except ValueError:
+            report["errors"].append(f"public identity CIDR is invalid: {public_identity_cidr}")
+        else:
+            if str(parsed_public_identity.network.prefixlen) != "32":
+                report["errors"].append("public identity CIDR must be a /32 loopback address")
+            if public_identity_ip and str(parsed_public_identity.ip) != public_identity_ip:
+                report["errors"].append("public identity CIDR does not match public_ip")
+    if public_identity_device != "lo":
+        report["errors"].append("public identity must be installed on lo")
+    public_identity_payload = "\n".join([*public_identity_apply_lines, *public_identity_remove_lines])
+    if 'ip addr replace "$PUBLIC_CIDR" dev "$DEVICE"' not in public_identity_payload:
+        report["errors"].append(
+            'public identity scripts missing required loopback operation: ip addr replace "$PUBLIC_CIDR" dev "$DEVICE"'
+        )
+    if "Shared head-end public identity is retained on customer removal." not in public_identity_remove_text:
+        report["errors"].append("public identity remove script must retain the shared head-end loopback identity")
+    if public_identity_intent.get("remove_policy") != "retain_shared_identity":
+        report["errors"].append("public identity remove policy must retain the shared head-end loopback identity")
+    if public_identity_ip and ipsec_intent.get("local_id") not in (None, "", public_identity_ip):
+        report["errors"].append("IPsec local_id must match the rendered public identity IP")
+
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")
     peer_public_ip = str(ipsec_intent.get("peer_public_ip") or "").strip()
@@ -305,12 +403,20 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
             for line in route_lines
             if line.startswith(f"ip route replace {peer_public_cidr} via ")
             and " dev " in line
-            and line.endswith(" onlink")
         ]
         edge_return_path = routing_intent.get("edge_return_path") or {}
         report["details"]["edge_return_route"] = return_route_lines[0] if return_route_lines else None
         if not edge_return_path.get("enabled"):
             report["errors"].append("routing-intent.json must mark the muxer edge return path as enabled")
+        expected_return_next_hop = str(transport_intent.get("mux_overlay_host") or "").strip()
+        expected_return_interface = str(transport_intent.get("interface") or "").strip()
+        expected_return_route = (
+            f"ip route replace {peer_public_cidr} via {expected_return_next_hop} dev {expected_return_interface}"
+        )
+        if expected_return_next_hop and expected_return_interface and expected_return_route not in route_lines:
+            report["errors"].append(
+                f"routing/ip-route.commands.txt missing GRE muxer edge return route: {expected_return_route}"
+            )
         if not return_route_lines:
             report["errors"].append(
                 f"routing/ip-route.commands.txt missing muxer edge return route for peer {peer_public_cidr}"
@@ -409,6 +515,12 @@ def build_install_layout(headend_root: Path, customer_name: str) -> dict[str, Pa
         "swanctl_conf": resolved_root / SWANCTL_CONF_ROOT / f"{customer_name}.conf",
         "ipsec_initiation_intent": customer_root / "ipsec" / "initiation-intent.json",
         "ipsec_initiate_script": customer_root / "ipsec" / "initiate-tunnel.sh",
+        "transport_intent": customer_root / "transport" / "transport-intent.json",
+        "transport_apply_script": customer_root / "transport" / "apply-transport.sh",
+        "transport_remove_script": customer_root / "transport" / "remove-transport.sh",
+        "public_identity_intent": customer_root / "public-identity" / "public-identity-intent.json",
+        "public_identity_apply_script": customer_root / "public-identity" / "apply-public-identity.sh",
+        "public_identity_remove_script": customer_root / "public-identity" / "remove-public-identity.sh",
         "route_commands": customer_root / "routing" / "ip-route.commands.txt",
         "route_apply_script": customer_root / "routing" / "apply-routes.sh",
         "route_remove_script": customer_root / "routing" / "remove-routes.sh",
@@ -495,6 +607,8 @@ def _render_master_apply_script(layout: dict[str, Path], customer_name: str) -> 
             'if ! grep -qxF "include conf.d/rpdb-customers/*.conf" "${SWANCTL_MAIN}"; then',
             "  printf '\\ninclude conf.d/rpdb-customers/*.conf\\n' >> \"${SWANCTL_MAIN}\"",
             'fi',
+            'bash "${CUSTOMER_ROOT}/public-identity/apply-public-identity.sh"',
+            'bash "${CUSTOMER_ROOT}/transport/apply-transport.sh"',
             'bash "${CUSTOMER_ROOT}/routing/apply-routes.sh"',
             'bash "${CUSTOMER_ROOT}/outside-nat/apply-outside-nat.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/apply-post-ipsec-nat.sh"',
@@ -525,6 +639,8 @@ def _render_master_remove_script(layout: dict[str, Path], customer_name: str) ->
             'bash "${CUSTOMER_ROOT}/routing/remove-routes.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/remove-post-ipsec-nat.sh"',
             'bash "${CUSTOMER_ROOT}/outside-nat/remove-outside-nat.sh"',
+            'bash "${CUSTOMER_ROOT}/transport/remove-transport.sh"',
+            'bash "${CUSTOMER_ROOT}/public-identity/remove-public-identity.sh"',
             'if command -v swanctl >/dev/null 2>&1 && systemctl is-active --quiet strongswan; then',
             '  swanctl --load-all',
             'elif command -v swanctl >/dev/null 2>&1; then',
@@ -561,6 +677,12 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
     _write_text(layout["swanctl_conf"], bundle.text_payloads["ipsec/swanctl-connection.conf"])
     _write_json(layout["ipsec_initiation_intent"], bundle.json_payloads["ipsec/initiation-intent.json"])
     _write_text(layout["ipsec_initiate_script"], bundle.text_payloads["ipsec/initiate-tunnel.sh"])
+    _write_json(layout["transport_intent"], bundle.json_payloads["transport/transport-intent.json"])
+    _write_text(layout["transport_apply_script"], bundle.text_payloads["transport/apply-transport.sh"])
+    _write_text(layout["transport_remove_script"], bundle.text_payloads["transport/remove-transport.sh"])
+    _write_json(layout["public_identity_intent"], bundle.json_payloads["public-identity/public-identity-intent.json"])
+    _write_text(layout["public_identity_apply_script"], bundle.text_payloads["public-identity/apply-public-identity.sh"])
+    _write_text(layout["public_identity_remove_script"], bundle.text_payloads["public-identity/remove-public-identity.sh"])
     _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route.commands.txt"])
     _write_text(layout["nft_apply"], bundle.text_payloads["post-ipsec-nat/nftables.apply.nft"])
     _write_text(layout["nft_remove"], bundle.text_payloads["post-ipsec-nat/nftables.remove.nft"])
@@ -594,6 +716,10 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
     for key in (
         "route_apply_script",
         "route_remove_script",
+        "transport_apply_script",
+        "transport_remove_script",
+        "public_identity_apply_script",
+        "public_identity_remove_script",
         "nat_apply_script",
         "nat_remove_script",
         "outside_nat_apply_script",
@@ -612,6 +738,8 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         "swanctl_conf": str(layout["swanctl_conf"]),
         "artifacts_root": str(layout["artifacts_root"]),
         "route_command_count": len(_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"])),
+        "transport": bundle.json_payloads["transport/transport-intent.json"],
+        "public_identity": bundle.json_payloads["public-identity/public-identity-intent.json"],
         "post_ipsec_nat_command_count": int(
             bundle.json_payloads["post-ipsec-nat/activation-manifest.json"].get("apply_command_count") or 0
         ),
@@ -630,6 +758,10 @@ def install_headend_bundle(bundle_dir: Path, headend_root: Path) -> dict[str, An
         "state_json": str(layout["state_json"]),
         "swanctl_conf": str(layout["swanctl_conf"]),
         "ipsec_initiate_script": str(layout["ipsec_initiate_script"]),
+        "transport_apply_script": str(layout["transport_apply_script"]),
+        "transport_remove_script": str(layout["transport_remove_script"]),
+        "public_identity_apply_script": str(layout["public_identity_apply_script"]),
+        "public_identity_remove_script": str(layout["public_identity_remove_script"]),
         "route_apply_script": str(layout["route_apply_script"]),
         "route_remove_script": str(layout["route_remove_script"]),
         "post_ipsec_nat_apply_script": str(layout["nat_apply_script"]),
@@ -653,6 +785,12 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
         "swanctl_conf",
         "ipsec_initiation_intent",
         "ipsec_initiate_script",
+        "transport_intent",
+        "transport_apply_script",
+        "transport_remove_script",
+        "public_identity_intent",
+        "public_identity_apply_script",
+        "public_identity_remove_script",
         "route_commands",
         "nft_apply",
         "nft_remove",
@@ -697,6 +835,48 @@ def validate_installed_headend(bundle_dir: Path, headend_root: Path) -> dict[str
         if installed_initiation_intent != bundle.json_payloads["ipsec/initiation-intent.json"]:
             report["errors"].append(
                 f"installed IPsec initiation intent does not match bundle: {layout['ipsec_initiation_intent']}"
+            )
+
+    if layout["transport_intent"].exists():
+        installed_transport_intent = _load_json(layout["transport_intent"])
+        if installed_transport_intent != bundle.json_payloads["transport/transport-intent.json"]:
+            report["errors"].append(
+                f"installed transport intent does not match bundle: {layout['transport_intent']}"
+            )
+
+    if layout["transport_apply_script"].exists():
+        installed_transport_apply = layout["transport_apply_script"].read_text(encoding="utf-8")
+        if installed_transport_apply != bundle.text_payloads["transport/apply-transport.sh"]:
+            report["errors"].append(
+                f"installed transport apply script does not match bundle: {layout['transport_apply_script']}"
+            )
+
+    if layout["transport_remove_script"].exists():
+        installed_transport_remove = layout["transport_remove_script"].read_text(encoding="utf-8")
+        if installed_transport_remove != bundle.text_payloads["transport/remove-transport.sh"]:
+            report["errors"].append(
+                f"installed transport remove script does not match bundle: {layout['transport_remove_script']}"
+            )
+
+    if layout["public_identity_intent"].exists():
+        installed_public_identity_intent = _load_json(layout["public_identity_intent"])
+        if installed_public_identity_intent != bundle.json_payloads["public-identity/public-identity-intent.json"]:
+            report["errors"].append(
+                f"installed public identity intent does not match bundle: {layout['public_identity_intent']}"
+            )
+
+    if layout["public_identity_apply_script"].exists():
+        installed_public_identity_apply = layout["public_identity_apply_script"].read_text(encoding="utf-8")
+        if installed_public_identity_apply != bundle.text_payloads["public-identity/apply-public-identity.sh"]:
+            report["errors"].append(
+                f"installed public identity apply script does not match bundle: {layout['public_identity_apply_script']}"
+            )
+
+    if layout["public_identity_remove_script"].exists():
+        installed_public_identity_remove = layout["public_identity_remove_script"].read_text(encoding="utf-8")
+        if installed_public_identity_remove != bundle.text_payloads["public-identity/remove-public-identity.sh"]:
+            report["errors"].append(
+                f"installed public identity remove script does not match bundle: {layout['public_identity_remove_script']}"
             )
 
     if layout["nft_apply"].exists():

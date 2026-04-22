@@ -28,7 +28,7 @@ from muxerlib.dynamic_provisioning import (
 )
 
 
-IPTABLES_FIELD_RE = re.compile(r"\b(?P<key>[A-Z]+)=(?P<value>[^ ]+)")
+KEY_VALUE_FIELD_RE = re.compile(r"\b(?P<key>[A-Z]+)=(?P<value>[^ ]+)")
 
 
 @dataclass(frozen=True)
@@ -105,6 +105,37 @@ def _environment_log_files(repo_root: Path, environment: str | None) -> list[Pat
     return [Path(log_path)] if log_path else []
 
 
+def _environment_request_roots(repo_root: Path, environment: str | None) -> list[Path]:
+    environment_path = _resolve_environment_path(repo_root, environment)
+    if environment_path is None:
+        return []
+    document = _load_yaml(environment_path)
+    roots = ((document.get("customer_requests") or {}).get("allowed_roots") or [])
+    return [Path(str(root)) for root in roots if str(root).strip()]
+
+
+def _environment_blocked_customers(repo_root: Path, environment: str | None) -> set[str]:
+    environment_path = _resolve_environment_path(repo_root, environment)
+    if environment_path is None:
+        return set()
+    document = _load_yaml(environment_path)
+    blocked = ((document.get("customer_requests") or {}).get("blocked_customers") or [])
+    return {str(customer).strip() for customer in blocked if str(customer).strip()}
+
+
+def _environment_watcher_policy(repo_root: Path, environment: str | None) -> dict[str, Any]:
+    environment_path = _resolve_environment_path(repo_root, environment)
+    if environment_path is None:
+        return {}
+    document = _load_yaml(environment_path)
+    watcher = document.get("nat_t_watcher") or {}
+    return {
+        "automation": watcher.get("automation") or {},
+        "promotion": watcher.get("promotion") or {},
+        "log_sync": watcher.get("log_sync") or {},
+    }
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -129,10 +160,15 @@ def _discover_request_paths(paths: Iterable[Path], roots: Iterable[Path]) -> lis
     return [discovered[key] for key in sorted(discovered)]
 
 
-def _load_customer_watches(request_paths: list[Path]) -> tuple[dict[str, CustomerWatch], list[dict[str, str]]]:
+def _load_customer_watches(
+    request_paths: list[Path],
+    *,
+    blocked_customers: set[str] | None = None,
+) -> tuple[dict[str, CustomerWatch], list[dict[str, str]]]:
     watches: dict[str, CustomerWatch] = {}
     errors: list[dict[str, str]] = []
     seen_peers: dict[str, str] = {}
+    blocked = blocked_customers or set()
     for request_path in request_paths:
         try:
             doc = _load_yaml(request_path)
@@ -140,6 +176,15 @@ def _load_customer_watches(request_paths: list[Path]) -> tuple[dict[str, Custome
             customer_name = str(customer.get("name") or "").strip()
             peer_ip = str(((customer.get("peer") or {}).get("public_ip") or "")).strip()
             if not customer_name or not peer_ip:
+                continue
+            if customer_name in blocked:
+                errors.append(
+                    {
+                        "request": str(request_path),
+                        "customer_name": customer_name,
+                        "error": "customer is blocked by deployment environment policy",
+                    }
+                )
                 continue
             ipaddress.ip_address(peer_ip)
             dynamic = validate_dynamic_initial_request(doc)
@@ -200,8 +245,8 @@ def _parse_json_event(line: str) -> dict[str, Any] | None:
     }
 
 
-def _parse_iptables_event(line: str) -> dict[str, Any] | None:
-    fields = {match.group("key"): match.group("value") for match in IPTABLES_FIELD_RE.finditer(line)}
+def _parse_key_value_event(line: str) -> dict[str, Any] | None:
+    fields = {match.group("key"): match.group("value") for match in KEY_VALUE_FIELD_RE.finditer(line)}
     peer = fields.get("SRC")
     dport = fields.get("DPT")
     protocol = fields.get("PROTO") or "udp"
@@ -223,7 +268,7 @@ def _parse_log_event(line: str) -> dict[str, Any] | None:
         return None
     event = _parse_json_event(stripped) if stripped.startswith("{") else None
     if event is None:
-        event = _parse_iptables_event(stripped)
+        event = _parse_key_value_event(stripped)
     if event is None:
         return None
     try:
@@ -241,6 +286,8 @@ def _read_new_lines(log_file: Path, state: dict[str, Any], *, reprocess: bool) -
     offset = 0 if reprocess else int(offsets.get(key) or 0)
     lines: list[str] = []
     with log_file.open("r", encoding="utf-8") as handle:
+        if not reprocess and log_file.stat().st_size < offset:
+            offset = 0
         handle.seek(offset)
         lines = handle.readlines()
         offsets[key] = handle.tell()
@@ -307,9 +354,37 @@ def _run_customer_flow(
     package_root: Path,
     deployment_environment: str | None,
     approve: bool,
+    promotion_mode: str,
+    skip_if_already_nat: bool,
+    allow_direct_nat_apply_if_missing: bool,
 ) -> dict[str, Any]:
     output_dir = package_root / watch.name
+    pre_promotion_remove: dict[str, Any] | None = None
     if deployment_environment:
+        if promotion_mode == "remove_reapply":
+            pre_promotion_remove = _run_pre_promotion_remove(
+                repo_root=repo_root,
+                watch=watch,
+                output_dir=output_dir / "pre-promotion-remove",
+                deployment_environment=deployment_environment,
+                approve=approve,
+                skip_if_already_nat=skip_if_already_nat,
+                allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
+            )
+            if pre_promotion_remove.get("status") in {"already_promoted", "blocked", "planned"}:
+                return {
+                    "command": [],
+                    "returncode": 1 if pre_promotion_remove.get("status") == "blocked" else 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "json": {
+                        "status": pre_promotion_remove.get("status"),
+                        "live_apply": False,
+                        "pre_promotion_remove": pre_promotion_remove,
+                    },
+                    "mode": "deploy_customer",
+                    "pre_promotion_remove": pre_promotion_remove,
+                }
         command = [
             sys.executable,
             "scripts/customers/deploy_customer.py",
@@ -356,6 +431,133 @@ def _run_customer_flow(
         "stderr": completed.stderr,
         "json": parsed,
         "mode": "deploy_customer" if deployment_environment else "provision_customer_end_to_end",
+        "pre_promotion_remove": pre_promotion_remove,
+    }
+
+
+def _run_command_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
+    completed = subprocess.run(
+        command,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    parsed: dict[str, Any] | None = None
+    if completed.stdout.strip():
+        try:
+            parsed = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            parsed = None
+    return {
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "json": parsed,
+    }
+
+
+def _remove_plan_customer_missing(plan: dict[str, Any]) -> bool:
+    payload = plan.get("json") or {}
+    errors = [str(error) for error in payload.get("errors") or []]
+    return any("not present in the customer SoT" in error for error in errors)
+
+
+def _remove_plan_customer_already_nat(plan: dict[str, Any]) -> bool:
+    payload = plan.get("json") or {}
+    metadata = (((payload.get("backend") or {}).get("metadata")) or {})
+    values = {
+        str(metadata.get("backend_cluster") or "").strip().lower().replace("-", "_"),
+        str(metadata.get("customer_class") or "").strip().lower().replace("-", "_"),
+    }
+    return bool({"nat", "nat_t", "natt"} & values)
+
+
+def _run_pre_promotion_remove(
+    *,
+    repo_root: Path,
+    watch: CustomerWatch,
+    output_dir: Path,
+    deployment_environment: str,
+    approve: bool,
+    skip_if_already_nat: bool,
+    allow_direct_nat_apply_if_missing: bool,
+) -> dict[str, Any]:
+    plan_command = [
+        sys.executable,
+        "scripts/customers/remove_customer.py",
+        "--customer-name",
+        watch.name,
+        "--environment",
+        deployment_environment,
+        "--out-dir",
+        str(output_dir / "plan"),
+        "--json",
+    ]
+    plan = _run_command_json(repo_root, plan_command)
+    plan_json = plan.get("json") or {}
+
+    if _remove_plan_customer_already_nat(plan) and skip_if_already_nat:
+        return {
+            "status": "already_promoted",
+            "reason": "customer_backend_is_already_nat",
+            "plan": plan,
+        }
+
+    if _remove_plan_customer_missing(plan):
+        return {
+            "status": "not_present",
+            "reason": "customer_not_present_before_nat_t_apply",
+            "direct_apply_allowed": bool(allow_direct_nat_apply_if_missing),
+            "plan": plan,
+        } if allow_direct_nat_apply_if_missing else {
+            "status": "blocked",
+            "reason": "customer_not_present_and_direct_apply_is_disabled",
+            "plan": plan,
+        }
+
+    if plan.get("returncode") != 0 or plan_json.get("status") != "ready_to_remove":
+        return {
+            "status": "blocked",
+            "reason": "pre_promotion_remove_plan_failed",
+            "plan": plan,
+        }
+
+    if not approve:
+        return {
+            "status": "planned",
+            "reason": "remove_reapply_requires_approved_run_for_live_remove",
+            "plan": plan,
+        }
+
+    remove_command = [
+        sys.executable,
+        "scripts/customers/remove_customer.py",
+        "--customer-name",
+        watch.name,
+        "--environment",
+        deployment_environment,
+        "--approve",
+        "--out-dir",
+        str(output_dir / "approved"),
+        "--json",
+    ]
+    remove = _run_command_json(repo_root, remove_command)
+    remove_json = remove.get("json") or {}
+    if remove.get("returncode") != 0 or remove_json.get("status") != "removed":
+        return {
+            "status": "blocked",
+            "reason": "pre_promotion_remove_failed",
+            "plan": plan,
+            "remove": remove,
+        }
+
+    return {
+        "status": "removed",
+        "reason": "existing_customer_removed_before_nat_t_apply",
+        "plan": plan,
+        "remove": remove,
     }
 
 
@@ -371,6 +573,9 @@ def _process_events(
     reprocess: bool,
     deployment_environment: str | None,
     approve: bool,
+    promotion_mode: str,
+    skip_if_already_nat: bool,
+    allow_direct_nat_apply_if_missing: bool,
 ) -> dict[str, Any]:
     watches_by_peer = {watch.peer_ip: watch for watch in watches.values()}
     observations_dir = out_dir / "observations"
@@ -451,6 +656,9 @@ def _process_events(
                     package_root=package_root,
                     deployment_environment=deployment_environment,
                     approve=approve,
+                    promotion_mode=promotion_mode,
+                    skip_if_already_nat=skip_if_already_nat,
+                    allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
                 )
             detected.append(
                 {
@@ -481,6 +689,7 @@ def _build_summary(
     loop_result: dict[str, Any],
     deployment_environment: str | None,
     approve: bool,
+    promotion_mode: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -492,6 +701,7 @@ def _build_summary(
         "package_root": str(package_root),
         "deployment_environment": deployment_environment,
         "approved_apply_requested": approve,
+        "promotion_mode": promotion_mode,
         "watched_customers": {
             name: {
                 "peer_ip": watch.peer_ip,
@@ -563,8 +773,19 @@ def main() -> int:
     parser.add_argument("--reprocess", action="store_true", help="Read logs from the beginning instead of stored offsets")
     parser.add_argument("--follow", action="store_true", help="Continue polling log files instead of exiting")
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0, help="Polling interval for --follow")
+    parser.add_argument(
+        "--promotion-mode",
+        choices=["deploy_only", "remove_reapply"],
+        help="How approved NAT-T promotion should handle an existing customer. Defaults to the deployment environment policy.",
+    )
     parser.add_argument("--json", action="store_true", help="Print watcher summary as JSON")
     args = parser.parse_args()
+
+    watcher_policy = _environment_watcher_policy(repo_root, args.environment)
+    promotion_policy = watcher_policy.get("promotion") or {}
+    promotion_mode = str(args.promotion_mode or promotion_policy.get("mode") or "deploy_only").strip()
+    skip_if_already_nat = bool(promotion_policy.get("skip_if_already_nat", True))
+    allow_direct_nat_apply_if_missing = bool(promotion_policy.get("allow_direct_nat_apply_if_missing", True))
 
     raw_log_files = [Path(path) for path in args.log_file]
     if not raw_log_files:
@@ -572,9 +793,12 @@ def main() -> int:
     if not raw_log_files:
         parser.error("--log-file is required unless --environment defines nat_t_watcher.log_source.path")
     log_files = [path.resolve() for path in raw_log_files]
+    request_roots = [Path(path) for path in args.customer_request_root]
+    if not request_roots:
+        request_roots = _environment_request_roots(repo_root, args.environment)
     request_paths = _discover_request_paths(
         [Path(path) for path in args.customer_request],
-        [Path(path) for path in args.customer_request_root],
+        request_roots,
     )
     if not request_paths:
         request_paths = _discover_request_paths(
@@ -584,7 +808,10 @@ def main() -> int:
                 muxer_dir / "config" / "customer-requests" / "migrated",
             ],
         )
-    watches, request_errors = _load_customer_watches(request_paths)
+    watches, request_errors = _load_customer_watches(
+        request_paths,
+        blocked_customers=_environment_blocked_customers(repo_root, args.environment),
+    )
     state_file = Path(args.state_file).resolve()
     out_dir = Path(args.out_dir).resolve()
     package_root = Path(args.package_root).resolve()
@@ -605,6 +832,9 @@ def main() -> int:
             reprocess=bool(args.reprocess),
             deployment_environment=args.environment,
             approve=bool(args.approve),
+            promotion_mode=promotion_mode,
+            skip_if_already_nat=skip_if_already_nat,
+            allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
         )
         _write_json(state_file, state)
         summary = _build_summary(
@@ -617,6 +847,7 @@ def main() -> int:
             loop_result=loop_result,
             deployment_environment=args.environment,
             approve=bool(args.approve),
+            promotion_mode=promotion_mode,
         )
         _write_json(out_dir / "watch-summary.json", summary)
         if args.json:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -130,27 +131,112 @@ def _resolve_repo_path(path_like: str) -> Path:
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
 
-def _assert_headend_edge_return_route(
+def _assert_headend_transport_and_identity(
     package_dir: Path,
     *,
     customer_name: str,
     peer_public_ip: str,
-    muxer_public_private_ip: str,
-    headend_public_iface: str,
+    headend_public_ip: str,
 ) -> str:
     peer_public_cidr = peer_public_ip if "/" in peer_public_ip else f"{peer_public_ip}/32"
-    expected_route = (
-        f"ip route replace {peer_public_cidr} via {muxer_public_private_ip} "
-        f"dev {headend_public_iface} onlink"
-    )
+    bundle_dir = package_dir / "bundle"
+    customer_module_path = bundle_dir / "customer" / "customer-module.json"
+    if not customer_module_path.exists():
+        raise SystemExit(f"{customer_name} customer module is missing: {customer_module_path}")
+    customer_module = json.loads(customer_module_path.read_text(encoding="utf-8"))
+    transport = customer_module.get("transport") or {}
+    overlay = transport.get("overlay") or {}
+    interface = str(transport.get("interface") or "").strip()
+    mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
+    router_overlay_ip = str(overlay.get("router_ip") or "").strip()
+    mux_overlay_host = str(ipaddress.ip_interface(mux_overlay_ip).ip) if mux_overlay_ip else ""
+    tunnel_key = str(transport.get("tunnel_key") or "").strip()
+    tunnel_ttl = str(transport.get("tunnel_ttl") or "").strip()
+    expected_route = f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {interface}"
     route_path = package_dir / "bundle" / "headend" / "routing" / "ip-route.commands.txt"
     if not route_path.exists():
         raise SystemExit(f"{customer_name} head-end route artifact is missing: {route_path}")
     route_text = route_path.read_text(encoding="utf-8")
     if expected_route not in route_text:
         raise SystemExit(
-            f"{customer_name} head-end route artifact is missing muxer edge return route: {expected_route}"
+            f"{customer_name} head-end route artifact is missing GRE muxer edge return route: {expected_route}"
         )
+
+    transport_intent_path = bundle_dir / "headend" / "transport" / "transport-intent.json"
+    transport_apply_path = bundle_dir / "headend" / "transport" / "apply-transport.sh"
+    transport_remove_path = bundle_dir / "headend" / "transport" / "remove-transport.sh"
+    public_identity_intent_path = bundle_dir / "headend" / "public-identity" / "public-identity-intent.json"
+    public_identity_apply_path = bundle_dir / "headend" / "public-identity" / "apply-public-identity.sh"
+    public_identity_remove_path = bundle_dir / "headend" / "public-identity" / "remove-public-identity.sh"
+    for path in (
+        transport_intent_path,
+        transport_apply_path,
+        transport_remove_path,
+        public_identity_intent_path,
+        public_identity_apply_path,
+        public_identity_remove_path,
+    ):
+        if not path.exists():
+            raise SystemExit(f"{customer_name} head-end transport/public identity artifact is missing: {path}")
+
+    transport_intent = json.loads(transport_intent_path.read_text(encoding="utf-8"))
+    if not transport_intent.get("enabled"):
+        raise SystemExit(f"{customer_name} head-end transport intent is not enabled")
+    if transport_intent.get("type") != "gre":
+        raise SystemExit(f"{customer_name} head-end transport intent is not GRE")
+    expected_transport_values = {
+        "interface": interface,
+        "tunnel_key": tunnel_key,
+        "tunnel_ttl": tunnel_ttl,
+        "router_overlay_ip": router_overlay_ip,
+        "mux_overlay_ip": mux_overlay_ip,
+        "mux_overlay_host": mux_overlay_host,
+        "peer_public_cidr": peer_public_cidr,
+    }
+    for key, expected_value in expected_transport_values.items():
+        if str(transport_intent.get(key) or "") != expected_value:
+            raise SystemExit(
+                f"{customer_name} head-end transport intent {key} mismatch: expected {expected_value}"
+            )
+
+    transport_script_text = "\n".join(
+        [
+            transport_apply_path.read_text(encoding="utf-8"),
+            transport_remove_path.read_text(encoding="utf-8"),
+        ]
+    )
+    for required_fragment in (
+        'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+        'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
+        'ip link set "$IFNAME" up',
+        'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',
+        'ip link del "$IFNAME" 2>/dev/null || true',
+    ):
+        if required_fragment not in transport_script_text:
+            raise SystemExit(f"{customer_name} head-end transport scripts missing: {required_fragment}")
+
+    public_identity_intent = json.loads(public_identity_intent_path.read_text(encoding="utf-8"))
+    expected_public_cidr = f"{headend_public_ip}/32"
+    if public_identity_intent.get("public_ip") != headend_public_ip:
+        raise SystemExit(f"{customer_name} public identity IP mismatch")
+    if public_identity_intent.get("cidr") != expected_public_cidr:
+        raise SystemExit(f"{customer_name} public identity CIDR mismatch")
+    if public_identity_intent.get("device") != "lo":
+        raise SystemExit(f"{customer_name} public identity must bind on lo")
+    public_identity_script_text = "\n".join(
+        [
+            public_identity_apply_path.read_text(encoding="utf-8"),
+            public_identity_remove_path.read_text(encoding="utf-8"),
+        ]
+    )
+    if 'ip addr replace "$PUBLIC_CIDR" dev "$DEVICE"' not in public_identity_script_text:
+        raise SystemExit(f"{customer_name} public identity apply script does not add the loopback /32")
+    if "Shared head-end public identity is retained on customer removal." not in public_identity_script_text:
+        raise SystemExit(f"{customer_name} public identity remove script must retain the shared /32")
+    banned = "iptables"
+    generated_payload = "\n".join([route_text, transport_script_text, public_identity_script_text]).lower()
+    if banned in generated_payload or "iptables-restore" in generated_payload:
+        raise SystemExit(f"{customer_name} generated head-end transport artifacts contain iptables tokens")
     return expected_route
 
 
@@ -272,6 +358,7 @@ def main() -> int:
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_access_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_backend_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py"),
@@ -698,6 +785,13 @@ def main() -> int:
         raise SystemExit("Customer 2 dry-run did not select non-NAT head end")
     if ((customer2_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 2 dry-run gate did not report dry_run_ready")
+    customer2_package_dir = _resolve_repo_path(str((customer2_deploy.get("package") or {}).get("package_dir") or ""))
+    customer2_edge_return_route = _assert_headend_transport_and_identity(
+        customer2_package_dir,
+        customer_name="legacy-cust0002",
+        peer_public_ip="166.213.153.39",
+        headend_public_ip="23.20.31.151",
+    )
 
     customer4_deploy = _run_json(
         [
@@ -736,12 +830,11 @@ def main() -> int:
     if ((customer4_deploy.get("dry_run_gate") or {}).get("status")) != "dry_run_ready":
         raise SystemExit("Customer 4 NAT-T dry-run gate did not report dry_run_ready")
     customer4_package_dir = _resolve_repo_path(str((customer4_deploy.get("package") or {}).get("package_dir") or ""))
-    customer4_edge_return_route = _assert_headend_edge_return_route(
+    customer4_edge_return_route = _assert_headend_transport_and_identity(
         customer4_package_dir,
         customer_name="vpn-customer-stage1-15-cust-0004",
         peer_public_ip="3.237.201.84",
-        muxer_public_private_ip="172.31.33.150",
-        headend_public_iface="ens34",
+        headend_public_ip="23.20.31.151",
     )
     customer4_swanctl = (
         customer4_package_dir / "bundle" / "headend" / "ipsec" / "swanctl-connection.conf"
@@ -864,6 +957,7 @@ def main() -> int:
             "customer2_status": customer2_deploy["status"],
             "customer2_headend_family": customer2_deploy["selected_targets"]["headend_family"],
             "customer2_gate": customer2_deploy["dry_run_gate"]["status"],
+            "customer2_edge_return_route": customer2_edge_return_route,
             "customer4_status": customer4_deploy["status"],
             "customer4_headend_family": customer4_deploy["selected_targets"]["headend_family"],
             "customer4_gate": customer4_deploy["dry_run_gate"]["status"],
@@ -1064,6 +1158,118 @@ def main() -> int:
             "listener_emit_report": listener_emit_report,
             "second_pass_detected_count": second_pass["detected_count"],
             "watch_summary": watcher_report["out_dir"] + "/watch-summary.json",
+        },
+    )
+
+    # Step 3h: verify the control-plane runner consumes the environment
+    # contract, discovers customer request roots from that contract, and calls
+    # the watcher without operator-selected customer files.
+    runner_root = BUILD_ROOT / "nr"
+    if runner_root.exists():
+        shutil.rmtree(runner_root)
+    runner_root.mkdir(parents=True, exist_ok=True)
+    runner_env_path = runner_root / "e.yaml"
+    runner_env_doc = _build_staged_live_environment(
+        runner_env_path,
+        name="repo-verification-phase8-watcher-runner",
+        root=runner_root / "roots",
+    )
+    runner_env_doc["nat_t_watcher"]["state_root"] = str(runner_root / "s")
+    runner_env_doc["nat_t_watcher"]["output_root"] = str(runner_root / "o")
+    runner_env_doc["nat_t_watcher"]["package_root"] = str(runner_root / "p")
+    runner_env_doc["nat_t_watcher"]["log_sync"]["local_copy"] = str(runner_root / "synced.jsonl")
+    _write_yaml(runner_env_path, runner_env_doc)
+    runner_log = Path(str(runner_env_doc["nat_t_watcher"]["log_source"]["path"]))
+    runner_tcpdump_log = runner_root / "tcpdump.txt"
+    _write_text(
+        runner_tcpdump_log,
+        "\n".join(
+            [
+                "2026-04-15 22:45:00.000000 IP 3.237.201.84.500 > 172.31.33.150.500: UDP, length 292",
+                "2026-04-15 22:45:02.000000 IP 3.237.201.84.4500 > 172.31.33.150.4500: UDP, length 108",
+                "2026-04-15 22:45:03.000000 IP 172.31.33.150.4500 > 3.237.201.84.4500: UDP, length 108",
+            ]
+        ),
+    )
+    runner_listener_emit_report = _run_json(
+        [
+            "python",
+            str(RUNTIME_ROOT / "src" / "nat_t_event_listener.py"),
+            "--input-file",
+            str(runner_tcpdump_log),
+            "--event-log",
+            str(runner_log),
+            "--interface",
+            "ens5",
+            "--local-address",
+            "172.31.33.150",
+            "--json",
+        ]
+    )
+    if runner_listener_emit_report.get("emitted") != 2 or runner_listener_emit_report.get("ignored") != 1:
+        raise SystemExit("NAT-T runner listener fixture did not emit the expected JSONL events")
+    runner_report = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
+            "--environment",
+            str(runner_env_path),
+            "--log-sync-mode",
+            "local_file",
+            "--approve",
+            "--json",
+        ]
+    )
+    runner_watcher = runner_report.get("watcher") or {}
+    runner_watcher_json = runner_watcher.get("json") or {}
+    runner_command = runner_watcher.get("command") or []
+    if runner_report.get("status") != "ok":
+        raise SystemExit("NAT-T watcher runner did not complete successfully")
+    if "--customer-request" in runner_command:
+        raise SystemExit("NAT-T watcher runner must not require operator-selected customer files")
+    if runner_watcher_json.get("detected_count") != 1:
+        raise SystemExit("NAT-T watcher runner did not detect exactly one promotion event")
+    runner_detected = runner_watcher_json["detected"][0]
+    runner_provisioning = runner_detected.get("provisioning") or {}
+    runner_provisioning_json = runner_provisioning.get("json") or {}
+    if runner_provisioning_json.get("status") != "applied":
+        raise SystemExit("NAT-T watcher runner did not drive the staged orchestrator apply path")
+    runner_second_pass = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
+            "--environment",
+            str(runner_env_path),
+            "--log-sync-mode",
+            "local_file",
+            "--approve",
+            "--json",
+        ]
+    )
+    runner_second_watcher_json = ((runner_second_pass.get("watcher") or {}).get("json") or {})
+    if runner_second_watcher_json.get("detected_count") != 0:
+        raise SystemExit("NAT-T watcher runner was not idempotent on second pass")
+    watcher_service_path = REPO_ROOT / "scripts" / "customers" / "systemd" / "rpdb-nat-t-watcher.service"
+    watcher_service_text = watcher_service_path.read_text(encoding="utf-8")
+    for token in (
+        "scripts/customers/run_nat_t_watcher.py",
+        "--environment ${RPDB_ENVIRONMENT}",
+        "--follow",
+        "--approve",
+        "Restart=always",
+    ):
+        if token not in watcher_service_text:
+            raise SystemExit(f"NAT-T watcher service contract missing token: {token}")
+    record_step(
+        "automatic_nat_t_control_plane_runner",
+        {
+            "detected_customer": runner_detected["customer_name"],
+            "environment_file": str(runner_env_path),
+            "environment_request_roots_used": True,
+            "operator_selected_customer_file": False,
+            "deploy_status": runner_provisioning_json["status"],
+            "second_pass_detected_count": runner_second_watcher_json["detected_count"],
+            "service_template": str(watcher_service_path),
         },
     )
 

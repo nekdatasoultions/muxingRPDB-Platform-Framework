@@ -949,6 +949,159 @@ def _render_clear_route_command(subnet: str, outside_nat: Dict[str, Any]) -> str
     return f"ip route replace {subnet} dev {route_dev}"
 
 
+def _interface_host(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return str(ipaddress.ip_interface(text).ip)
+
+
+def _render_headend_transport_artifacts(
+    *,
+    customer_name: str,
+    peer_public_cidr: str,
+    transport: Dict[str, Any],
+    backend: Dict[str, Any],
+) -> Dict[str, Any]:
+    overlay = transport.get("overlay") or {}
+    interface = str(transport.get("interface") or "").strip()
+    tunnel_type = str(transport.get("tunnel_type") or "gre").strip().lower()
+    tunnel_key = transport.get("tunnel_key")
+    tunnel_ttl = transport.get("tunnel_ttl") or 64
+    router_overlay_ip = str(overlay.get("router_ip") or "").strip()
+    mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
+    mux_overlay_host = _interface_host(mux_overlay_ip) if mux_overlay_ip else ""
+    enabled = bool(
+        interface
+        and tunnel_type == "gre"
+        and tunnel_key not in (None, "")
+        and router_overlay_ip
+        and mux_overlay_host
+        and peer_public_cidr
+    )
+
+    intent = {
+        "customer_name": customer_name,
+        "enabled": enabled,
+        "type": tunnel_type,
+        "interface": interface or None,
+        "tunnel_key": tunnel_key,
+        "tunnel_ttl": tunnel_ttl,
+        "local_underlay": _placeholder("HEADEND_PRIMARY_IP"),
+        "remote_underlay": _placeholder("MUXER_TRANSPORT_IP"),
+        "backend_underlay_ip": backend.get("underlay_ip"),
+        "router_overlay_ip": router_overlay_ip or None,
+        "mux_overlay_ip": mux_overlay_ip or None,
+        "mux_overlay_host": mux_overlay_host or None,
+        "peer_public_cidr": peer_public_cidr or None,
+        "purpose": "customer-scoped GRE return path from the head-end back to the muxer edge",
+    }
+
+    apply_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'INTENT="$SCRIPT_DIR/transport-intent.json"',
+            "json_get() {",
+            "  python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); value=data.get(sys.argv[2]); print(str(value).lower() if isinstance(value, bool) else (\"\" if value is None else value))' \"$INTENT\" \"$1\"",
+            "}",
+            'ENABLED="$(json_get enabled)"',
+            'if [ "$ENABLED" != "true" ]; then',
+            "  exit 0",
+            "fi",
+            'IFNAME="$(json_get interface)"',
+            'LOCAL_UL="$(json_get local_underlay)"',
+            'REMOTE_UL="$(json_get remote_underlay)"',
+            'ROUTER_IP="$(json_get router_overlay_ip)"',
+            'MUX_OVERLAY_HOST="$(json_get mux_overlay_host)"',
+            'PEER_CIDR="$(json_get peer_public_cidr)"',
+            'KEY="$(json_get tunnel_key)"',
+            'TTL="$(json_get tunnel_ttl)"',
+            'if ip link show "$IFNAME" >/dev/null 2>&1; then',
+            '  ip link del "$IFNAME"',
+            "fi",
+            'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+            'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
+            'ip link set "$IFNAME" up',
+            'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',
+            "",
+        ]
+    )
+
+    remove_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'INTENT="$SCRIPT_DIR/transport-intent.json"',
+            "json_get() {",
+            "  python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); value=data.get(sys.argv[2]); print(str(value).lower() if isinstance(value, bool) else (\"\" if value is None else value))' \"$INTENT\" \"$1\"",
+            "}",
+            'IFNAME="$(json_get interface)"',
+            'PEER_CIDR="$(json_get peer_public_cidr)"',
+            'if [ -n "$PEER_CIDR" ] && [ -n "$IFNAME" ]; then',
+            '  ip route del "$PEER_CIDR" dev "$IFNAME" 2>/dev/null || true',
+            "fi",
+            'if [ -n "$IFNAME" ]; then',
+            '  ip link del "$IFNAME" 2>/dev/null || true',
+            "fi",
+            "",
+        ]
+    )
+
+    return {
+        "transport/transport-intent.json": intent,
+        "transport/apply-transport.sh": apply_script,
+        "transport/remove-transport.sh": remove_script,
+    }
+
+
+def _render_headend_public_identity_artifacts(customer_name: str) -> Dict[str, Any]:
+    intent = {
+        "customer_name": customer_name,
+        "enabled": True,
+        "public_ip": _placeholder("HEADEND_PUBLIC_IP"),
+        "cidr": f"{_placeholder('HEADEND_PUBLIC_IP')}/32",
+        "device": "lo",
+        "local_id": _placeholder("HEADEND_ID"),
+        "remove_policy": "retain_shared_identity",
+        "purpose": "make the muxer EIP identity locally present for IPsec validation and symmetric initiation",
+    }
+
+    apply_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'INTENT="$SCRIPT_DIR/public-identity-intent.json"',
+            'PUBLIC_CIDR="$(python3 -c \'import json,sys; print(json.load(open(sys.argv[1])).get("cidr") or "")\' "$INTENT")"',
+            'DEVICE="$(python3 -c \'import json,sys; print(json.load(open(sys.argv[1])).get("device") or "lo")\' "$INTENT")"',
+            'if [ -n "$PUBLIC_CIDR" ]; then',
+            '  ip addr replace "$PUBLIC_CIDR" dev "$DEVICE"',
+            "fi",
+            "",
+        ]
+    )
+
+    remove_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            "# Shared head-end public identity is retained on customer removal.",
+            "# Platform teardown, not per-customer rollback, should remove it.",
+            "true",
+            "",
+        ]
+    )
+
+    return {
+        "public-identity/public-identity-intent.json": intent,
+        "public-identity/apply-public-identity.sh": apply_script,
+        "public-identity/remove-public-identity.sh": remove_script,
+    }
+
+
 def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     customer = module.get("customer") or {}
     peer = module.get("peer") or {}
@@ -1086,8 +1239,19 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     customer_name = str(customer.get("name") or "")
     peer_public_ip = str(peer.get("public_ip") or "").strip()
     peer_public_cidr = f"{peer_public_ip}/32" if peer_public_ip and "/" not in peer_public_ip else peer_public_ip
+    overlay = transport.get("overlay") or {}
+    mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
+    mux_overlay_host = _interface_host(mux_overlay_ip) if mux_overlay_ip else ""
+    transport_interface = str(transport.get("interface") or "").strip()
     post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
     outside_nat_nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors)
+    transport_artifacts = _render_headend_transport_artifacts(
+        customer_name=customer_name,
+        peer_public_cidr=peer_public_cidr,
+        transport=transport,
+        backend=backend,
+    )
+    public_identity_artifacts = _render_headend_public_identity_artifacts(customer_name)
     ipsec_initiation = _render_ipsec_initiation(ipsec)
     effective_remote_ts = _effective_remote_ts(selectors)
     clear_route_subnets = (
@@ -1102,12 +1266,11 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             for subnet in clear_route_subnets
         ],
     ]
-    if peer_public_cidr:
+    if peer_public_cidr and mux_overlay_host and transport_interface:
         route_commands.extend(
             [
-                "# Return IPsec transport traffic through the muxer edge",
-                f"ip route replace {peer_public_cidr} via ${'{MUXER_PUBLIC_PRIVATE_IP}'} "
-                f"dev ${'{HEADEND_PUBLIC_IFACE}'} onlink",
+                "# Return IPsec transport traffic through the customer-scoped GRE path to the muxer edge",
+                f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {transport_interface}",
             ]
         )
 
@@ -1157,11 +1320,15 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "vti_shared": ipsec.get("vti_shared"),
             },
             "edge_return_path": {
-                "enabled": bool(peer_public_cidr),
+                "enabled": bool(peer_public_cidr and mux_overlay_host and transport_interface),
                 "peer_public_cidr": peer_public_cidr or None,
-                "next_hop": _placeholder("MUXER_PUBLIC_PRIVATE_IP") if peer_public_cidr else None,
-                "interface": _placeholder("HEADEND_PUBLIC_IFACE") if peer_public_cidr else None,
-                "purpose": "force head-end IPsec transport replies back through the muxer edge",
+                "next_hop": mux_overlay_host if peer_public_cidr else None,
+                "interface": transport_interface if peer_public_cidr else None,
+                "transport": {
+                    "type": transport.get("tunnel_type"),
+                    "requires_headend_tunnel": True,
+                },
+                "purpose": "force head-end IPsec transport replies back through the customer-scoped GRE tunnel to the muxer edge",
             },
             "outside_nat": {
                 "enabled": bool(outside_nat.get("enabled")),
@@ -1173,6 +1340,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             },
         },
         "routing/ip-route.commands.txt": "\n".join(route_commands) + "\n",
+        **transport_artifacts,
+        **public_identity_artifacts,
         "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(customer_name, post_ipsec_nat),
         "post-ipsec-nat/nftables.apply.nft": post_ipsec_nftables["apply"],
         "post-ipsec-nat/nftables.remove.nft": post_ipsec_nftables["remove"],

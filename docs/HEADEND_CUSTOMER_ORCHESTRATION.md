@@ -18,6 +18,14 @@ The bundle must contain these installable head-end files:
 
 - `headend/ipsec/ipsec-intent.json`
 - `headend/ipsec/swanctl-connection.conf`
+- `headend/ipsec/initiation-intent.json`
+- `headend/ipsec/initiate-tunnel.sh`
+- `headend/transport/transport-intent.json`
+- `headend/transport/apply-transport.sh`
+- `headend/transport/remove-transport.sh`
+- `headend/public-identity/public-identity-intent.json`
+- `headend/public-identity/apply-public-identity.sh`
+- `headend/public-identity/remove-public-identity.sh`
 - `headend/routing/routing-intent.json`
 - `headend/routing/ip-route.commands.txt`
 - `headend/post-ipsec-nat/post-ipsec-nat-intent.json`
@@ -25,6 +33,11 @@ The bundle must contain these installable head-end files:
 - `headend/post-ipsec-nat/nftables.remove.nft`
 - `headend/post-ipsec-nat/nftables-state.json`
 - `headend/post-ipsec-nat/activation-manifest.json`
+- `headend/outside-nat/outside-nat-intent.json`
+- `headend/outside-nat/nftables.apply.nft`
+- `headend/outside-nat/nftables.remove.nft`
+- `headend/outside-nat/nftables-state.json`
+- `headend/outside-nat/activation-manifest.json`
 
 Unresolved placeholders are not allowed in the text or JSON payloads at apply
 time.
@@ -47,8 +60,19 @@ When one customer is installed into a head-end root, the orchestration writes:
           <customer-name>/
             artifacts/
               ipsec/
+              transport/
+              public-identity/
               routing/
               post-ipsec-nat/
+              outside-nat/
+            transport/
+              transport-intent.json
+              apply-transport.sh
+              remove-transport.sh
+            public-identity/
+              public-identity-intent.json
+              apply-public-identity.sh
+              remove-public-identity.sh
             routing/
               ip-route.commands.txt
               apply-routes.sh
@@ -60,6 +84,13 @@ When one customer is installed into a head-end root, the orchestration writes:
               activation-manifest.json
               apply-post-ipsec-nat.sh
               remove-post-ipsec-nat.sh
+            outside-nat/
+              nftables.apply.nft
+              nftables.remove.nft
+              nftables-state.json
+              activation-manifest.json
+              apply-outside-nat.sh
+              remove-outside-nat.sh
             apply-headend-customer.sh
             remove-headend-customer.sh
             install-state.json
@@ -94,13 +125,16 @@ python scripts\deployment\remove_headend_customer.py `
 ## Current Boundary
 
 - `swanctl` customer material is installable and customer-scoped.
+- customer GRE transport is installable and customer-scoped.
+- the shared head-end public identity loopback is applied before IPsec load and
+  retained on per-customer removal.
 - route programming is installable and customer-scoped.
 - post-IPsec NAT is installable and customer-scoped through generated
   `nftables` batch artifacts.
 - one-to-one translated subnet intent renders nftables DNAT/SNAT maps.
 - explicit host mappings render nftables DNAT/SNAT maps.
-- validation checks that the rendered `swanctl` and nftables artifacts match
-  the richer intent payloads before install.
+- validation checks that the rendered `swanctl`, GRE transport, public identity,
+  and nftables artifacts match the richer intent payloads before install.
 
 That keeps the deployment path honest while integrating the head-end
 install/apply/remove flow around the artifacts we can verify repo-only today.

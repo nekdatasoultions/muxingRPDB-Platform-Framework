@@ -96,6 +96,19 @@ nat_t_watcher:
   state_root: build/nat-t-watcher/state
   output_root: build/nat-t-watcher/out
   package_root: build/nat-t-watcher/packages
+  automation:
+    enabled: true
+    requires_approval: true
+    run_provisioning: true
+    follow: true
+    poll_interval_seconds: 15
+  promotion:
+    mode: remove_reapply
+    skip_if_already_nat: true
+    allow_direct_nat_apply_if_missing: true
+  log_sync:
+    mode: ssh_muxer
+    local_copy: build/nat-t-watcher/synced/muxer-events.jsonl
 
 customer_requests:
   allowed_roots:

@@ -27,6 +27,8 @@ tree.
 
 - [RPDB target architecture](RPDB_TARGET_ARCHITECTURE.md)
 - [RPDB core engineering guardrails](RPDB_CORE_ENGINEERING_GUARDRAILS.md)
+- [Automatic NAT-T promotion project plan](RPDB_AUTOMATIC_NAT_T_PROMOTION_PROJECT_PLAN.md)
+- [Dynamic-routing project plan](DYNAMIC_ROUTING_PROJECT_PLAN.md)
 - [Database bootstrap](DATABASE_BOOTSTRAP.md)
 - [Head-end customer orchestration](HEADEND_CUSTOMER_ORCHESTRATION.md)
 
