@@ -272,6 +272,7 @@ def main() -> int:
         str(MUXER_DIR / "runtime-package" / "scripts" / "render_nft_passthrough.py"),
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_access_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_backend_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py"),
@@ -1064,6 +1065,118 @@ def main() -> int:
             "listener_emit_report": listener_emit_report,
             "second_pass_detected_count": second_pass["detected_count"],
             "watch_summary": watcher_report["out_dir"] + "/watch-summary.json",
+        },
+    )
+
+    # Step 3h: verify the control-plane runner consumes the environment
+    # contract, discovers customer request roots from that contract, and calls
+    # the watcher without operator-selected customer files.
+    runner_root = BUILD_ROOT / "nr"
+    if runner_root.exists():
+        shutil.rmtree(runner_root)
+    runner_root.mkdir(parents=True, exist_ok=True)
+    runner_env_path = runner_root / "e.yaml"
+    runner_env_doc = _build_staged_live_environment(
+        runner_env_path,
+        name="repo-verification-phase8-watcher-runner",
+        root=runner_root / "roots",
+    )
+    runner_env_doc["nat_t_watcher"]["state_root"] = str(runner_root / "s")
+    runner_env_doc["nat_t_watcher"]["output_root"] = str(runner_root / "o")
+    runner_env_doc["nat_t_watcher"]["package_root"] = str(runner_root / "p")
+    runner_env_doc["nat_t_watcher"]["log_sync"]["local_copy"] = str(runner_root / "synced.jsonl")
+    _write_yaml(runner_env_path, runner_env_doc)
+    runner_log = Path(str(runner_env_doc["nat_t_watcher"]["log_source"]["path"]))
+    runner_tcpdump_log = runner_root / "tcpdump.txt"
+    _write_text(
+        runner_tcpdump_log,
+        "\n".join(
+            [
+                "2026-04-15 22:45:00.000000 IP 3.237.201.84.500 > 172.31.33.150.500: UDP, length 292",
+                "2026-04-15 22:45:02.000000 IP 3.237.201.84.4500 > 172.31.33.150.4500: UDP, length 108",
+                "2026-04-15 22:45:03.000000 IP 172.31.33.150.4500 > 3.237.201.84.4500: UDP, length 108",
+            ]
+        ),
+    )
+    runner_listener_emit_report = _run_json(
+        [
+            "python",
+            str(RUNTIME_ROOT / "src" / "nat_t_event_listener.py"),
+            "--input-file",
+            str(runner_tcpdump_log),
+            "--event-log",
+            str(runner_log),
+            "--interface",
+            "ens5",
+            "--local-address",
+            "172.31.33.150",
+            "--json",
+        ]
+    )
+    if runner_listener_emit_report.get("emitted") != 2 or runner_listener_emit_report.get("ignored") != 1:
+        raise SystemExit("NAT-T runner listener fixture did not emit the expected JSONL events")
+    runner_report = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
+            "--environment",
+            str(runner_env_path),
+            "--log-sync-mode",
+            "local_file",
+            "--approve",
+            "--json",
+        ]
+    )
+    runner_watcher = runner_report.get("watcher") or {}
+    runner_watcher_json = runner_watcher.get("json") or {}
+    runner_command = runner_watcher.get("command") or []
+    if runner_report.get("status") != "ok":
+        raise SystemExit("NAT-T watcher runner did not complete successfully")
+    if "--customer-request" in runner_command:
+        raise SystemExit("NAT-T watcher runner must not require operator-selected customer files")
+    if runner_watcher_json.get("detected_count") != 1:
+        raise SystemExit("NAT-T watcher runner did not detect exactly one promotion event")
+    runner_detected = runner_watcher_json["detected"][0]
+    runner_provisioning = runner_detected.get("provisioning") or {}
+    runner_provisioning_json = runner_provisioning.get("json") or {}
+    if runner_provisioning_json.get("status") != "applied":
+        raise SystemExit("NAT-T watcher runner did not drive the staged orchestrator apply path")
+    runner_second_pass = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
+            "--environment",
+            str(runner_env_path),
+            "--log-sync-mode",
+            "local_file",
+            "--approve",
+            "--json",
+        ]
+    )
+    runner_second_watcher_json = ((runner_second_pass.get("watcher") or {}).get("json") or {})
+    if runner_second_watcher_json.get("detected_count") != 0:
+        raise SystemExit("NAT-T watcher runner was not idempotent on second pass")
+    watcher_service_path = REPO_ROOT / "scripts" / "customers" / "systemd" / "rpdb-nat-t-watcher.service"
+    watcher_service_text = watcher_service_path.read_text(encoding="utf-8")
+    for token in (
+        "scripts/customers/run_nat_t_watcher.py",
+        "--environment ${RPDB_ENVIRONMENT}",
+        "--follow",
+        "--approve",
+        "Restart=always",
+    ):
+        if token not in watcher_service_text:
+            raise SystemExit(f"NAT-T watcher service contract missing token: {token}")
+    record_step(
+        "automatic_nat_t_control_plane_runner",
+        {
+            "detected_customer": runner_detected["customer_name"],
+            "environment_file": str(runner_env_path),
+            "environment_request_roots_used": True,
+            "operator_selected_customer_file": False,
+            "deploy_status": runner_provisioning_json["status"],
+            "second_pass_detected_count": runner_second_watcher_json["detected_count"],
+            "service_template": str(watcher_service_path),
         },
     )
 

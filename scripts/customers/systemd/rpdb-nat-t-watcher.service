@@ -1,0 +1,15 @@
+[Unit]
+Description=RPDB NAT-T control-plane watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=RPDB_ENVIRONMENT=rpdb-empty-live
+WorkingDirectory=/opt/rpdb
+ExecStart=/usr/bin/python3 scripts/customers/run_nat_t_watcher.py --environment ${RPDB_ENVIRONMENT} --follow --approve --json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

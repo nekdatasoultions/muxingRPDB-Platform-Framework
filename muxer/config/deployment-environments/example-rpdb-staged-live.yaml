@@ -92,6 +92,19 @@ nat_t_watcher:
   state_root: build/staged-live/nat-t-watcher/state
   output_root: build/staged-live/nat-t-watcher/out
   package_root: build/staged-live/nat-t-watcher/packages
+  automation:
+    enabled: true
+    requires_approval: true
+    run_provisioning: true
+    follow: false
+    poll_interval_seconds: 5
+  promotion:
+    mode: deploy_only
+    skip_if_already_nat: true
+    allow_direct_nat_apply_if_missing: true
+  log_sync:
+    mode: local_file
+    local_copy: build/staged-live/nat-t-watcher/synced/muxer-events.jsonl
 
 customer_requests:
   allowed_roots:

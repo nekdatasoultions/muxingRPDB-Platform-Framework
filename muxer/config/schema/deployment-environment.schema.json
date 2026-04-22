@@ -249,6 +249,62 @@
         },
         "package_root": {
           "$ref": "#/$defs/non_empty_string"
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requires_approval": {
+              "type": "boolean"
+            },
+            "run_provisioning": {
+              "type": "boolean"
+            },
+            "follow": {
+              "type": "boolean"
+            },
+            "poll_interval_seconds": {
+              "type": "number",
+              "minimum": 1
+            }
+          }
+        },
+        "promotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "deploy_only",
+                "remove_reapply"
+              ]
+            },
+            "skip_if_already_nat": {
+              "type": "boolean"
+            },
+            "allow_direct_nat_apply_if_missing": {
+              "type": "boolean"
+            }
+          }
+        },
+        "log_sync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "auto",
+                "local_file",
+                "ssh_muxer"
+              ]
+            },
+            "local_copy": {
+              "$ref": "#/$defs/non_empty_string"
+            }
+          }
         }
       }
     },
