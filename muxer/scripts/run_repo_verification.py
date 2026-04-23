@@ -2920,6 +2920,12 @@ print(
         raise SystemExit("head-end initiation helper must bound swanctl --initiate runtime")
     if 'timeout "$INITIATE_TIMEOUT_SECONDS"s swanctl --initiate --child "$CHILD"' not in customer_artifacts_text:
         raise SystemExit("head-end initiation helper must wrap swanctl --initiate with a process timeout")
+    if "def _effective_local_ts(" not in customer_artifacts_text:
+        raise SystemExit("head-end artifact rendering must derive effective local traffic selectors")
+    if "outside_nat.get(\"translated_subnets\")" not in customer_artifacts_text:
+        raise SystemExit("outside NAT translated subnets must participate in head-end local_ts rendering")
+    if "local_ts = {','.join(effective_local_ts)}" not in customer_artifacts_text:
+        raise SystemExit("swanctl local_ts must use effective local selectors")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
     if "include conf.d/rpdb-customers/*.conf" not in headend_customer_lib_text:

@@ -149,6 +149,18 @@ def _effective_remote_ts(selectors: Dict[str, Any]) -> List[str]:
     return [str(value) for value in (selectors.get("remote_subnets") or []) if str(value).strip()]
 
 
+def _effective_local_ts(selectors: Dict[str, Any], outside_nat: Dict[str, Any] | None = None) -> List[str]:
+    values: List[str] = []
+    for value in selectors.get("local_subnets") or []:
+        _append_unique(values, value)
+    if outside_nat and bool(outside_nat.get("enabled")):
+        # Outside NAT presents translated far-end space to the customer, so
+        # those translated prefixes must be negotiated as head-end local_ts.
+        for value in outside_nat.get("translated_subnets") or []:
+            _append_unique(values, value)
+    return values
+
+
 def _append_unique(values: List[str], value: Any) -> None:
     text = str(value or "").strip()
     if text and text not in values:
@@ -323,11 +335,13 @@ def _render_ipsec_intent(
     selectors: Dict[str, Any],
     protocols: Dict[str, Any],
     ipsec: Dict[str, Any],
+    outside_nat: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
     local_addrs = ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP")
     initiation = _render_ipsec_initiation(ipsec)
+    effective_local_ts = _effective_local_ts(selectors, outside_nat)
     effective_remote_ts = _effective_remote_ts(selectors)
     return {
         "customer_name": customer.get("name"),
@@ -368,6 +382,10 @@ def _render_ipsec_intent(
         "encapsulation_model": "nat-t" if protocols.get("udp4500") else "strict-non-nat",
         "selectors": {
             "local_subnets": selectors.get("local_subnets") or [],
+            "effective_local_ts": effective_local_ts,
+            "effective_local_ts_source": "local_subnets_plus_outside_nat_translated_subnets"
+            if outside_nat and bool(outside_nat.get("enabled"))
+            else "local_subnets",
             "remote_subnets": selectors.get("remote_subnets") or [],
             "remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
             "effective_remote_ts": effective_remote_ts,
@@ -392,6 +410,7 @@ def _render_swanctl_connection(
     peer: Dict[str, Any],
     selectors: Dict[str, Any],
     ipsec: Dict[str, Any],
+    outside_nat: Dict[str, Any] | None = None,
 ) -> str:
     customer_name = str(customer.get("name") or "")
     secret_name = f"ike-{customer_name}-psk"
@@ -401,6 +420,7 @@ def _render_swanctl_connection(
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
     initiation = _render_ipsec_initiation(ipsec)
+    effective_local_ts = _effective_local_ts(selectors, outside_nat)
     effective_remote_ts = _effective_remote_ts(selectors)
     lines: List[str] = [
         "connections {",
@@ -428,7 +448,7 @@ def _render_swanctl_connection(
             "    }",
             "    children {",
             f"      {customer_name}-child {{",
-            f"        local_ts = {','.join(selectors.get('local_subnets') or [])}",
+            f"        local_ts = {','.join(effective_local_ts)}",
             f"        remote_ts = {','.join(effective_remote_ts)}",
             "        mode = tunnel",
             f"        start_action = {initiation['swanctl_start_action']}",
@@ -1329,8 +1349,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
         )
 
     return {
-        "ipsec/ipsec-intent.json": _render_ipsec_intent(customer, peer, selectors, protocols, ipsec),
-        "ipsec/swanctl-connection.conf": _render_swanctl_connection(customer, peer, selectors, ipsec),
+        "ipsec/ipsec-intent.json": _render_ipsec_intent(customer, peer, selectors, protocols, ipsec, outside_nat),
+        "ipsec/swanctl-connection.conf": _render_swanctl_connection(customer, peer, selectors, ipsec, outside_nat),
         "ipsec/initiation-intent.json": {
             **ipsec_initiation,
             "customer_name": customer_name,
