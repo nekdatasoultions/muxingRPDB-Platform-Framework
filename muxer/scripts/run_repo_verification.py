@@ -2918,7 +2918,7 @@ print(
     )
     if "RPDB_HEADEND_INITIATE_TIMEOUT_SECONDS" not in customer_artifacts_text:
         raise SystemExit("head-end initiation helper must bound swanctl --initiate runtime")
-    if 'timeout "${INITIATE_TIMEOUT_SECONDS}s" swanctl --initiate --child "$CHILD"' not in customer_artifacts_text:
+    if 'timeout "$INITIATE_TIMEOUT_SECONDS"s swanctl --initiate --child "$CHILD"' not in customer_artifacts_text:
         raise SystemExit("head-end initiation helper must wrap swanctl --initiate with a process timeout")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
