@@ -130,7 +130,12 @@ def _render_initiation_script(customer_name: str, initiation: Dict[str, Any]) ->
             '  echo "swanctl not found; cannot initiate $CONNECTION" >&2',
             "  exit 1",
             "fi",
-            'swanctl --initiate --child "$CHILD"',
+            'INITIATE_TIMEOUT_SECONDS="${RPDB_HEADEND_INITIATE_TIMEOUT_SECONDS:-30}"',
+            'if command -v timeout >/dev/null 2>&1; then',
+            '  timeout "${INITIATE_TIMEOUT_SECONDS}s" swanctl --initiate --child "$CHILD"',
+            "else",
+            '  swanctl --initiate --child "$CHILD" --timeout "$INITIATE_TIMEOUT_SECONDS"',
+            "fi",
         ]
     ) + "\n"
 
