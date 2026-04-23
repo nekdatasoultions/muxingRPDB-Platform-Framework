@@ -2907,6 +2907,12 @@ print(
         raise SystemExit("head-end customer apply must allow HA promotion to activate staged payloads")
     if "head-end initiate did not complete; customer config remains loaded" not in headend_customer_lib_text:
         raise SystemExit("head-end customer apply must not fail deployment when the peer is not yet responding")
+    if "RPDB_HEADEND_RESET_IPSEC_ON_APPLY" not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must support customer-scoped IPsec reset on reapply/promotion")
+    if 'swanctl --terminate --ike "${CUST}"' not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must reset same-customer IKE SAs before reloading")
+    if 'swanctl --terminate --child "${CUST}-child"' not in headend_customer_lib_text:
+        raise SystemExit("head-end customer apply must reset same-customer Child SAs before reloading")
     if "strongswan is not active; removed staged config" not in headend_customer_lib_text:
         raise SystemExit("head-end customer remove must tolerate inactive standby strongSwan services")
     if "include conf.d/rpdb-customers/*.conf" not in headend_customer_lib_text:
