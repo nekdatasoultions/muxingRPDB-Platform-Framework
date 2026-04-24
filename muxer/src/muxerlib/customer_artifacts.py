@@ -1095,6 +1095,7 @@ def _render_headend_transport_artifacts(
     tunnel_type = str(transport.get("tunnel_type") or "gre").strip().lower()
     tunnel_key = transport.get("tunnel_key")
     tunnel_ttl = transport.get("tunnel_ttl") or 64
+    tunnel_mtu = transport.get("tunnel_mtu")
     router_overlay_ip = str(overlay.get("router_ip") or "").strip()
     mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
     mux_overlay_host = _interface_host(mux_overlay_ip) if mux_overlay_ip else ""
@@ -1114,6 +1115,7 @@ def _render_headend_transport_artifacts(
         "interface": interface or None,
         "tunnel_key": tunnel_key,
         "tunnel_ttl": tunnel_ttl,
+        "tunnel_mtu": int(tunnel_mtu) if tunnel_mtu not in (None, "") else None,
         "local_underlay": _placeholder("HEADEND_PRIMARY_IP"),
         "remote_underlay": _placeholder("MUXER_TRANSPORT_IP"),
         "backend_underlay_ip": backend.get("underlay_ip"),
@@ -1145,10 +1147,14 @@ def _render_headend_transport_artifacts(
             'PEER_CIDR="$(json_get peer_public_cidr)"',
             'KEY="$(json_get tunnel_key)"',
             'TTL="$(json_get tunnel_ttl)"',
+            'MTU="$(json_get tunnel_mtu)"',
             'if ip link show "$IFNAME" >/dev/null 2>&1; then',
             '  ip link del "$IFNAME"',
             "fi",
             'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+            'if [ -n "$MTU" ]; then',
+            '  ip link set "$IFNAME" mtu "$MTU"',
+            "fi",
             'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
             'ip link set "$IFNAME" up',
             'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',
@@ -1303,6 +1309,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
             "tunnel_type": transport.get("tunnel_type"),
             "tunnel_key": transport.get("tunnel_key"),
             "tunnel_ttl": transport.get("tunnel_ttl"),
+            "tunnel_mtu": transport.get("tunnel_mtu"),
             "overlay": transport.get("overlay") or {},
             "peer_public_ip": peer.get("public_ip"),
             "backend_cluster": backend.get("cluster"),
@@ -1317,6 +1324,11 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
                 f"local ${'{MUXER_TRANSPORT_IP}'} remote ${'{BACKEND_UNDERLAY_IP}'} "
                 f"ttl {transport.get('tunnel_ttl')} key {transport.get('tunnel_key')}",
                 f"ip addr replace {((transport.get('overlay') or {}).get('mux_ip') or '')} dev {transport.get('interface')}",
+                *(
+                    [f"ip link set {transport.get('interface')} mtu {transport.get('tunnel_mtu')}"]
+                    if transport.get("tunnel_mtu") not in (None, "")
+                    else []
+                ),
                 f"ip link set {transport.get('interface')} up",
             ]
         )
@@ -1446,6 +1458,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "fwmark": transport.get("mark"),
                 "route_table": transport.get("table"),
                 "interface": transport.get("interface"),
+                "tunnel_mtu": transport.get("tunnel_mtu"),
             },
             "vti_binding": {
                 "mark": ipsec.get("mark"),
@@ -1460,6 +1473,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "interface": transport_interface if peer_public_cidr else None,
                 "transport": {
                     "type": transport.get("tunnel_type"),
+                    "mtu": transport.get("tunnel_mtu"),
                     "requires_headend_tunnel": True,
                 },
                 "purpose": "force head-end IPsec transport replies back through the customer-scoped GRE tunnel to the muxer edge",

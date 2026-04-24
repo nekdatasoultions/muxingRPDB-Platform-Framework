@@ -72,6 +72,16 @@ def _promotion_doc(dynamic: Dict[str, Any]) -> Dict[str, Any]:
     return promotion
 
 
+def _request_transport_overrides(customer_doc: Dict[str, Any]) -> Dict[str, Any]:
+    transport = customer_doc.get("transport") or {}
+    if not isinstance(transport, dict):
+        return {}
+    overrides: Dict[str, Any] = {}
+    if transport.get("tunnel_mtu") not in (None, ""):
+        overrides["tunnel_mtu"] = int(transport["tunnel_mtu"])
+    return overrides
+
+
 def _request_has_explicit_stack(customer: Dict[str, Any]) -> bool:
     backend = customer.get("backend") or {}
     return bool(str(customer.get("customer_class") or "").strip()) or bool(
@@ -314,6 +324,9 @@ def build_nat_t_promotion_request(
 
     for allocator_owned in ("id", "transport"):
         promoted_customer.pop(allocator_owned, None)
+    transport_overrides = _request_transport_overrides(customer)
+    if transport_overrides:
+        promoted_customer["transport"] = transport_overrides
 
     promoted_request = {
         "schema_version": int(doc.get("schema_version") or 1),

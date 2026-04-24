@@ -276,6 +276,17 @@
         }
       }
     },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tunnel_mtu": {
+          "type": "integer",
+          "minimum": 576,
+          "maximum": 65535
+        }
+      }
+    },
     "ipsec": {
       "type": "object",
       "additionalProperties": false,
@@ -585,6 +596,9 @@
         },
         "dynamic_provisioning": {
           "$ref": "#/$defs/dynamic_provisioning"
+        },
+        "transport": {
+          "$ref": "#/$defs/transport"
         },
         "ipsec": {
           "$ref": "#/$defs/ipsec"

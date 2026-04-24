@@ -130,6 +130,7 @@ def ensure_tunnel(
     mode: str = "ipip",
     ttl: int = 64,
     key: int | None = None,
+    mtu: int | None = None,
 ) -> None:
     mode = str(mode).strip().lower()
     if mode not in {"ipip", "gre"}:
@@ -166,6 +167,8 @@ def ensure_tunnel(
             cmd.extend(["key", str(key)])
         must(cmd)
 
+    if mtu is not None:
+        must(["ip", "link", "set", ifname, "mtu", str(int(mtu))])
     must(["ip", "link", "set", ifname, "up"])
     must(["ip", "addr", "replace", overlay_ip, "dev", ifname])
 

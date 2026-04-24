@@ -152,6 +152,7 @@ def _assert_headend_transport_and_identity(
     mux_overlay_host = str(ipaddress.ip_interface(mux_overlay_ip).ip) if mux_overlay_ip else ""
     tunnel_key = str(transport.get("tunnel_key") or "").strip()
     tunnel_ttl = str(transport.get("tunnel_ttl") or "").strip()
+    tunnel_mtu = str(transport.get("tunnel_mtu") or "").strip()
     expected_route = f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {interface}"
     route_path = package_dir / "bundle" / "headend" / "routing" / "ip-route.commands.txt"
     if not route_path.exists():
@@ -188,6 +189,7 @@ def _assert_headend_transport_and_identity(
         "interface": interface,
         "tunnel_key": tunnel_key,
         "tunnel_ttl": tunnel_ttl,
+        "tunnel_mtu": tunnel_mtu,
         "router_overlay_ip": router_overlay_ip,
         "mux_overlay_ip": mux_overlay_ip,
         "mux_overlay_host": mux_overlay_host,
@@ -206,7 +208,9 @@ def _assert_headend_transport_and_identity(
         ]
     )
     for required_fragment in (
+        'MTU="$(json_get tunnel_mtu)"',
         'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+        'ip link set "$IFNAME" mtu "$MTU"',
         'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
         'ip link set "$IFNAME" up',
         'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',

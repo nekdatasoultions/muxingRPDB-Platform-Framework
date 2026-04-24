@@ -179,6 +179,8 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
 
     if transport.get("tunnel_ttl") is not None:
         compat["tunnel_ttl"] = int(transport["tunnel_ttl"])
+    if transport.get("tunnel_mtu") is not None:
+        compat["tunnel_mtu"] = int(transport["tunnel_mtu"])
 
     if transport.get("tunnel_key") is not None:
         compat["tunnel_key"] = int(transport["tunnel_key"])
@@ -257,6 +259,8 @@ def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_a
         transport_doc["tunnel_key"] = int(module["tunnel_key"])
     if module.get("tunnel_ttl") is not None:
         transport_doc["tunnel_ttl"] = int(module["tunnel_ttl"])
+    if module.get("tunnel_mtu") is not None:
+        transport_doc["tunnel_mtu"] = int(module["tunnel_mtu"])
     if module.get("tunnel_type"):
         transport_doc["tunnel_type"] = str(module["tunnel_type"])
     if module.get("rpdb_priority") is not None:

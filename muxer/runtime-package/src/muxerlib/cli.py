@@ -46,7 +46,9 @@ def print_module_summary(
     peer = str(module["peer_ip"])
     mark = hex(base_mark + cid) if "mark" not in module else hex(norm_int(module["mark"]))
     table = base_table + cid if "table" not in module else int(module["table"])
-    tunnel_mode, tunnel_ifname, _tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+    tunnel_mode, tunnel_ifname, _tunnel_ttl, tunnel_key, _tunnel_mtu = customer_tunnel_settings(
+        module, name, cid
+    )
     if "overlay" in module and module["overlay"]:
         mux_ip = str(module["overlay"]["mux_ip"])
         rtr_ip = str(module["overlay"]["router_ip"])

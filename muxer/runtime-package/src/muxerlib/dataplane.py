@@ -329,7 +329,9 @@ def derive_customer_transport(
 
     cid = int(module["id"])
     name = str(module["name"])
-    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key, tunnel_mtu = customer_tunnel_settings(
+        module, name, cid
+    )
     module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
     cust_inside_ip = inside_ip if transport_local_mode == "interface_ip" else module_inside_ip
     cust_backend_ul = str(module.get("backend_underlay_ip", backend_ul)).strip()
@@ -356,6 +358,7 @@ def derive_customer_transport(
             "mode": tunnel_mode,
             "interface": tunnel_ifname,
             "ttl": tunnel_ttl,
+            "mtu": tunnel_mtu,
             "key": tunnel_key,
             "overlay": {
                 "mux_ip": mux_overlay,
@@ -367,6 +370,7 @@ def derive_customer_transport(
                 + (f" key {tunnel_key}" if tunnel_mode == "gre" and tunnel_key is not None else "")
             ),
             "address_cli": f"ip addr replace {mux_overlay} dev {tunnel_ifname}",
+            "mtu_cli": f"ip link set {tunnel_ifname} mtu {tunnel_mtu}" if tunnel_mtu is not None else "",
             "up_cli": f"ip link set {tunnel_ifname} up",
         },
     }
@@ -454,7 +458,9 @@ def derive_headend_return_path(
 ) -> Dict[str, Any]:
     name = str(module["name"])
     cid = int(module["id"])
-    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key, tunnel_mtu = customer_tunnel_settings(
+        module, name, cid
+    )
     overlay = module.get("overlay") or {}
     router_ip = str(overlay.get("router_ip", "")).strip()
     mux_ip = str(overlay.get("mux_ip", "")).strip()
@@ -470,11 +476,13 @@ def derive_headend_return_path(
             "mode": tunnel_mode,
             "interface": tunnel_ifname,
             "ttl": tunnel_ttl,
+            "mtu": tunnel_mtu,
             "key": tunnel_key,
             "router_overlay_ip": router_ip,
             "mux_overlay_ip": mux_ip,
             "apply_cli": [
                 f"ip addr replace {router_ip} dev {tunnel_ifname}",
+                f"ip link set {tunnel_ifname} mtu {tunnel_mtu}" if tunnel_mtu is not None else "",
                 f"ip link set {tunnel_ifname} up",
                 f"ip route replace {peer_ip}/32 via {mux_overlay_ip} dev {tunnel_ifname}" if mux_overlay_ip else "",
             ],

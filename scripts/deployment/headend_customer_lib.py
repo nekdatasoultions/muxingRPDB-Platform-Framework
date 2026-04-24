@@ -306,6 +306,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     report["details"]["headend_transport_enabled"] = transport_intent.get("enabled")
     report["details"]["headend_transport_interface"] = transport_intent.get("interface")
     report["details"]["headend_transport_type"] = transport_intent.get("type")
+    report["details"]["headend_transport_mtu"] = transport_intent.get("tunnel_mtu")
     report["details"]["headend_transport_peer_route"] = transport_intent.get("peer_public_cidr")
     report["details"]["public_identity_enabled"] = public_identity_intent.get("enabled")
     report["details"]["public_identity_cidr"] = public_identity_intent.get("cidr")
@@ -337,6 +338,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         "interface": module_transport.get("interface"),
         "tunnel_key": module_transport.get("tunnel_key"),
         "tunnel_ttl": module_transport.get("tunnel_ttl"),
+        "tunnel_mtu": module_transport.get("tunnel_mtu"),
         "router_overlay_ip": module_overlay.get("router_ip"),
         "mux_overlay_ip": module_overlay.get("mux_ip"),
     }
@@ -352,7 +354,9 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
             report["errors"].append("head-end transport intent mux_overlay_host does not match mux_overlay_ip")
     transport_payload = "\n".join([*transport_apply_lines, *transport_remove_lines])
     for expected_fragment in (
+        'MTU="$(json_get tunnel_mtu)"',
         'ip tunnel add "$IFNAME" mode gre local "$LOCAL_UL" remote "$REMOTE_UL" key "$KEY" ttl "$TTL"',
+        'ip link set "$IFNAME" mtu "$MTU"',
         'ip addr replace "$ROUTER_IP" dev "$IFNAME"',
         'ip link set "$IFNAME" up',
         'ip route replace "$PEER_CIDR" via "$MUX_OVERLAY_HOST" dev "$IFNAME"',

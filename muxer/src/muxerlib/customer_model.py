@@ -35,6 +35,7 @@ class Transport:
     overlay: Overlay
     tunnel_type: str = "gre"
     tunnel_ttl: int = 64
+    tunnel_mtu: Optional[int] = None
     rpdb_priority: Optional[int] = None
 
 
@@ -352,7 +353,7 @@ def _validated_cidr(value: Any, path: str, *, prefixlen: int | None = None) -> s
     return text
 
 
-def _validated_path_mtu(value: Any, path: str) -> Optional[int]:
+def _validated_optional_mtu(value: Any, path: str) -> Optional[int]:
     if value in (None, ""):
         return None
     try:
@@ -668,6 +669,10 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                 interface=str(_require(transport.get("interface"), "customer.transport.interface")),
                 tunnel_type=str(transport.get("tunnel_type") or "gre"),
                 tunnel_ttl=int(transport.get("tunnel_ttl") or 64),
+                tunnel_mtu=_validated_optional_mtu(
+                    transport.get("tunnel_mtu"),
+                    "customer.transport.tunnel_mtu",
+                ),
                 rpdb_priority=(
                     int(transport["rpdb_priority"])
                     if transport.get("rpdb_priority") is not None
@@ -742,7 +747,10 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     mobike=ipsec.get("mobike"),
                     fragmentation=ipsec.get("fragmentation"),
                     clear_df_bit=ipsec.get("clear_df_bit"),
-                    path_mtu=_validated_path_mtu(ipsec.get("path_mtu"), "customer.ipsec.path_mtu"),
+                    path_mtu=_validated_optional_mtu(
+                        ipsec.get("path_mtu"),
+                        "customer.ipsec.path_mtu",
+                    ),
                     mark=str(ipsec.get("mark") or ""),
                     vti_interface=str(ipsec.get("vti_interface") or ""),
                     vti_routing=_as_yes_no(ipsec.get("vti_routing")),

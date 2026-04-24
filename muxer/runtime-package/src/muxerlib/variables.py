@@ -413,6 +413,10 @@ def build_modules_from_variables(
             module["tunnel_ttl"] = customer["tunnel_ttl"]
         elif "tunnel_ttl" in default_muxer:
             module["tunnel_ttl"] = default_muxer["tunnel_ttl"]
+        if "tunnel_mtu" in customer:
+            module["tunnel_mtu"] = customer["tunnel_mtu"]
+        elif "tunnel_mtu" in default_muxer:
+            module["tunnel_mtu"] = default_muxer["tunnel_mtu"]
 
         if "inside_ip" in customer:
             module["inside_ip"] = customer["inside_ip"]

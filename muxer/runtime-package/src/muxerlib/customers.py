@@ -81,7 +81,11 @@ def customer_headend_egress_sources(module: Dict[str, Any], backend_underlay_ip:
     return sources
 
 
-def customer_tunnel_settings(module: Dict[str, Any], name: str, cid: int) -> Tuple[str, str, int, int | None]:
+def customer_tunnel_settings(
+    module: Dict[str, Any],
+    name: str,
+    cid: int,
+) -> Tuple[str, str, int, int | None, int | None]:
     mode = str(module.get("tunnel_type", "ipip")).strip().lower()
     if mode not in {"ipip", "gre"}:
         raise SystemExit(f"{name}: unsupported tunnel_type '{mode}'")
@@ -93,9 +97,15 @@ def customer_tunnel_settings(module: Dict[str, Any], name: str, cid: int) -> Tup
     key: int | None = None
     if key_raw is not None:
         key = parse_int(key_raw, 0)
+    mtu_raw = module.get("tunnel_mtu", None)
+    mtu: int | None = None
+    if mtu_raw not in (None, ""):
+        mtu = parse_int(mtu_raw, 0)
+        if mtu < 576 or mtu > 65535:
+            raise SystemExit(f"{name}: tunnel_mtu must be between 576 and 65535")
     if mode == "ipip" and key is not None:
         raise SystemExit(f"{name}: tunnel_key is valid only for GRE tunnel_type")
     if mode == "gre" and key is None:
         key = 1000 + cid
 
-    return mode, ifname, ttl, key
+    return mode, ifname, ttl, key, mtu

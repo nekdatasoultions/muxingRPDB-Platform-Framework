@@ -93,11 +93,17 @@ Optional:
 
 - `tunnel_type`
 - `tunnel_ttl`
+- `tunnel_mtu`
 - `rpdb_priority`
 
 Current state:
 
 - these fields are still accepted and used by the compatibility runtime
+- `tunnel_mtu` is the true Linux interface MTU for the per-customer transport
+  tunnel and is applied to the GRE/VTI device itself during deployment/runtime
+- `tunnel_mtu` is separate from `ipsec.path_mtu`; the former changes the actual
+  tunnel interface MTU, while the latter drives customer-facing TCP MSS clamp
+  derivation for the encrypted path
 
 Target state:
 

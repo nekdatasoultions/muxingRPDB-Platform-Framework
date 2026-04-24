@@ -166,7 +166,9 @@ def _clear_passthrough_customer_transport(
 ) -> None:
     cid = int(module["id"])
     name = str(module["name"])
-    _tunnel_mode, tunnel_ifname, _tunnel_ttl, _tunnel_key = customer_tunnel_settings(module, name, cid)
+    _tunnel_mode, tunnel_ifname, _tunnel_ttl, _tunnel_key, _tunnel_mtu = customer_tunnel_settings(
+        module, name, cid
+    )
     mark_hex = hex(base_mark + cid) if "mark" not in module else hex(int(str(module["mark"]), 0))
     table_id = base_table + cid if "table" not in module else int(module["table"])
 
@@ -192,7 +194,9 @@ def _apply_passthrough_customer_transport(
 ) -> None:
     cid = int(module["id"])
     name = str(module["name"])
-    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key = customer_tunnel_settings(module, name, cid)
+    tunnel_mode, tunnel_ifname, tunnel_ttl, tunnel_key, tunnel_mtu = customer_tunnel_settings(
+        module, name, cid
+    )
 
     module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
     if transport_local_mode == "interface_ip":
@@ -223,6 +227,7 @@ def _apply_passthrough_customer_transport(
         mode=tunnel_mode,
         ttl=tunnel_ttl,
         key=tunnel_key,
+        mtu=tunnel_mtu,
     )
     ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
 

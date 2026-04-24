@@ -479,6 +479,7 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
     customer_doc = copy.deepcopy(request_doc.get("customer") or {})
     backend_doc = copy.deepcopy(customer_doc.get("backend") or {})
     ipsec_doc = copy.deepcopy(customer_doc.get("ipsec") or {})
+    request_transport_doc = copy.deepcopy(customer_doc.get("transport") or {})
     requested_customer_class = str(customer_doc.get("customer_class") or "").strip()
     requested_backend_cluster = str(backend_doc.get("cluster") or "").strip()
 
@@ -506,6 +507,8 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
             "router_ip": str(allocation_plan["overlay"]["router_ip"]),
         },
     }
+    if request_transport_doc.get("tunnel_mtu") is not None:
+        transport_doc["tunnel_mtu"] = int(request_transport_doc["tunnel_mtu"])
 
     rendered_customer = {
         "id": int(allocation_plan["customer_id"]),
