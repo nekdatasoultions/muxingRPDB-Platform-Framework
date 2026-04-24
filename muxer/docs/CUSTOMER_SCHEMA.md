@@ -211,6 +211,7 @@ Optional per-customer IPsec overrides:
 - `mobike`
 - `fragmentation`
 - `clear_df_bit`
+- `path_mtu`
 - `mark`
 - `vti_interface`
 - `vti_routing`
@@ -250,6 +251,12 @@ Current repo note:
   `start_action = trap|start`, an initiation intent, and a head-end
   `swanctl --initiate --child` helper
 
+`path_mtu` is the customer-facing IPsec path-size knob. When it is set, the
+renderer derives a TCP MSS clamp of `path_mtu - 40` for customer-facing
+nftables chains unless a more specific `post_ipsec_nat.tcp_mss_clamp` or
+`outside_nat.tcp_mss_clamp` override is present. Non-TCP traffic still relies
+on the normal PMTU/fragmentation behavior of the IPsec path.
+
 ### `customer.post_ipsec_nat`
 
 Optional for the customer source, but when present it must include:
@@ -280,6 +287,8 @@ Important meaning:
   `/27`, that we present after NAT
 - `post_ipsec_nat.core_subnets` defines our side local/core reachability for
   that translated path
+- `post_ipsec_nat.tcp_mss_clamp` overrides the derived clamp from
+  `ipsec.path_mtu` when that translated path needs a specific TCP value
 
 Target NAT intent:
 
@@ -326,6 +335,8 @@ Important meaning:
 - `selectors.remote_host_cidrs` scopes NAT, routing, and accounting to concrete
   customer hosts or smaller customer CIDRs when set
 - `selectors.remote_subnets` remains the broader customer encryption domain
+- `outside_nat.tcp_mss_clamp` overrides the derived clamp from `ipsec.path_mtu`
+  when that clear-side presentation needs a different TCP value
 
 Detailed model:
 

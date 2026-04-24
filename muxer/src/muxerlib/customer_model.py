@@ -128,6 +128,7 @@ class Ipsec:
     mobike: Optional[bool] = None
     fragmentation: Optional[bool] = None
     clear_df_bit: Optional[bool] = None
+    path_mtu: Optional[int] = None
     mark: str = ""
     vti_interface: str = ""
     vti_routing: str = ""
@@ -349,6 +350,20 @@ def _validated_cidr(value: Any, path: str, *, prefixlen: int | None = None) -> s
     if prefixlen is not None and network.prefixlen != prefixlen:
         raise ValueError(f"{path} must use /{prefixlen}")
     return text
+
+
+def _validated_path_mtu(value: Any, path: str) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        mtu = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path} must be an integer") from exc
+    if mtu < 576:
+        raise ValueError(f"{path} must be at least 576")
+    if mtu > 65535:
+        raise ValueError(f"{path} must be at most 65535")
+    return mtu
 
 
 def _parse_host_mappings(value: Any, path: str) -> Optional[List[HostMapping]]:
@@ -727,6 +742,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     mobike=ipsec.get("mobike"),
                     fragmentation=ipsec.get("fragmentation"),
                     clear_df_bit=ipsec.get("clear_df_bit"),
+                    path_mtu=_validated_path_mtu(ipsec.get("path_mtu"), "customer.ipsec.path_mtu"),
                     mark=str(ipsec.get("mark") or ""),
                     vti_interface=str(ipsec.get("vti_interface") or ""),
                     vti_routing=_as_yes_no(ipsec.get("vti_routing")),

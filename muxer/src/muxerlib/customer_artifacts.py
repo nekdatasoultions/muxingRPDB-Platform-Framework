@@ -59,6 +59,26 @@ def _render_copy_df(ipsec: Dict[str, Any]) -> str | None:
     return "no" if bool(ipsec.get("clear_df_bit")) else "yes"
 
 
+def _derived_tcp_mss_clamp_from_path_mtu(path_mtu: Any) -> int | None:
+    if path_mtu in (None, ""):
+        return None
+    return int(path_mtu) - 40
+
+
+def _resolve_tcp_mss_clamp(
+    configured_value: Any,
+    ipsec: Dict[str, Any] | None = None,
+) -> Tuple[int | None, int | None, str | None]:
+    configured = None
+    if configured_value not in (None, ""):
+        configured = int(configured_value)
+        return configured, configured, "configured"
+    derived = _derived_tcp_mss_clamp_from_path_mtu((ipsec or {}).get("path_mtu"))
+    if derived is not None:
+        return None, derived, "ipsec.path_mtu"
+    return None, None, None
+
+
 def _normalized_swanctl_start_action(value: Any) -> str:
     text = str(value or "").strip().lower().replace(" ", "")
     if text == "start|trap":
@@ -373,6 +393,8 @@ def _render_ipsec_intent(
         "mobike": ipsec.get("mobike"),
         "fragmentation": ipsec.get("fragmentation"),
         "clear_df_bit": ipsec.get("clear_df_bit"),
+        "path_mtu": ipsec.get("path_mtu"),
+        "derived_tcp_mss_clamp": _derived_tcp_mss_clamp_from_path_mtu(ipsec.get("path_mtu")),
         "rendered_copy_df": _render_copy_df(ipsec),
         "mark": ipsec.get("mark"),
         "vti_interface": ipsec.get("vti_interface"),
@@ -566,7 +588,11 @@ def _build_nft_host_mappings(post_ipsec_nat: Dict[str, Any]) -> tuple[List[Tuple
     return mappings, warnings
 
 
-def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str, Any]) -> Dict[str, Any]:
+def _render_post_ipsec_nat_nftables(
+    customer_name: str,
+    post_ipsec_nat: Dict[str, Any],
+    ipsec: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     enabled = bool(post_ipsec_nat.get("enabled"))
     safe_customer = _nft_name(customer_name, prefix="cust")
     table_name = _nft_name(customer_name, prefix="rpdb_hn")
@@ -576,7 +602,10 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
     real_set = f"{safe_customer}_real_v4"
     core_set = f"{safe_customer}_core_v4"
     output_mark = str(post_ipsec_nat.get("output_mark") or "").strip()
-    tcp_mss_clamp = post_ipsec_nat.get("tcp_mss_clamp")
+    configured_tcp_mss_clamp, effective_tcp_mss_clamp, tcp_mss_clamp_source = _resolve_tcp_mss_clamp(
+        post_ipsec_nat.get("tcp_mss_clamp"),
+        ipsec,
+    )
 
     host_mappings, warnings = _build_nft_host_mappings(post_ipsec_nat)
     dnat_entries = _nft_map_entries(host_mappings)
@@ -602,6 +631,10 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
             "mangle_prerouting": "mangle_prerouting",
             "mangle_forward": "mangle_forward",
         },
+        "ipsec_path_mtu": (ipsec or {}).get("path_mtu"),
+        "configured_tcp_mss_clamp": configured_tcp_mss_clamp,
+        "effective_tcp_mss_clamp": effective_tcp_mss_clamp,
+        "tcp_mss_clamp_source": tcp_mss_clamp_source,
         "sets": {
             "core": core_set,
             "real": real_set,
@@ -681,12 +714,12 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
                 "  }",
             ]
         )
-    if tcp_mss_clamp not in {None, ""}:
+    if effective_tcp_mss_clamp is not None:
         lines.extend(
             [
                 "  chain mangle_forward {",
                 "    type filter hook forward priority mangle; policy accept;",
-                f"    ip saddr @{core_set} ip daddr @{real_set} tcp flags syn / syn,rst tcp option maxseg size set {int(tcp_mss_clamp)}",
+                f"    ip saddr @{core_set} ip daddr @{real_set} tcp flags syn / syn,rst tcp option maxseg size set {int(effective_tcp_mss_clamp)}",
                 "  }",
             ]
         )
@@ -715,9 +748,14 @@ def _render_post_ipsec_nat_nftables(customer_name: str, post_ipsec_nat: Dict[str
     }
 
 
-def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, Any]) -> Dict[str, Any]:
-    nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
+def _render_post_ipsec_nat_intent(
+    customer_name: str,
+    post_ipsec_nat: Dict[str, Any],
+    ipsec: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat, ipsec)
     manifest = nftables["manifest"]
+    state = nftables["state"]
     command_model = "disabled"
     if bool(post_ipsec_nat.get("enabled")):
         if str(post_ipsec_nat.get("mapping_strategy") or "") == "one_to_one":
@@ -741,7 +779,10 @@ def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, 
         "core_subnets": post_ipsec_nat.get("core_subnets") or [],
         "interface": _effective_nat_interface(post_ipsec_nat),
         "output_mark": post_ipsec_nat.get("output_mark"),
-        "tcp_mss_clamp": post_ipsec_nat.get("tcp_mss_clamp"),
+        "ipsec_path_mtu": (ipsec or {}).get("path_mtu"),
+        "configured_tcp_mss_clamp": state.get("configured_tcp_mss_clamp"),
+        "tcp_mss_clamp": state.get("effective_tcp_mss_clamp"),
+        "tcp_mss_clamp_source": state.get("tcp_mss_clamp_source"),
         "route_via": post_ipsec_nat.get("route_via"),
         "route_dev": post_ipsec_nat.get("route_dev"),
         "rendered_command_model": command_model,
@@ -752,6 +793,9 @@ def _render_post_ipsec_nat_intent(customer_name: str, post_ipsec_nat: Dict[str, 
             "apply_command_count": manifest.get("apply_command_count"),
             "rollback_command_count": manifest.get("rollback_command_count"),
             "host_mapping_count": manifest.get("host_mapping_count"),
+            "configured_tcp_mss_clamp": manifest.get("configured_tcp_mss_clamp"),
+            "effective_tcp_mss_clamp": manifest.get("effective_tcp_mss_clamp"),
+            "tcp_mss_clamp_source": manifest.get("tcp_mss_clamp_source"),
             "fallback_policy": manifest.get("fallback_policy"),
         },
     }
@@ -771,6 +815,7 @@ def _render_outside_nat_nftables(
     customer_name: str,
     outside_nat: Dict[str, Any],
     selectors: Dict[str, Any],
+    ipsec: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     enabled = bool(outside_nat.get("enabled"))
     safe_customer = _nft_name(customer_name, prefix="cust")
@@ -781,7 +826,10 @@ def _render_outside_nat_nftables(
     real_set = f"{safe_customer}_outside_real_v4"
     customer_sources_set = f"{safe_customer}_outside_customer_sources_v4"
     output_mark = str(outside_nat.get("output_mark") or "").strip()
-    tcp_mss_clamp = outside_nat.get("tcp_mss_clamp")
+    configured_tcp_mss_clamp, effective_tcp_mss_clamp, tcp_mss_clamp_source = _resolve_tcp_mss_clamp(
+        outside_nat.get("tcp_mss_clamp"),
+        ipsec,
+    )
 
     host_mappings, warnings = _build_nft_host_mappings(outside_nat)
     dnat_entries = _nft_map_entries(host_mappings)
@@ -808,6 +856,10 @@ def _render_outside_nat_nftables(
             "mangle_prerouting": "mangle_prerouting",
             "mangle_forward": "mangle_forward",
         },
+        "ipsec_path_mtu": (ipsec or {}).get("path_mtu"),
+        "configured_tcp_mss_clamp": configured_tcp_mss_clamp,
+        "effective_tcp_mss_clamp": effective_tcp_mss_clamp,
+        "tcp_mss_clamp_source": tcp_mss_clamp_source,
         "sets": {
             "customer_sources": customer_sources_set,
             "real": real_set,
@@ -888,12 +940,12 @@ def _render_outside_nat_nftables(
                 "  }",
             ]
         )
-    if tcp_mss_clamp not in {None, ""}:
+    if effective_tcp_mss_clamp is not None:
         lines.extend(
             [
                 "  chain mangle_forward {",
                 "    type filter hook forward priority mangle; policy accept;",
-                f"    ip saddr @{customer_sources_set} ip daddr @{real_set} tcp flags syn / syn,rst tcp option maxseg size set {int(tcp_mss_clamp)}",
+                f"    ip saddr @{customer_sources_set} ip daddr @{real_set} tcp flags syn / syn,rst tcp option maxseg size set {int(effective_tcp_mss_clamp)}",
                 "  }",
             ]
         )
@@ -926,9 +978,11 @@ def _render_outside_nat_intent(
     customer_name: str,
     outside_nat: Dict[str, Any],
     selectors: Dict[str, Any],
+    ipsec: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors)
+    nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors, ipsec)
     manifest = nftables["manifest"]
+    state = nftables["state"]
     command_model = "disabled"
     if bool(outside_nat.get("enabled")):
         if str(outside_nat.get("mapping_strategy") or "") == "one_to_one":
@@ -953,7 +1007,10 @@ def _render_outside_nat_intent(
         "selector_remote_host_cidrs": selectors.get("remote_host_cidrs") or [],
         "interface": _effective_nat_interface(outside_nat),
         "output_mark": outside_nat.get("output_mark"),
-        "tcp_mss_clamp": outside_nat.get("tcp_mss_clamp"),
+        "ipsec_path_mtu": (ipsec or {}).get("path_mtu"),
+        "configured_tcp_mss_clamp": state.get("configured_tcp_mss_clamp"),
+        "tcp_mss_clamp": state.get("effective_tcp_mss_clamp"),
+        "tcp_mss_clamp_source": state.get("tcp_mss_clamp_source"),
         "route_via": outside_nat.get("route_via"),
         "route_dev": outside_nat.get("route_dev"),
         "deferred": bool(outside_nat.get("deferred")),
@@ -966,6 +1023,9 @@ def _render_outside_nat_intent(
             "apply_command_count": manifest.get("apply_command_count"),
             "rollback_command_count": manifest.get("rollback_command_count"),
             "host_mapping_count": manifest.get("host_mapping_count"),
+            "configured_tcp_mss_clamp": manifest.get("configured_tcp_mss_clamp"),
+            "effective_tcp_mss_clamp": manifest.get("effective_tcp_mss_clamp"),
+            "tcp_mss_clamp_source": manifest.get("tcp_mss_clamp_source"),
             "fallback_policy": manifest.get("fallback_policy"),
         },
     }
@@ -1317,8 +1377,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
     mux_overlay_host = _interface_host(mux_overlay_ip) if mux_overlay_ip else ""
     transport_interface = str(transport.get("interface") or "").strip()
-    post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat)
-    outside_nat_nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors)
+    post_ipsec_nftables = _render_post_ipsec_nat_nftables(customer_name, post_ipsec_nat, ipsec)
+    outside_nat_nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors, ipsec)
     transport_artifacts = _render_headend_transport_artifacts(
         customer_name=customer_name,
         peer_public_cidr=peer_public_cidr,
@@ -1418,12 +1478,21 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
         "routing/ip-route.commands.txt": "\n".join(route_commands) + "\n",
         **transport_artifacts,
         **public_identity_artifacts,
-        "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(customer_name, post_ipsec_nat),
+        "post-ipsec-nat/post-ipsec-nat-intent.json": _render_post_ipsec_nat_intent(
+            customer_name,
+            post_ipsec_nat,
+            ipsec,
+        ),
         "post-ipsec-nat/nftables.apply.nft": post_ipsec_nftables["apply"],
         "post-ipsec-nat/nftables.remove.nft": post_ipsec_nftables["remove"],
         "post-ipsec-nat/nftables-state.json": post_ipsec_nftables["state"],
         "post-ipsec-nat/activation-manifest.json": post_ipsec_nftables["manifest"],
-        "outside-nat/outside-nat-intent.json": _render_outside_nat_intent(customer_name, outside_nat, selectors),
+        "outside-nat/outside-nat-intent.json": _render_outside_nat_intent(
+            customer_name,
+            outside_nat,
+            selectors,
+            ipsec,
+        ),
         "outside-nat/nftables.apply.nft": outside_nat_nftables["apply"],
         "outside-nat/nftables.remove.nft": outside_nat_nftables["remove"],
         "outside-nat/nftables-state.json": outside_nat_nftables["state"],

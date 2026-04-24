@@ -357,6 +357,11 @@
         "clear_df_bit": {
           "type": "boolean"
         },
+        "path_mtu": {
+          "type": "integer",
+          "minimum": 576,
+          "maximum": 65535
+        },
         "vti_routing": {
           "anyOf": [
             {

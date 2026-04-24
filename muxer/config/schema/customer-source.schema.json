@@ -437,6 +437,11 @@
         "clear_df_bit": {
           "type": "boolean"
         },
+        "path_mtu": {
+          "type": "integer",
+          "minimum": 576,
+          "maximum": 65535
+        },
         "mark": {
           "type": "string",
           "pattern": "^0x[0-9a-fA-F]+\\/0x[0-9a-fA-F]+$"
