@@ -1,0 +1,63 @@
+schema_version: 1
+
+customer:
+  name: vpn-customer-stage1-15-cust-0007
+  peer:
+    public_ip: 35.171.133.225
+    remote_id: 35.171.133.225
+    psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0007/psk
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+      - 10.128.4.3/32
+    remote_subnets:
+      - 10.129.3.0/24
+    remote_host_cidrs:
+      - 10.129.3.133/32
+  transport:
+    tunnel_mtu: 1436
+  ipsec:
+    auto: start
+    remote_id: 35.171.133.225
+    ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
+    esp_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
+    dpddelay: 10s
+    dpdtimeout: 120s
+    dpdaction: restart
+    replay_protection: true
+    pfs_required: false
+    pfs_groups:
+      - modp2048
+      - modp4096
+    mobike: false
+    fragmentation: true
+    clear_df_bit: true
+    path_mtu: 1400
+  post_ipsec_nat:
+    enabled: false
+    mode: netmap
+    translated_subnets:
+      - 172.30.0.64/27
+    real_subnets:
+      - 10.129.3.133/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    tcp_mss_clamp: 1360
+  outside_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 194.138.36.86/32
+    translated_subnets:
+      - 10.128.4.3/32
+    tcp_mss_clamp: 1360
+    route_via: 172.31.63.44
+    route_dev: ens36
