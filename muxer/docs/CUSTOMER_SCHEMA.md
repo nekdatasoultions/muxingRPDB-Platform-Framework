@@ -104,6 +104,8 @@ Current state:
 - `tunnel_mtu` is separate from `ipsec.path_mtu`; the former changes the actual
   tunnel interface MTU, while the latter drives customer-facing TCP MSS clamp
   derivation for the encrypted path
+- for an operator guide with examples, precedence, and verification commands,
+  see [TUNNEL_MTU_AND_IPSEC_PATH_MTU.md](./TUNNEL_MTU_AND_IPSEC_PATH_MTU.md)
 
 Target state:
 
@@ -262,6 +264,10 @@ renderer derives a TCP MSS clamp of `path_mtu - 40` for customer-facing
 nftables chains unless a more specific `post_ipsec_nat.tcp_mss_clamp` or
 `outside_nat.tcp_mss_clamp` override is present. Non-TCP traffic still relies
 on the normal PMTU/fragmentation behavior of the IPsec path.
+
+For an operator guide that explains how `transport.tunnel_mtu`,
+`ipsec.path_mtu`, and the explicit per-path clamp overrides work together, see
+[TUNNEL_MTU_AND_IPSEC_PATH_MTU.md](./TUNNEL_MTU_AND_IPSEC_PATH_MTU.md).
 
 ### `customer.post_ipsec_nat`
 
