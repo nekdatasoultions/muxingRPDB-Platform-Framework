@@ -1,0 +1,69 @@
+{
+  "framework_control_fields": [
+    "framework.version",
+    "framework.topology.outer_tunnel.auth_method",
+    "framework.topology.outer_tunnel.peer_ip_mode",
+    "framework.topology.inner_vpn.auth_method",
+    "framework.topology.inner_vpn.termination_model",
+    "framework.topology.handoff.transport",
+    "framework.topology.translation.default_mode",
+    "framework.topology.translation.boundary",
+    "framework.placement_constraints.cgnat_head_end.allowed_subnets",
+    "framework.placement_constraints.cgnat_isp_head_end.allowed_subnets",
+    "framework.placement_constraints.customer_devices.allowed_subnets"
+  ],
+  "infra_deployable_fields": [
+    "operations.environment_name",
+    "operations.aws.region",
+    "operations.aws.vpc_id",
+    "operations.cgnat_head_end.instance_name",
+    "operations.cgnat_head_end.instance_type",
+    "operations.cgnat_head_end.subnet_id",
+    "operations.cgnat_head_end.public_eip_allocation_id",
+    "operations.cgnat_isp_head_end.instance_name",
+    "operations.cgnat_isp_head_end.instance_type",
+    "operations.cgnat_isp_head_end.transit_subnet_id",
+    "operations.cgnat_isp_head_end.customer_subnet_id",
+    "operations.gre_inventory.assignment_mode"
+  ],
+  "server_side_renderable_fields": [
+    "operations.cgnat_head_end.outer_tunnel_interface",
+    "operations.cgnat_head_end.gre_source_interface",
+    "operations.cgnat_isp_head_end.outer_tunnel_source_interface",
+    "operations.cgnat_isp_head_end.customer_facing_interface",
+    "sot.identities.outer_tunnel_identity_ref",
+    "sot.identities.inner_customer_identity",
+    "sot.identities.customer_loopback_ip",
+    "sot.addressing.translation_mode",
+    "sot.addressing.customer_original_inside_space",
+    "sot.addressing.platform_assigned_inside_space",
+    "sot.backend_selection.preferred_class",
+    "sot.backend_selection.customer_facing_public_ip",
+    "sot.backend_selection.termination_public_loopback",
+    "sot.customer_devices[*].known_inside_identity",
+    "sot.customer_devices[*].inner_vpn_auth_ref"
+  ],
+  "external_dependency_fields": [
+    "operations.backend_vpn_head_ends",
+    "operations.gre_inventory.inventory_ref",
+    "operations.certificates.cgnat_head_end_server_cert_ref",
+    "operations.certificates.cgnat_isp_head_end_client_cert_ref"
+  ],
+  "sot_service_intent_fields": [
+    "sot.service_id",
+    "sot.customer_id",
+    "sot.identities.outer_tunnel_identity_ref",
+    "sot.identities.inner_customer_identity",
+    "sot.identities.customer_loopback_ip",
+    "sot.addressing.customer_original_inside_space",
+    "sot.addressing.platform_assigned_inside_space",
+    "sot.addressing.translation_mode",
+    "sot.backend_selection.preferred_class",
+    "sot.backend_selection.customer_facing_public_ip",
+    "sot.backend_selection.termination_public_loopback",
+    "sot.customer_devices[*].name",
+    "sot.customer_devices[*].subnet_id",
+    "sot.customer_devices[*].known_inside_identity",
+    "sot.customer_devices[*].inner_vpn_auth_ref"
+  ]
+}

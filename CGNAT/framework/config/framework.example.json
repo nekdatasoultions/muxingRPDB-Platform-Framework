@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "topology": {
+    "outer_tunnel": {
+      "auth_method": "certificate",
+      "peer_ip_mode": "dynamic_or_unknown"
+    },
+    "inner_vpn": {
+      "auth_method": "key_based",
+      "termination_model": "backend_vpn_head_end"
+    },
+    "handoff": {
+      "transport": "gre"
+    },
+    "translation": {
+      "default_mode": "one_to_one",
+      "boundary": "backend_vpn_head_end"
+    }
+  },
+  "placement_constraints": {
+    "cgnat_head_end": {
+      "allowed_subnets": [
+        "subnet-04a6b7f3a3855d438"
+      ]
+    },
+    "cgnat_isp_head_end": {
+      "allowed_subnets": [
+        "subnet-04a6b7f3a3855d438",
+        "subnet-0e6ae1d598e08d002"
+      ]
+    },
+    "customer_devices": {
+      "allowed_subnets": [
+        "subnet-0e6ae1d598e08d002"
+      ]
+    }
+  }
+}

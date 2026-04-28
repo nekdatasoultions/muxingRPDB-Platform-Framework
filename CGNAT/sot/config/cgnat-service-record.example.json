@@ -1,0 +1,33 @@
+{
+  "record_type": "cgnat_service",
+  "version": 1,
+  "service_id": "cgnat-service-example",
+  "customer_id": "customer-example",
+  "identities": {
+    "outer_tunnel_identity_ref": "cgnat-isp-head-end/example",
+    "inner_customer_identity": "customer-site-a",
+    "customer_loopback_ip": "10.250.1.10"
+  },
+  "addressing": {
+    "customer_original_inside_space": [
+      "10.20.30.0/24"
+    ],
+    "platform_assigned_inside_space": [
+      "10.128.10.0/24"
+    ],
+    "translation_mode": "one_to_one"
+  },
+  "backend_selection": {
+    "preferred_class": "nat_t",
+    "customer_facing_public_ip": "198.51.100.10",
+    "termination_public_loopback": "198.51.100.10"
+  },
+  "customer_devices": [
+    {
+      "name": "customer-device-1",
+      "subnet_id": "subnet-0e6ae1d598e08d002",
+      "known_inside_identity": "10.20.30.10",
+      "inner_vpn_auth_ref": "secret://customer-device-1/ipsec-key"
+    }
+  ]
+}

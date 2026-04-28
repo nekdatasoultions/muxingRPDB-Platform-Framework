@@ -1,0 +1,118 @@
+{
+  "framework": {
+    "version": 1,
+    "topology": {
+      "outer_tunnel": {
+        "auth_method": "certificate",
+        "peer_ip_mode": "dynamic_or_unknown"
+      },
+      "inner_vpn": {
+        "auth_method": "key_based",
+        "termination_model": "backend_vpn_head_end"
+      },
+      "handoff": {
+        "transport": "gre"
+      },
+      "translation": {
+        "default_mode": "one_to_one",
+        "boundary": "backend_vpn_head_end"
+      }
+    },
+    "placement_constraints": {
+      "cgnat_head_end": {
+        "allowed_subnets": [
+          "subnet-04a6b7f3a3855d438"
+        ]
+      },
+      "cgnat_isp_head_end": {
+        "allowed_subnets": [
+          "subnet-04a6b7f3a3855d438",
+          "subnet-0e6ae1d598e08d002"
+        ]
+      },
+      "customer_devices": {
+        "allowed_subnets": [
+          "subnet-0e6ae1d598e08d002"
+        ]
+      }
+    }
+  },
+  "operations": {
+    "environment_name": "example-aws-environment",
+    "aws": {
+      "region": "us-east-1",
+      "vpc_id": "vpc-xxxxxxxxxxxxxxxxx"
+    },
+    "cgnat_head_end": {
+      "instance_name": "cgnat-head-end-1",
+      "subnet_id": "subnet-04a6b7f3a3855d438",
+      "instance_type": "t3.large",
+      "public_eip_allocation_id": "eipalloc-xxxxxxxxxxxxxxxxx",
+      "outer_tunnel_interface": "eth0",
+      "gre_source_interface": "eth0"
+    },
+    "cgnat_isp_head_end": {
+      "instance_name": "cgnat-isp-head-end-1",
+      "transit_subnet_id": "subnet-04a6b7f3a3855d438",
+      "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+      "instance_type": "t3.large",
+      "outer_tunnel_source_interface": "eth0",
+      "customer_facing_interface": "eth1"
+    },
+    "backend_vpn_head_ends": {
+      "nat_t": [
+        {
+          "name": "backend-nat-1",
+          "gre_remote": "172.31.40.222",
+          "public_loopback": "198.51.100.10"
+        }
+      ],
+      "non_nat": [
+        {
+          "name": "backend-non-nat-1",
+          "gre_remote": "172.31.41.222",
+          "public_loopback": "198.51.100.20"
+        }
+      ]
+    },
+    "gre_inventory": {
+      "inventory_ref": "existing-shared-gre-space",
+      "assignment_mode": "next_available"
+    },
+    "certificates": {
+      "cgnat_head_end_server_cert_ref": "arn:aws:acm:us-east-1:111111111111:certificate/example-server",
+      "cgnat_isp_head_end_client_cert_ref": "arn:aws:acm:us-east-1:111111111111:certificate/example-client"
+    }
+  },
+  "sot": {
+    "service_id": "cgnat-service-example",
+    "customer_id": "customer-example",
+    "identities": {
+      "outer_tunnel_identity_ref": "cgnat-isp-head-end/example",
+      "inner_customer_identity": "customer-site-a",
+      "customer_loopback_ip": "10.250.1.10"
+    },
+    "addressing": {
+      "customer_original_inside_space": [
+        "10.20.30.0/24"
+      ],
+      "platform_assigned_inside_space": [
+        "10.128.10.0/24"
+      ],
+      "translation_mode": "one_to_one"
+    },
+    "backend_selection": {
+      "preferred_class": "nat_t",
+      "customer_facing_public_ip": "198.51.100.10",
+      "termination_public_loopback": "198.51.100.10"
+    },
+    "customer_devices": [
+      {
+        "name": "customer-device-1",
+        "subnet_id": "subnet-0e6ae1d598e08d002",
+        "known_inside_identity": "10.20.30.10",
+        "inner_vpn_auth_ref": "secret://customer-device-1/ipsec-key"
+      }
+    ]
+  }
+}

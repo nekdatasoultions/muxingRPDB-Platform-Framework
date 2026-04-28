@@ -1,0 +1,47 @@
+{
+  "record_type": "cgnat_backend_contract",
+  "service_id": "cgnat-service-example",
+  "customer_id": "customer-example",
+  "customer_facing_target": {
+    "target_public_ip": "198.51.100.10",
+    "description": "Customer continues to target the existing public IP used by the muxer-backed service."
+  },
+  "cgnat_path": {
+    "outer_tunnel": {
+      "auth_method": "certificate",
+      "peer_ip_mode": "dynamic_or_unknown",
+      "cgnat_isp_head_end_identity_ref": "cgnat-isp-head-end/example"
+    },
+    "inner_vpn": {
+      "auth_method": "key_based",
+      "inner_customer_identity": "customer-site-a",
+      "customer_loopback_ip": "10.250.1.10"
+    }
+  },
+  "gre_handoff": {
+    "transport": "gre",
+    "inventory_ref": "existing-shared-gre-space",
+    "assignment_mode": "next_available",
+    "cgnat_head_end_source_interface": "eth0",
+    "selected_backend_name": "backend-nat-1",
+    "selected_backend_gre_remote": "172.31.40.222"
+  },
+  "backend_termination": {
+    "preferred_class": "nat_t",
+    "termination_public_loopback": "198.51.100.10",
+    "selected_backend_public_loopback": "198.51.100.10"
+  },
+  "translation": {
+    "mode": "one_to_one",
+    "boundary": "backend_vpn_head_end",
+    "customer_original_inside_space": [
+      "10.20.30.0/24"
+    ],
+    "platform_assigned_inside_space": [
+      "10.128.10.0/24"
+    ]
+  },
+  "path_statement": {
+    "summary": "Customer keeps the same public IP target; CGNAT changes the path through the CGNAT ISP HEAD END, the CGNAT HEAD END, and GRE to the selected backend head end."
+  }
+}

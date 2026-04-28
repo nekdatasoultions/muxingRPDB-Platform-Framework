@@ -1,0 +1,47 @@
+{
+  "environment_name": "example-aws-environment",
+  "aws": {
+    "region": "us-east-1",
+    "vpc_id": "vpc-xxxxxxxxxxxxxxxxx"
+  },
+  "cgnat_head_end": {
+    "instance_name": "cgnat-head-end-1",
+    "subnet_id": "subnet-04a6b7f3a3855d438",
+    "instance_type": "t3.large",
+    "public_eip_allocation_id": "eipalloc-xxxxxxxxxxxxxxxxx",
+    "outer_tunnel_interface": "eth0",
+    "gre_source_interface": "eth0"
+  },
+  "cgnat_isp_head_end": {
+    "instance_name": "cgnat-isp-head-end-1",
+    "transit_subnet_id": "subnet-04a6b7f3a3855d438",
+    "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+    "instance_type": "t3.large",
+    "outer_tunnel_source_interface": "eth0",
+    "customer_facing_interface": "eth1"
+  },
+  "backend_vpn_head_ends": {
+    "nat_t": [
+      {
+        "name": "backend-nat-1",
+        "gre_remote": "172.31.40.222",
+        "public_loopback": "198.51.100.10"
+      }
+    ],
+    "non_nat": [
+      {
+        "name": "backend-non-nat-1",
+        "gre_remote": "172.31.41.222",
+        "public_loopback": "198.51.100.20"
+      }
+    ]
+  },
+  "gre_inventory": {
+    "inventory_ref": "existing-shared-gre-space",
+    "assignment_mode": "next_available"
+  },
+  "certificates": {
+    "cgnat_head_end_server_cert_ref": "arn:aws:acm:us-east-1:111111111111:certificate/example-server",
+    "cgnat_isp_head_end_client_cert_ref": "arn:aws:acm:us-east-1:111111111111:certificate/example-client"
+  }
+}
