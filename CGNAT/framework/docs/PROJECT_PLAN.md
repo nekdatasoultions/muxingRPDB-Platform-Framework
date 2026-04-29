@@ -479,8 +479,9 @@ Only happens after a Go decision.
 Scope:
 
 - one CGNAT HEAD END in `subnet-04a6b7f3a3855d438`
-- one CGNAT ISP HEAD END spanning both subnets
-- customer devices only in `subnet-0e6ae1d598e08d002`
+- one demo CGNAT ISP HEAD END using the reviewed operations-defined transit
+  and customer-facing subnets
+- demo customer devices in the reviewed customer-facing subnet
 - connectivity to backend VPN head ends
 - public loopback reachability model
 
@@ -587,7 +588,8 @@ This initial CGNAT block is complete when:
 This plan gives us:
 
 - corrected role names
-- exact subnet placement rules
+- fixed hosted-head-end placement plus variable-driven demo ISP/customer
+  placement rules
 - outer cert-auth tunnel
 - inner non-cert customer VPN
 - NAT to platform-assigned space

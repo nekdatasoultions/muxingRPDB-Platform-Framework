@@ -41,10 +41,12 @@ At minimum, operations inputs should provide:
 Operations inputs must respect the approved placement constraints:
 
 - CGNAT HEAD END only in `subnet-04a6b7f3a3855d438`
-- CGNAT ISP HEAD END spanning:
-  - `subnet-04a6b7f3a3855d438`
-  - `subnet-0e6ae1d598e08d002`
-- Customer Devices only in `subnet-0e6ae1d598e08d002`
+- CGNAT ISP HEAD END using an operations-defined transit subnet and an
+  operations-defined customer-facing subnet
+- Customer Devices using the operations-defined customer-facing subnet selected
+  for the demo
+- any single-instance demo ISP node keeping its transit and customer-facing
+  subnets in the same availability zone
 
 The framework validator should reject operations input that violates these
 constraints.

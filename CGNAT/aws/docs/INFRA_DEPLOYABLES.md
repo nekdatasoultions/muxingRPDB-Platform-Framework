@@ -36,9 +36,12 @@ Deployable infrastructure for the CGNAT ISP HEAD END includes:
 - optional key pair policy
 - root volume policy
 - transit-side subnet placement in `subnet-04a6b7f3a3855d438`
-- customer-side subnet placement in `subnet-0e6ae1d598e08d002`
+- customer-side subnet placement in an operations-defined customer-facing demo
+  subnet
 - interface layout across those subnets
 - any public-side attachment needed for the outer tunnel source path
+- same-AZ subnet compatibility when the ISP role is modeled as a single EC2
+  instance with multiple ENIs
 
 ### Shared Environment Infrastructure
 

@@ -130,10 +130,11 @@ to bypass the backend VPN head end or the CGNAT HEAD END.
 The dataplane must respect the approved placement model:
 
 - CGNAT HEAD END only in `subnet-04a6b7f3a3855d438`
-- CGNAT ISP HEAD END in:
-  - `subnet-04a6b7f3a3855d438`
-  - `subnet-0e6ae1d598e08d002`
-- Customer Devices only in `subnet-0e6ae1d598e08d002`
+- CGNAT ISP HEAD END using operations-defined transit and customer-facing demo
+  subnets
+- Customer Devices using the operations-defined customer-facing demo subnet
+- any single-instance demo ISP node using a same-AZ subnet pair for those two
+  attachments
 
 All dataplane-relevant values must be variable-driven, including:
 
