@@ -4,10 +4,26 @@
     "region": "us-east-1",
     "vpc_id": "vpc-xxxxxxxxxxxxxxxxx"
   },
+  "default_tags": {
+    "Project": "CGNAT",
+    "Environment": "example-aws-environment"
+  },
   "cgnat_head_end": {
     "instance_name": "cgnat-head-end-1",
     "subnet_id": "subnet-04a6b7f3a3855d438",
     "instance_type": "t3.large",
+    "ami_id": "ami-xxxxxxxxxxxxxxxxx",
+    "security_group_ids": [
+      "sg-xxxxxxxxxxxxxxxxx"
+    ],
+    "iam_instance_profile": "cgnat-head-end-profile",
+    "key_pair_name": null,
+    "root_volume": {
+      "device_name": "/dev/xvda",
+      "size_gb": 30,
+      "volume_type": "gp3",
+      "delete_on_termination": true
+    },
     "public_eip_allocation_id": "eipalloc-xxxxxxxxxxxxxxxxx",
     "outer_tunnel_interface": "eth0",
     "gre_source_interface": "eth0"
@@ -17,6 +33,18 @@
     "transit_subnet_id": "subnet-04a6b7f3a3855d438",
     "customer_subnet_id": "subnet-0e6ae1d598e08d002",
     "instance_type": "t3.large",
+    "ami_id": "ami-yyyyyyyyyyyyyyyyy",
+    "security_group_ids": [
+      "sg-yyyyyyyyyyyyyyyyy"
+    ],
+    "iam_instance_profile": "cgnat-isp-head-end-profile",
+    "key_pair_name": null,
+    "root_volume": {
+      "device_name": "/dev/xvda",
+      "size_gb": 30,
+      "volume_type": "gp3",
+      "delete_on_termination": true
+    },
     "outer_tunnel_source_interface": "eth0",
     "customer_facing_interface": "eth1"
   },

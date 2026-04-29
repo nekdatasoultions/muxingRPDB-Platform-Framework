@@ -15,6 +15,11 @@ choices that must exist before the server-side CGNAT behavior can be configured.
 Deployable infrastructure for the CGNAT HEAD END includes:
 
 - EC2 instance definition
+- AMI selection
+- security group assignment
+- IAM instance profile assignment
+- optional key pair policy
+- root volume policy
 - subnet placement in `subnet-04a6b7f3a3855d438`
 - instance type
 - public EIP allocation or association
@@ -25,6 +30,11 @@ Deployable infrastructure for the CGNAT HEAD END includes:
 Deployable infrastructure for the CGNAT ISP HEAD END includes:
 
 - EC2 instance definition
+- AMI selection
+- security group assignment
+- IAM instance profile assignment
+- optional key pair policy
+- root volume policy
 - transit-side subnet placement in `subnet-04a6b7f3a3855d438`
 - customer-side subnet placement in `subnet-0e6ae1d598e08d002`
 - interface layout across those subnets

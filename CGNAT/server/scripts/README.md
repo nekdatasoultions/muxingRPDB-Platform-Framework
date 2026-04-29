@@ -5,6 +5,7 @@ Server-side scripts belong here.
 Current server-side builder:
 
 - `render_server_package.py`
+- `render_scenario1_server_configs.py`
 
 Usage:
 
@@ -21,3 +22,22 @@ This renders server-side package artifacts only:
 - CGNAT ISP HEAD END path shape
 - backend expectations
 - validation targets
+
+Concrete Scenario 1 config artifact render:
+
+```powershell
+python CGNAT\server\scripts\render_scenario1_server_configs.py `
+  CGNAT\build\sample-from-split\server-package `
+  CGNAT\build\sample-from-split\server-configs
+```
+
+This renders:
+
+- head-end structured config
+- ISP-side structured config
+- backend validation expectations
+- runtime input manifest
+- runtime environment file
+- validation command sheet
+- strongSwan `swanctl.conf` fragments
+- Linux iproute2 GRE/route scripts

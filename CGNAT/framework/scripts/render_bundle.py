@@ -11,7 +11,7 @@ def main() -> int:
     src_root = project_root / "src"
     sys.path.insert(0, str(src_root))
 
-    from cgnat.bundle import load_bundle, dump_json, dump_text
+    from cgnat.bundle import ensure_path_within_cgnat, load_bundle, dump_json, dump_text
     from cgnat.render import (
         render_backend_contract,
         render_deployment_summary,
@@ -32,7 +32,7 @@ def main() -> int:
     bundle = load_bundle(args.bundle)
     validation = validate_bundle(bundle)
 
-    output_dir = Path(args.output_dir)
+    output_dir = ensure_path_within_cgnat(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     framework_dir = output_dir / "framework"

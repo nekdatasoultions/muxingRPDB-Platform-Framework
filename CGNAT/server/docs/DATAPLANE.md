@@ -170,7 +170,15 @@ All dataplane-relevant values must be variable-driven, including:
 - How should backend class selection be represented in config and SoT?
 - What minimum observability do we need at the CGNAT HEAD END to confirm
   correct steering?
-- What is the best way to validate return-path symmetry in the first prototype?
+
+Return-path validation for Scenario 1 is no longer an open question. The
+validation plan now requires explicit request and reply visibility at:
+
+- Customer Device
+- CGNAT ISP HEAD END
+- CGNAT HEAD END outer-tunnel path
+- CGNAT HEAD END GRE path
+- selected backend head end
 
 ## Acceptance Criteria
 

@@ -15,6 +15,8 @@ The operations layer answers questions like:
 - which AWS account and region is this deployed into
 - which VPC and subnets are used
 - which instances represent the CGNAT HEAD END and CGNAT ISP HEAD END
+- which AMI, security groups, and instance profile those roles use
+- what tag policy and root volume policy those roles use
 - which backend VPN head ends are reachable
 - which certificate references are used
 - how a test deployment is rolled forward or rolled back
@@ -28,6 +30,8 @@ At minimum, operations inputs should provide:
 - VPC identifier
 - CGNAT HEAD END placement
 - CGNAT ISP HEAD END placement
+- EC2 launch configuration for each CGNAT role
+- default AWS tagging policy
 - backend VPN head-end inventory
 - GRE inventory reference and allocation policy
 - outer-tunnel certificate references

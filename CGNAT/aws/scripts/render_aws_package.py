@@ -53,6 +53,11 @@ def _render_cgnat_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         "role": "cgnat_head_end",
         "instance_name": operations["cgnat_head_end"]["instance_name"],
         "instance_type": operations["cgnat_head_end"]["instance_type"],
+        "ami_id": operations["cgnat_head_end"]["ami_id"],
+        "security_group_ids": operations["cgnat_head_end"]["security_group_ids"],
+        "iam_instance_profile": operations["cgnat_head_end"]["iam_instance_profile"],
+        "key_pair_name": operations["cgnat_head_end"]["key_pair_name"],
+        "root_volume": operations["cgnat_head_end"]["root_volume"],
         "subnet_id": operations["cgnat_head_end"]["subnet_id"],
         "public_eip_allocation_id": operations["cgnat_head_end"]["public_eip_allocation_id"],
         "interfaces": {
@@ -69,6 +74,11 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         "role": "cgnat_isp_head_end",
         "instance_name": operations["cgnat_isp_head_end"]["instance_name"],
         "instance_type": operations["cgnat_isp_head_end"]["instance_type"],
+        "ami_id": operations["cgnat_isp_head_end"]["ami_id"],
+        "security_group_ids": operations["cgnat_isp_head_end"]["security_group_ids"],
+        "iam_instance_profile": operations["cgnat_isp_head_end"]["iam_instance_profile"],
+        "key_pair_name": operations["cgnat_isp_head_end"]["key_pair_name"],
+        "root_volume": operations["cgnat_isp_head_end"]["root_volume"],
         "subnets": {
             "transit_subnet_id": operations["cgnat_isp_head_end"]["transit_subnet_id"],
             "customer_subnet_id": operations["cgnat_isp_head_end"]["customer_subnet_id"],
@@ -84,6 +94,7 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
 def _render_dependencies(bundle: dict[str, Any]) -> dict[str, Any]:
     return {
         "aws": bundle["operations"]["aws"],
+        "default_tags": bundle["operations"]["default_tags"],
         "backend_vpn_head_ends": bundle["operations"]["backend_vpn_head_ends"],
         "gre_inventory": bundle["operations"]["gre_inventory"],
         "certificates": bundle["operations"]["certificates"],
@@ -142,7 +153,7 @@ def _render_readme(bundle: dict[str, Any]) -> str:
 def main() -> int:
     sys.path.insert(0, str(_framework_src_root()))
 
-    from cgnat.bundle import dump_json, dump_text, load_bundle
+    from cgnat.bundle import dump_json, dump_text, ensure_path_within_cgnat, load_bundle
     from cgnat.validate import validate_bundle
 
     parser = argparse.ArgumentParser(description="Render AWS-side deployment package artifacts from a CGNAT bundle.")
@@ -155,7 +166,7 @@ def main() -> int:
     if not validation["ok"]:
         return 1
 
-    output_dir = Path(args.output_dir)
+    output_dir = ensure_path_within_cgnat(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     dump_json(output_dir / "package-manifest.json", _render_package_manifest(bundle))

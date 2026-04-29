@@ -52,6 +52,8 @@ def _render_cgnat_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
             "peer_ip_mode": framework["topology"]["outer_tunnel"]["peer_ip_mode"],
             "termination_interface": operations["cgnat_head_end"]["outer_tunnel_interface"],
             "server_certificate_ref": operations["certificates"]["cgnat_head_end_server_cert_ref"],
+            "local_identity": f"cgnat-head-end/{sot['service_id']}",
+            "remote_identity_ref": sot["identities"]["outer_tunnel_identity_ref"],
         },
         "gre_handoff": {
             "transport": framework["topology"]["handoff"]["transport"],
@@ -80,6 +82,8 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
             "peer_ip_mode": framework["topology"]["outer_tunnel"]["peer_ip_mode"],
             "source_interface": operations["cgnat_isp_head_end"]["outer_tunnel_source_interface"],
             "client_certificate_ref": operations["certificates"]["cgnat_isp_head_end_client_cert_ref"],
+            "local_identity_ref": sot["identities"]["outer_tunnel_identity_ref"],
+            "remote_identity": f"cgnat-head-end/{sot['service_id']}",
         },
         "customer_service_path": {
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],
@@ -168,7 +172,7 @@ def _render_readme(bundle: dict[str, Any]) -> str:
 def main() -> int:
     sys.path.insert(0, str(_framework_src_root()))
 
-    from cgnat.bundle import dump_json, dump_text, load_bundle
+    from cgnat.bundle import dump_json, dump_text, ensure_path_within_cgnat, load_bundle
     from cgnat.validate import validate_bundle
 
     parser = argparse.ArgumentParser(description="Render server-side configuration package artifacts from a CGNAT bundle.")
@@ -181,7 +185,7 @@ def main() -> int:
     if not validation["ok"]:
         return 1
 
-    output_dir = Path(args.output_dir)
+    output_dir = ensure_path_within_cgnat(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     dump_json(output_dir / "package-manifest.json", _render_package_manifest(bundle))

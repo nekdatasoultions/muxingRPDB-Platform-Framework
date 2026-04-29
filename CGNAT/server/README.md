@@ -4,7 +4,7 @@ This lane holds server-side assets:
 
 - host/service behavior documents
 - server-side deployment shapes
-- future server-side configuration scripts
+- server-side configuration scripts
 
 Use this lane for what gets configured on hosts after infrastructure exists.
 

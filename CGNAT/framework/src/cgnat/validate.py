@@ -94,6 +94,24 @@ def _validate_operations(
     head_subnet = _get(operations, "cgnat_head_end", "subnet_id")
     if head_subnet not in head_subnets:
         messages.append(_msg("error", "head_subnet", "CGNAT HEAD END subnet is outside the allowed set."))
+    default_tags = _get(operations, "default_tags")
+    if not isinstance(default_tags, dict) or not default_tags:
+        messages.append(_msg("error", "default_tags", "operations.default_tags must be a non-empty object."))
+    head_ami = _get(operations, "cgnat_head_end", "ami_id")
+    head_sgs = _get(operations, "cgnat_head_end", "security_group_ids")
+    head_profile = _get(operations, "cgnat_head_end", "iam_instance_profile")
+    head_key_pair = _get(operations, "cgnat_head_end", "key_pair_name")
+    head_root = _get(operations, "cgnat_head_end", "root_volume") or {}
+    if not head_ami:
+        messages.append(_msg("error", "head_ami", "CGNAT HEAD END ami_id is required."))
+    if not isinstance(head_sgs, list) or not head_sgs:
+        messages.append(_msg("error", "head_security_groups", "CGNAT HEAD END security_group_ids must be a non-empty list."))
+    if not head_profile:
+        messages.append(_msg("error", "head_instance_profile", "CGNAT HEAD END iam_instance_profile is required."))
+    if head_key_pair is not None and not isinstance(head_key_pair, str):
+        messages.append(_msg("error", "head_key_pair_name", "CGNAT HEAD END key_pair_name must be a string or null."))
+    if not head_root.get("device_name") or not head_root.get("size_gb") or not head_root.get("volume_type"):
+        messages.append(_msg("error", "head_root_volume", "CGNAT HEAD END root_volume must define device_name, size_gb, and volume_type."))
 
     isp_transit_subnet = _get(operations, "cgnat_isp_head_end", "transit_subnet_id")
     isp_customer_subnet = _get(operations, "cgnat_isp_head_end", "customer_subnet_id")
@@ -103,6 +121,21 @@ def _validate_operations(
         messages.append(_msg("error", "isp_customer_subnet", "CGNAT ISP HEAD END customer subnet is outside the allowed set."))
     if isp_customer_subnet not in customer_subnets:
         messages.append(_msg("error", "customer_side_subnet", "CGNAT ISP HEAD END customer subnet is not in the customer-device subnet set."))
+    isp_ami = _get(operations, "cgnat_isp_head_end", "ami_id")
+    isp_sgs = _get(operations, "cgnat_isp_head_end", "security_group_ids")
+    isp_profile = _get(operations, "cgnat_isp_head_end", "iam_instance_profile")
+    isp_key_pair = _get(operations, "cgnat_isp_head_end", "key_pair_name")
+    isp_root = _get(operations, "cgnat_isp_head_end", "root_volume") or {}
+    if not isp_ami:
+        messages.append(_msg("error", "isp_ami", "CGNAT ISP HEAD END ami_id is required."))
+    if not isinstance(isp_sgs, list) or not isp_sgs:
+        messages.append(_msg("error", "isp_security_groups", "CGNAT ISP HEAD END security_group_ids must be a non-empty list."))
+    if not isp_profile:
+        messages.append(_msg("error", "isp_instance_profile", "CGNAT ISP HEAD END iam_instance_profile is required."))
+    if isp_key_pair is not None and not isinstance(isp_key_pair, str):
+        messages.append(_msg("error", "isp_key_pair_name", "CGNAT ISP HEAD END key_pair_name must be a string or null."))
+    if not isp_root.get("device_name") or not isp_root.get("size_gb") or not isp_root.get("volume_type"):
+        messages.append(_msg("error", "isp_root_volume", "CGNAT ISP HEAD END root_volume must define device_name, size_gb, and volume_type."))
 
     backends = _get(operations, "backend_vpn_head_ends") or {}
     if not any(backends.get(name) for name in ALLOWED_BACKEND_CLASSES):
