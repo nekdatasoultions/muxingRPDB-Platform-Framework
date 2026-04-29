@@ -234,7 +234,197 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertTrue((prep_output / "aws-deploy-plan" / "deployment-plan.json").exists())
         self.assertTrue((prep_output / "server-package" / "package-manifest.json").exists())
         self.assertTrue((prep_output / "server-configs" / "scenario1-runtime.env").exists())
+        self.assertTrue((prep_output / "host-apply" / "package-manifest.json").exists())
+        self.assertTrue((prep_output / "host-apply" / "hosts" / "cgnat-head-end" / "apply.sh").exists())
+        self.assertTrue((prep_output / "host-apply" / "hosts" / "cgnat-isp-head-end" / "preflight.sh").exists())
         self.assertIn("does not deploy infrastructure", readme)
+
+    def test_prepare_scenario1_can_include_remote_apply_plan(self) -> None:
+        prep_output = self.tempdir_path / "scenario1-prep-remote"
+        host_access_path = self.tempdir_path / "host-access-for-prep.json"
+
+        host_access = {
+            "cgnat_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.10",
+                "private_key_path": "/keys/cgnat-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-head-end",
+            },
+            "cgnat_isp_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.20",
+                "private_key_path": "/keys/cgnat-isp-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-isp-head-end",
+            },
+        }
+        host_access_path.write_text(json.dumps(host_access, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "framework" / "scripts" / "prepare_scenario1.py"),
+            str(self.bundle_path),
+            str(prep_output),
+            "--host-access-json",
+            str(host_access_path),
+        )
+
+        summary = json.loads((prep_output / "scenario1-preparation-summary.json").read_text(encoding="utf-8"))
+        readme = (prep_output / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("remote_apply_output", summary["steps"])
+        self.assertTrue((prep_output / "remote-apply-plan" / "commands" / "cgnat_head_end-stage.sh").exists())
+        self.assertIn("Remote apply plan", readme)
+
+    def test_prepare_scenario1_host_apply_outputs_per_host_bundles(self) -> None:
+        server_output = self.tempdir_path / "server-package"
+        config_output = self.tempdir_path / "server-configs"
+        host_apply_output = self.tempdir_path / "host-apply"
+
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"),
+            str(self.bundle_path),
+            str(server_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"),
+            str(server_output),
+            str(config_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_host_apply.py"),
+            str(config_output),
+            str(host_apply_output),
+        )
+
+        manifest = json.loads((host_apply_output / "package-manifest.json").read_text(encoding="utf-8"))
+        apply_order = json.loads((host_apply_output / "apply-order.json").read_text(encoding="utf-8"))
+        head_apply = (host_apply_output / "hosts" / "cgnat-head-end" / "apply.sh").read_text(encoding="utf-8")
+        head_preflight = (host_apply_output / "hosts" / "cgnat-head-end" / "preflight.sh").read_text(encoding="utf-8")
+        isp_preflight = (host_apply_output / "hosts" / "cgnat-isp-head-end" / "preflight.sh").read_text(encoding="utf-8")
+        isp_config = json.loads((config_output / "cgnat-isp-head-end-config.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest["package_type"], "scenario1_host_apply_package")
+        self.assertEqual(apply_order["steps"][0]["role"], "cgnat_head_end")
+        self.assertIn("swanctl --load-conns", head_apply)
+        self.assertIn("bash \"$SCRIPT_DIR/cgnat-head-end-gre.sh\"", head_apply)
+        self.assertIn("command -v swanctl", head_preflight)
+        self.assertIn("customer_facing_interface", json.dumps(isp_config))
+        self.assertIn("ip link show", isp_preflight)
+
+    def test_prepare_scenario1_remote_apply_plan_outputs_command_scripts(self) -> None:
+        server_output = self.tempdir_path / "server-package"
+        config_output = self.tempdir_path / "server-configs"
+        host_apply_output = self.tempdir_path / "host-apply"
+        remote_apply_output = self.tempdir_path / "remote-apply-plan"
+        host_access_path = self.tempdir_path / "host-access.json"
+
+        host_access = {
+            "cgnat_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.10",
+                "private_key_path": "/keys/cgnat-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-head-end",
+            },
+            "cgnat_isp_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.20",
+                "private_key_path": "/keys/cgnat-isp-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-isp-head-end",
+            },
+        }
+        host_access_path.write_text(json.dumps(host_access, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"),
+            str(self.bundle_path),
+            str(server_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"),
+            str(server_output),
+            str(config_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_host_apply.py"),
+            str(config_output),
+            str(host_apply_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_remote_apply_plan.py"),
+            str(host_apply_output),
+            str(host_access_path),
+            str(remote_apply_output),
+        )
+
+        manifest = json.loads((remote_apply_output / "package-manifest.json").read_text(encoding="utf-8"))
+        head_stage = (remote_apply_output / "commands" / "cgnat_head_end-stage.sh").read_text(encoding="utf-8")
+        isp_apply = (remote_apply_output / "commands" / "cgnat_isp_head_end-apply.sh").read_text(encoding="utf-8")
+
+        self.assertEqual(manifest["package_type"], "scenario1_remote_apply_plan")
+        self.assertIn("scp -i", head_stage)
+        self.assertIn("203.0.113.10", head_stage)
+        self.assertIn("./apply.sh", isp_apply)
+        self.assertIn("/var/tmp/cgnat-isp-head-end", isp_apply)
+
+    def test_execute_scenario1_remote_apply_plan_plan_mode(self) -> None:
+        server_output = self.tempdir_path / "server-package"
+        config_output = self.tempdir_path / "server-configs"
+        host_apply_output = self.tempdir_path / "host-apply"
+        remote_apply_output = self.tempdir_path / "remote-apply-plan"
+        execution_output = self.tempdir_path / "remote-apply-execution"
+        host_access_path = self.tempdir_path / "host-access-execution.json"
+
+        host_access = {
+            "cgnat_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.10",
+                "private_key_path": "/keys/cgnat-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-head-end",
+            },
+            "cgnat_isp_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "203.0.113.20",
+                "private_key_path": "/keys/cgnat-isp-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-isp-head-end",
+            },
+        }
+        host_access_path.write_text(json.dumps(host_access, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"),
+            str(self.bundle_path),
+            str(server_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"),
+            str(server_output),
+            str(config_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_host_apply.py"),
+            str(config_output),
+            str(host_apply_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_remote_apply_plan.py"),
+            str(host_apply_output),
+            str(host_access_path),
+            str(remote_apply_output),
+        )
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "execute_scenario1_remote_apply_plan.py"),
+            str(remote_apply_output),
+            str(execution_output),
+            "--mode",
+            "plan",
+        )
+
+        plan = json.loads((execution_output / "execution-plan.json").read_text(encoding="utf-8"))
+        readiness = json.loads((execution_output / "execution-readiness.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(plan["plan_type"], "scenario1_remote_apply_execution_plan")
+        self.assertEqual(readiness["mode"], "plan")
+        self.assertIn("steps", plan)
+        self.assertFalse(readiness["live_execution_allowed"])
 
 
 if __name__ == "__main__":

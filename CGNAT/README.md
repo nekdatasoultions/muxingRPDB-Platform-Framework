@@ -63,6 +63,7 @@ Useful script entry points:
 - [Scenario 1 local preparation orchestrator](./framework/scripts/prepare_scenario1.py)
 - [AWS package builder](./aws/scripts/README.md)
 - [Server package builder](./server/scripts/README.md)
+- [Server host-apply packager](./server/scripts/prepare_scenario1_host_apply.py)
 
 Useful cross-lane references:
 

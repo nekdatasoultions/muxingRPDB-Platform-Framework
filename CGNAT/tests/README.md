@@ -11,6 +11,7 @@ Current coverage:
   - AWS package artifacts
   - server package artifacts
 - Scenario 1 local preparation orchestration without deployment
+- Scenario 1 host-apply package generation without remote execution
 
 Run with:
 

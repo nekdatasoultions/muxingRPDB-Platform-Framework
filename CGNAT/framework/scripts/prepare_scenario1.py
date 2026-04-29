@@ -35,6 +35,9 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _render_readme(summary: dict[str, Any]) -> str:
     steps = summary["steps"]
+    remote_line = ""
+    if steps.get("remote_apply_output"):
+        remote_line = f"- Remote apply plan: `{steps['remote_apply_output']}`"
     return "\n".join(
         [
             "# Scenario 1 Preparation Output",
@@ -52,6 +55,8 @@ def _render_readme(summary: dict[str, Any]) -> str:
             f"- AWS deploy plan: `{steps['aws_deploy_plan_output']}`",
             f"- Server package: `{steps['server_package_output']}`",
             f"- Server configs: `{steps['server_config_output']}`",
+            f"- Host apply package: `{steps['host_apply_output']}`",
+            remote_line,
             "",
             "## Notes",
             "",
@@ -75,6 +80,10 @@ def main() -> int:
     )
     parser.add_argument("bundle", help="Path to the deployment bundle JSON file.")
     parser.add_argument("output_dir", help="Directory to write the orchestrated preparation outputs.")
+    parser.add_argument(
+        "--host-access-json",
+        help="Optional host access JSON file. When supplied, also render a no-execution remote apply plan.",
+    )
     args = parser.parse_args()
 
     bundle_path = Path(args.bundle).resolve()
@@ -86,6 +95,8 @@ def main() -> int:
     aws_deploy_plan_dir = output_dir / "aws-deploy-plan"
     server_package_dir = output_dir / "server-package"
     server_config_dir = output_dir / "server-configs"
+    host_apply_dir = output_dir / "host-apply"
+    remote_apply_dir = output_dir / "remote-apply-plan"
 
     _run_script(
         str(_script_path("framework", "scripts", "render_bundle.py")),
@@ -114,10 +125,33 @@ def main() -> int:
         str(server_package_dir),
         str(server_config_dir),
     )
+    _run_script(
+        str(_script_path("server", "scripts", "prepare_scenario1_host_apply.py")),
+        str(server_config_dir),
+        str(host_apply_dir),
+    )
+    if args.host_access_json:
+        _run_script(
+            str(_script_path("server", "scripts", "prepare_scenario1_remote_apply_plan.py")),
+            str(host_apply_dir),
+            str(Path(args.host_access_json).resolve()),
+            str(remote_apply_dir),
+        )
 
     bundle = load_bundle(bundle_path)
     validation = _load_json(framework_render_dir / "framework" / "validation-result.json")
     aws_readiness = _load_json(aws_deploy_plan_dir / "deployment-readiness.json")
+
+    steps = {
+        "framework_render_output": str(framework_render_dir),
+        "aws_package_output": str(aws_package_dir),
+        "aws_deploy_plan_output": str(aws_deploy_plan_dir),
+        "server_package_output": str(server_package_dir),
+        "server_config_output": str(server_config_dir),
+        "host_apply_output": str(host_apply_dir),
+    }
+    if args.host_access_json:
+        steps["remote_apply_output"] = str(remote_apply_dir)
 
     summary = {
         "orchestration_type": "scenario1_preparation",
@@ -129,13 +163,7 @@ def main() -> int:
         "validation_warning_count": validation["warning_count"],
         "aws_live_create_allowed": aws_readiness["live_create_allowed"],
         "aws_blocking_issue_count": aws_readiness["blocking_issue_count"],
-        "steps": {
-            "framework_render_output": str(framework_render_dir),
-            "aws_package_output": str(aws_package_dir),
-            "aws_deploy_plan_output": str(aws_deploy_plan_dir),
-            "server_package_output": str(server_package_dir),
-            "server_config_output": str(server_config_dir),
-        },
+        "steps": steps,
     }
 
     dump_json(output_dir / "scenario1-preparation-summary.json", summary)

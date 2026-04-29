@@ -20,6 +20,8 @@ Current orchestration entry point:
   - renders AWS package artifacts
   - builds the AWS plan in plan mode only
   - renders server package and server config artifacts
+  - prepares per-host apply bundles
+  - optionally prepares a no-execution remote apply plan when host access data is supplied
   - does not deploy infrastructure
 
 Useful references in this lane:
