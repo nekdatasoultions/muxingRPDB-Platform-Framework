@@ -24,6 +24,11 @@ Current orchestration entry point:
   - optionally runs a live AWS preflight against the rendered AWS package
   - optionally prepares a no-execution remote apply plan when host access data is supplied
   - does not deploy infrastructure
+- `scripts/prepare_scenario1_predeploy_review.py`
+  - assembles a pre-deploy review package from the generated prep and AWS
+    dry-run artifacts
+  - highlights open operator items before host apply
+  - does not deploy infrastructure
 
 Useful references in this lane:
 

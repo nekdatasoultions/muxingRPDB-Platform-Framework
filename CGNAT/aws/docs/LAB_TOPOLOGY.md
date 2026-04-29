@@ -21,9 +21,9 @@ to create the smallest environment that can prove:
 ```mermaid
 flowchart LR
     CD["Customer Devices
-subnet-0e6ae1d598e08d002"] --> ISP["CGNAT ISP HEAD END
-subnet-04a6b7f3a3855d438
-subnet-0e6ae1d598e08d002"]
+operations-defined customer subnet"] --> ISP["CGNAT ISP HEAD END
+operations-defined transit subnet
+operations-defined customer subnet"]
     ISP -->|Outer cert-auth tunnel| CHE["CGNAT HEAD END
 subnet-04a6b7f3a3855d438"]
     CHE -->|GRE| NAT["Backend NAT-T VPN Head End"]
@@ -53,8 +53,9 @@ One ISP-side CGNAT ISP HEAD END is required.
 
 Placement:
 
-- `subnet-04a6b7f3a3855d438`
-- `subnet-0e6ae1d598e08d002`
+- operations-defined transit subnet
+- operations-defined customer-facing subnet
+- same-AZ subnet pair when modeled as a single EC2 instance with multiple ENIs
 
 Primary purpose:
 
@@ -67,7 +68,7 @@ At least one Customer Device is required for the first lab pass.
 
 Placement:
 
-- only in `subnet-0e6ae1d598e08d002`
+- in the operations-defined customer-facing subnet chosen for the demo
 
 Primary purpose:
 
@@ -97,10 +98,10 @@ Primary purpose:
 The lab topology must enforce the approved subnet constraints:
 
 - CGNAT HEAD END only in `subnet-04a6b7f3a3855d438`
-- CGNAT ISP HEAD END only in:
-  - `subnet-04a6b7f3a3855d438`
-  - `subnet-0e6ae1d598e08d002`
-- Customer Devices only in `subnet-0e6ae1d598e08d002`
+- CGNAT ISP HEAD END only in the operations-defined transit and
+  customer-facing subnet pair
+- Customer Devices only in the operations-defined customer-facing subnet
+- any single-instance demo ISP node must use a same-AZ subnet pair
 
 These constraints must be represented by variables/config rather than hardcoded
 assumptions.

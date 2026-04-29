@@ -155,9 +155,10 @@ may not detect NAT on the inner layer.
 The outer access tunnel must be designed against the approved placement model:
 
 - CGNAT HEAD END only in `subnet-04a6b7f3a3855d438`
-- CGNAT ISP HEAD END spanning:
-  - `subnet-04a6b7f3a3855d438`
-  - `subnet-0e6ae1d598e08d002`
+- CGNAT ISP HEAD END using operations-defined transit and customer-facing
+  subnets
+- any single-instance demo ISP node using both interfaces must keep that
+  subnet pair in the same AZ
 
 All related addressing and interface assumptions must be variable-driven.
 

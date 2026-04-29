@@ -61,6 +61,7 @@ This means the project is not only about packet flow. It is also about:
 Useful script entry points:
 
 - [Scenario 1 local preparation orchestrator](./framework/scripts/prepare_scenario1.py)
+- [Scenario 1 pre-deploy review packager](./framework/scripts/prepare_scenario1_predeploy_review.py)
 - [AWS package builder](./aws/scripts/README.md)
 - [Server package builder](./server/scripts/README.md)
 - [Server host-apply packager](./server/scripts/prepare_scenario1_host_apply.py)

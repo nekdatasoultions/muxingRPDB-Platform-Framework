@@ -102,7 +102,7 @@ into the platform.
 
 They:
 
-- sit only in `subnet-0e6ae1d598e08d002`
+- sit in the operations-defined customer-facing demo subnet
 - initiate the inner S2S VPN
 - do not use certificates for the inner VPN
 - use keys and customer identity material
@@ -113,7 +113,9 @@ The CGNAT ISP HEAD END is the customer/carrier-side bridge.
 
 It:
 
-- spans `subnet-04a6b7f3a3855d438` and `subnet-0e6ae1d598e08d002`
+- uses operations-defined transit and customer-facing subnets
+- must keep those subnets same-AZ when the role is modeled as a single EC2
+  instance with multiple ENIs
 - establishes the outer certificate-authenticated tunnel
 - provides the transport path used by downstream Customer Devices
 - does not terminate the platform-side service intent of the inner VPN
@@ -304,6 +306,7 @@ translation boundary so that service-side routing stays deterministic.
 - The customer-facing inner VPN target must remain the same public IP currently
   used by the existing muxer-backed service.
 - Variable-driven placement and addressing are mandatory.
+- Any single-instance demo ISP node must use a same-AZ subnet pair.
 - The framework must be reusable across AWS environments rather than tied to a
   single deployment footprint.
 - The operations model must be explicit rather than implied.

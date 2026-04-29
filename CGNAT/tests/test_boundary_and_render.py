@@ -15,6 +15,7 @@ sys.path.insert(0, str(FRAMEWORK_SRC))
 
 from cgnat.bundle import cgnat_root, ensure_path_within_cgnat  # noqa: E402
 from cgnat.aws_preflight import analyze_aws_inventory  # noqa: E402
+from cgnat.predeploy_review import build_predeploy_review  # noqa: E402
 
 
 class WorkspaceBoundaryTests(unittest.TestCase):
@@ -596,6 +597,36 @@ class PackageRenderingTests(unittest.TestCase):
 
         self.assertFalse(result["ready_for_live_apply"])
         self.assertIn("isp_head_end_subnet_az_mismatch", issue_codes)
+
+    def test_build_predeploy_review_reports_ready_state_and_open_items(self) -> None:
+        bundle = json.loads((CGNAT_ROOT / "framework" / "config" / "deployment-bundle.example.json").read_text(encoding="utf-8"))
+        prep_summary = {
+            "validation_ok": True,
+            "aws_live_create_allowed": True,
+            "aws_preflight_ready_for_live_apply": True,
+        }
+        preflight_result = {"issues": []}
+        aws_apply_result = {
+            "head_end": {"status": "dry_run_ok"},
+            "isp_head_end": {"status": "dry_run_ok"},
+            "post_create_actions": [
+                {"status": "dry_run_ok"},
+                {"status": "dry_run_ok"},
+            ],
+        }
+
+        review = build_predeploy_review(
+            bundle,
+            prep_summary,
+            preflight_result,
+            aws_apply_result,
+            host_access_strategy_path=str(CGNAT_ROOT / "server" / "config" / "host-access-strategy.example.json"),
+        )
+
+        self.assertTrue(review["ready_for_hard_review"])
+        self.assertTrue(review["status_summary"]["aws_dry_run_ok"])
+        self.assertEqual(review["deployment_model"]["customer_facing_public_ip"], "198.51.100.10")
+        self.assertGreaterEqual(len(review["open_items_before_host_apply"]), 3)
 
 
 if __name__ == "__main__":

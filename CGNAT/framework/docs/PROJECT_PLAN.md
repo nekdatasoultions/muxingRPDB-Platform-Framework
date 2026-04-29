@@ -152,7 +152,7 @@ routing / services / return path
 - the first implementation should assume CGNAT-owned record shapes even if the
   same database platform is reused
 
-## 5. Fixed Placement Requirements
+## 5. Placement Requirements
 
 ### CGNAT HEAD END
 
@@ -162,21 +162,24 @@ Must exist only in:
 
 ### CGNAT ISP HEAD END
 
-Must span:
+For the first single-instance demo model, the CGNAT ISP HEAD END must:
 
-- `subnet-04a6b7f3a3855d438`
-- `subnet-0e6ae1d598e08d002`
+- use an operations-defined transit subnet
+- use an operations-defined customer-facing subnet
+- keep both attached subnets in the same availability zone when modeled as one
+  EC2 instance with multiple ENIs
 
 ### Customer Devices
 
-Must exist only in:
+For the first single-instance demo model, Customer Devices must:
 
-- `subnet-0e6ae1d598e08d002`
+- use an operations-defined customer-facing subnet
+- stay aligned with the customer-facing side chosen for the demo ISP node
 
 ### Placement Modeling Rule
 
-These subnet rules must be represented in variables/config and validated by the
-CGNAT design.
+These placement rules must be represented in variables/config and validated by
+the CGNAT design.
 
 ## 6. Guardrails
 
@@ -398,8 +401,9 @@ Define the exact topology needed to prove the design.
 Required components:
 
 - one CGNAT HEAD END in `subnet-04a6b7f3a3855d438`
-- one CGNAT ISP HEAD END spanning both subnets
-- customer devices only in `subnet-0e6ae1d598e08d002`
+- one demo CGNAT ISP HEAD END using operations-defined transit and
+  customer-facing subnets
+- demo customer devices in the chosen customer-facing subnet
 - backend NAT-T and non-NAT VPN head ends
 - test/core service nodes
 
@@ -440,7 +444,8 @@ All of these must be true:
 1. Do we understand the exact outer-tunnel cert-auth model?
 2. Do we understand the exact inner-VPN model?
 3. Do we know where NAT from customer-original to assigned space occurs?
-4. Are subnet placement rules fully documented?
+4. Are subnet placement rules fully documented, including same-AZ constraints
+   for any single-instance multi-ENI demo node?
 5. Are deployment variables defined?
 6. Do we know exactly which AWS resources must be created?
 7. Do we have a rollback approach for the test deployment?

@@ -37,9 +37,11 @@ Validate that the configured topology matches the approved design.
 This includes:
 
 - one CGNAT HEAD END in `subnet-04a6b7f3a3855d438`
-- one CGNAT ISP HEAD END spanning the approved subnet set
-- Customer Devices only in `subnet-0e6ae1d598e08d002`
+- one demo CGNAT ISP HEAD END using the approved operations-defined subnet set
+- Customer Devices aligned to the operations-defined customer-facing subnet
 - backend inventory exists for NAT-T or non-NAT service classes
+- any single-instance multi-ENI demo node keeps its attached subnets in the
+  same availability zone
 
 ### Layer 4: Functional Validation
 
@@ -127,6 +129,7 @@ The minimum Scenario 1 evidence set should include:
 - CGNAT ISP HEAD END transit subnet is allowed
 - CGNAT ISP HEAD END customer subnet is allowed
 - Customer Device subnet placement is allowed
+- single-instance demo ISP/customer subnet pair is same-AZ compatible
 
 ### Inventory Checks
 
