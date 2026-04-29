@@ -71,3 +71,54 @@ shape to produce:
 
 Remaining caution before live deployment is now operational review, not missing
 launch-shape definition.
+
+## Issue 2: Scenario 1 ISP HEAD END Cannot Span the Current Fixed Subnets
+
+### Status
+
+- open hard no-go for `rpdb-empty-live`
+
+### Discovered During
+
+- live AWS preflight for `deployment-bundle.rpdb-empty-live.json`
+
+### Summary
+
+The current Scenario 1 placement rule says the CGNAT ISP HEAD END must attach
+to:
+
+- transit subnet `subnet-04a6b7f3a3855d438`
+- customer subnet `subnet-0e6ae1d598e08d002`
+
+In the live AWS environment, those subnets are in different availability
+zones:
+
+- `subnet-04a6b7f3a3855d438` -> `us-east-1a`
+- `subnet-0e6ae1d598e08d002` -> `us-east-1b`
+
+A single EC2 instance cannot attach ENIs across different availability zones.
+
+### Why This Matters
+
+This is not a documentation mismatch or a soft warning. It is a real
+infrastructure constraint that prevents live deployment of the current
+single-instance CGNAT ISP HEAD END model in `rpdb-empty-live`.
+
+### Current Handling
+
+The live preflight now detects this condition and raises:
+
+- `isp_head_end_subnet_az_mismatch`
+- severity: `hard_no_go`
+
+### What Must Change Before Live Apply
+
+At least one of these must happen:
+
+- choose a customer-facing subnet in the same AZ as the transit subnet
+- choose a transit subnet in the same AZ as the customer-facing subnet
+- redesign the CGNAT ISP HEAD END away from a single EC2 instance with ENIs in
+  both subnets
+
+Until one of those changes is made, Scenario 1 cannot safely move into live
+infrastructure apply for this environment.

@@ -1,0 +1,31 @@
+{
+  "service_id": "cgnat-scenario1-rpdb-empty-live",
+  "customer_id": "scenario1-pilot",
+  "identities": {
+    "outer_tunnel_identity_ref": "cgnat-isp-head-end/rpdb-empty-live/scenario1-pilot",
+    "inner_customer_identity": "scenario1-pilot-customer",
+    "customer_loopback_ip": "10.250.1.10"
+  },
+  "addressing": {
+    "customer_original_inside_space": [
+      "10.20.30.0/24"
+    ],
+    "platform_assigned_inside_space": [
+      "10.128.250.0/24"
+    ],
+    "translation_mode": "one_to_one"
+  },
+  "backend_selection": {
+    "preferred_class": "non_nat",
+    "customer_facing_public_ip": "23.20.31.151",
+    "termination_public_loopback": "23.20.31.151"
+  },
+  "customer_devices": [
+    {
+      "name": "scenario1-pilot-device-1",
+      "subnet_id": "subnet-0e6ae1d598e08d002",
+      "known_inside_identity": "10.20.30.10",
+      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
+    }
+  ]
+}

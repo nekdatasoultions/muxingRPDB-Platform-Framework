@@ -14,6 +14,7 @@ FRAMEWORK_SRC = CGNAT_ROOT / "framework" / "src"
 sys.path.insert(0, str(FRAMEWORK_SRC))
 
 from cgnat.bundle import cgnat_root, ensure_path_within_cgnat  # noqa: E402
+from cgnat.aws_preflight import analyze_aws_inventory  # noqa: E402
 
 
 class WorkspaceBoundaryTests(unittest.TestCase):
@@ -172,6 +173,45 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertFalse(plan["deployment_ready_for_live_create"])
         self.assertFalse(readiness["live_create_allowed"])
         self.assertIn("missing_head_end_root_volume_field_delete_on_termination", issue_codes)
+
+    def test_aws_deploy_plan_mode_allows_allocate_new_eip_strategy(self) -> None:
+        aws_output = self.tempdir_path / "aws-package-allocate-new-eip"
+        deploy_output = self.tempdir_path / "aws-deploy-plan-allocate-new-eip"
+
+        self._run(
+            str(CGNAT_ROOT / "aws" / "scripts" / "render_aws_package.py"),
+            str(self.bundle_path),
+            str(aws_output),
+        )
+
+        head_end_path = aws_output / "cgnat-head-end.json"
+        head_end = json.loads(head_end_path.read_text(encoding="utf-8"))
+        head_end["public_eip_strategy"] = "allocate_new"
+        head_end["public_eip_allocation_id"] = None
+        head_end_path.write_text(json.dumps(head_end, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        isp_head_end_path = aws_output / "cgnat-isp-head-end.json"
+        isp_head_end = json.loads(isp_head_end_path.read_text(encoding="utf-8"))
+        isp_head_end["public_eip_strategy"] = "allocate_new"
+        isp_head_end["public_eip_allocation_id"] = None
+        isp_head_end_path.write_text(json.dumps(isp_head_end, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "aws" / "scripts" / "deploy_scenario1_aws.py"),
+            str(aws_output),
+            str(deploy_output),
+            "--mode",
+            "plan",
+        )
+
+        plan = json.loads((deploy_output / "deployment-plan.json").read_text(encoding="utf-8"))
+        readiness = json.loads((deploy_output / "deployment-readiness.json").read_text(encoding="utf-8"))
+        action_names = {action["name"] for action in plan["post_create_actions"]["actions"]}
+
+        self.assertTrue(plan["deployment_ready_for_live_create"])
+        self.assertTrue(readiness["live_create_allowed"])
+        self.assertIn("allocate_and_associate_head_end_eip", action_names)
+        self.assertIn("allocate_and_associate_isp_head_end_eip", action_names)
 
     def test_server_config_renderer_outputs_scenario1_artifacts(self) -> None:
         server_output = self.tempdir_path / "server-package"
@@ -425,6 +465,137 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(readiness["mode"], "plan")
         self.assertIn("steps", plan)
         self.assertFalse(readiness["live_execution_allowed"])
+
+    def test_derive_host_access_from_aws_apply_uses_associated_public_ips(self) -> None:
+        apply_result_path = self.tempdir_path / "apply-result.json"
+        strategy_path = self.tempdir_path / "host-access-strategy.json"
+        output_path = self.tempdir_path / "derived-host-access.json"
+
+        apply_result = {
+            "mode": "live_apply",
+            "head_end": {
+                "response": {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-head",
+                            "PrivateIpAddress": "172.31.40.250",
+                        }
+                    ]
+                }
+            },
+            "isp_head_end": {
+                "response": {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-isp",
+                            "PrivateIpAddress": "172.31.40.251",
+                        }
+                    ]
+                }
+            },
+            "post_create_actions": [
+                {
+                    "name": "allocate_and_associate_head_end_eip",
+                    "service_role": "cgnat_head_end",
+                    "status": "completed",
+                    "response": {
+                        "allocation": {
+                            "PublicIp": "54.10.10.10",
+                            "AllocationId": "eipalloc-head",
+                        }
+                    },
+                },
+                {
+                    "name": "allocate_and_associate_isp_head_end_eip",
+                    "service_role": "cgnat_isp_head_end",
+                    "status": "completed",
+                    "response": {
+                        "allocation": {
+                            "PublicIp": "54.10.10.11",
+                            "AllocationId": "eipalloc-isp",
+                        }
+                    },
+                },
+            ],
+        }
+        strategy = {
+            "cgnat_head_end": {
+                "ssh_user": "ec2-user",
+                "private_key_path": "/keys/cgnat-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-head-end",
+                "address_source": "associated_public_ip",
+            },
+            "cgnat_isp_head_end": {
+                "ssh_user": "ec2-user",
+                "private_key_path": "/keys/cgnat-isp-head-end.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-isp-head-end",
+                "address_source": "associated_public_ip",
+            },
+        }
+        apply_result_path.write_text(json.dumps(apply_result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        strategy_path.write_text(json.dumps(strategy, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "derive_host_access_from_aws_apply.py"),
+            str(apply_result_path),
+            str(strategy_path),
+            str(output_path),
+        )
+
+        derived = json.loads(output_path.read_text(encoding="utf-8"))
+        self.assertEqual(derived["cgnat_head_end"]["target_host"], "54.10.10.10")
+        self.assertEqual(derived["cgnat_isp_head_end"]["target_host"], "54.10.10.11")
+
+    def test_aws_live_preflight_detects_cross_az_isp_subnets(self) -> None:
+        package = {
+            "manifest": {
+                "service_id": "cgnat-service-example",
+                "customer_id": "customer-example",
+                "environment_name": "rpdb-empty-live",
+            },
+            "cgnat_head_end": {
+                "subnet_id": "subnet-a",
+                "security_group_ids": ["sg-a"],
+                "ami_id": "ami-a",
+                "iam_instance_profile": "profile-a",
+                "key_pair_name": "muxer",
+                "public_eip_strategy": "allocate_new",
+            },
+            "cgnat_isp_head_end": {
+                "subnets": {
+                    "transit_subnet_id": "subnet-a",
+                    "customer_subnet_id": "subnet-b",
+                },
+                "security_group_ids": ["sg-a"],
+                "ami_id": "ami-a",
+                "iam_instance_profile": "profile-a",
+                "key_pair_name": "muxer",
+                "public_eip_strategy": "allocate_new",
+            },
+            "dependencies": {
+                "aws": {
+                    "vpc_id": "vpc-a",
+                }
+            },
+        }
+        inventory = {
+            "sts_identity": {"Account": "123456789012"},
+            "subnets": [
+                {"SubnetId": "subnet-a", "VpcId": "vpc-a", "AvailabilityZone": "us-east-1a"},
+                {"SubnetId": "subnet-b", "VpcId": "vpc-a", "AvailabilityZone": "us-east-1b"},
+            ],
+            "security_groups": [{"GroupId": "sg-a", "VpcId": "vpc-a"}],
+            "images": [{"ImageId": "ami-a"}],
+            "instance_profiles": ["profile-a"],
+            "key_pairs": ["muxer"],
+            "addresses": [],
+        }
+
+        result = analyze_aws_inventory(package, inventory)
+        issue_codes = {issue["code"] for issue in result["issues"]}
+
+        self.assertFalse(result["ready_for_live_apply"])
+        self.assertIn("isp_head_end_subnet_az_mismatch", issue_codes)
 
 
 if __name__ == "__main__":

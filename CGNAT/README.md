@@ -65,6 +65,12 @@ Useful script entry points:
 - [Server package builder](./server/scripts/README.md)
 - [Server host-apply packager](./server/scripts/prepare_scenario1_host_apply.py)
 
+Useful live-environment baselines:
+
+- `framework/config/deployment-bundle.rpdb-empty-live.json`
+- `aws/config/operations.rpdb-empty-live.json`
+- `sot/config/sot.rpdb-empty-live.json`
+
 Useful cross-lane references:
 
 - [Backend Contract Map](./framework/docs/SHARED_INTEGRATION_MAP.md)

@@ -1,0 +1,79 @@
+{
+  "environment_name": "rpdb-empty-live",
+  "aws": {
+    "region": "us-east-1",
+    "vpc_id": "vpc-0f74bd28e5a4239a2"
+  },
+  "default_tags": {
+    "Project": "CGNAT",
+    "Environment": "rpdb-empty-live",
+    "ManagedBy": "cgnat-framework"
+  },
+  "cgnat_head_end": {
+    "instance_name": "cgnat-head-end-rpdb-empty-a",
+    "subnet_id": "subnet-04a6b7f3a3855d438",
+    "instance_type": "c8gn.2xlarge",
+    "ami_id": "ami-0b11e0ed3f8697f97",
+    "security_group_ids": [
+      "sg-0e8b00aabfc719b44"
+    ],
+    "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+    "key_pair_name": "muxer",
+    "root_volume": {
+      "device_name": "/dev/xvda",
+      "size_gb": 16,
+      "volume_type": "gp3",
+      "delete_on_termination": true
+    },
+    "public_eip_strategy": "allocate_new",
+    "public_eip_allocation_id": null,
+    "outer_tunnel_interface": "eth0",
+    "gre_source_interface": "eth0"
+  },
+  "cgnat_isp_head_end": {
+    "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
+    "transit_subnet_id": "subnet-04a6b7f3a3855d438",
+    "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+    "instance_type": "c8gn.2xlarge",
+    "ami_id": "ami-0b11e0ed3f8697f97",
+    "security_group_ids": [
+      "sg-0e8b00aabfc719b44"
+    ],
+    "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+    "key_pair_name": "muxer",
+    "root_volume": {
+      "device_name": "/dev/xvda",
+      "size_gb": 16,
+      "volume_type": "gp3",
+      "delete_on_termination": true
+    },
+    "public_eip_strategy": "allocate_new",
+    "public_eip_allocation_id": null,
+    "outer_tunnel_source_interface": "eth0",
+    "customer_facing_interface": "eth1"
+  },
+  "backend_vpn_head_ends": {
+    "nat_t": [
+      {
+        "name": "vpn-headend-nat-graviton-dev-rpdb-empty-headend-a",
+        "gre_remote": "172.31.40.222",
+        "public_loopback": "23.20.31.151"
+      }
+    ],
+    "non_nat": [
+      {
+        "name": "vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-a",
+        "gre_remote": "172.31.40.223",
+        "public_loopback": "23.20.31.151"
+      }
+    ]
+  },
+  "gre_inventory": {
+    "inventory_ref": "existing-shared-gre-space",
+    "assignment_mode": "next_available"
+  },
+  "certificates": {
+    "cgnat_head_end_server_cert_ref": "local-pki://rpdb-empty-live/cgnat-head-end-server",
+    "cgnat_isp_head_end_client_cert_ref": "local-pki://rpdb-empty-live/cgnat-isp-head-end-client"
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "framework": {
+    "version": 1,
+    "topology": {
+      "outer_tunnel": {
+        "auth_method": "certificate",
+        "peer_ip_mode": "dynamic_or_unknown"
+      },
+      "inner_vpn": {
+        "auth_method": "key_based",
+        "termination_model": "backend_vpn_head_end"
+      },
+      "handoff": {
+        "transport": "gre"
+      },
+      "translation": {
+        "default_mode": "one_to_one",
+        "boundary": "backend_vpn_head_end"
+      }
+    },
+    "placement_constraints": {
+      "cgnat_head_end": {
+        "allowed_subnets": [
+          "subnet-04a6b7f3a3855d438"
+        ]
+      },
+      "cgnat_isp_head_end": {
+        "allowed_subnets": [
+          "subnet-04a6b7f3a3855d438",
+          "subnet-0e6ae1d598e08d002"
+        ]
+      },
+      "customer_devices": {
+        "allowed_subnets": [
+          "subnet-0e6ae1d598e08d002"
+        ]
+      }
+    }
+  },
+  "operations": {
+    "environment_name": "rpdb-empty-live",
+    "aws": {
+      "region": "us-east-1",
+      "vpc_id": "vpc-0f74bd28e5a4239a2"
+    },
+    "default_tags": {
+      "Environment": "rpdb-empty-live",
+      "ManagedBy": "cgnat-framework",
+      "Project": "CGNAT"
+    },
+    "cgnat_head_end": {
+      "instance_name": "cgnat-head-end-rpdb-empty-a",
+      "subnet_id": "subnet-04a6b7f3a3855d438",
+      "instance_type": "c8gn.2xlarge",
+      "ami_id": "ami-0b11e0ed3f8697f97",
+      "security_group_ids": [
+        "sg-0e8b00aabfc719b44"
+      ],
+      "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+      "key_pair_name": "muxer",
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 16,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "public_eip_strategy": "allocate_new",
+      "public_eip_allocation_id": null,
+      "outer_tunnel_interface": "eth0",
+      "gre_source_interface": "eth0"
+    },
+    "cgnat_isp_head_end": {
+      "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
+      "transit_subnet_id": "subnet-04a6b7f3a3855d438",
+      "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+      "instance_type": "c8gn.2xlarge",
+      "ami_id": "ami-0b11e0ed3f8697f97",
+      "security_group_ids": [
+        "sg-0e8b00aabfc719b44"
+      ],
+      "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+      "key_pair_name": "muxer",
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 16,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "public_eip_strategy": "allocate_new",
+      "public_eip_allocation_id": null,
+      "outer_tunnel_source_interface": "eth0",
+      "customer_facing_interface": "eth1"
+    },
+    "backend_vpn_head_ends": {
+      "nat_t": [
+        {
+          "name": "vpn-headend-nat-graviton-dev-rpdb-empty-headend-a",
+          "gre_remote": "172.31.40.222",
+          "public_loopback": "23.20.31.151"
+        }
+      ],
+      "non_nat": [
+        {
+          "name": "vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-a",
+          "gre_remote": "172.31.40.223",
+          "public_loopback": "23.20.31.151"
+        }
+      ]
+    },
+    "gre_inventory": {
+      "inventory_ref": "existing-shared-gre-space",
+      "assignment_mode": "next_available"
+    },
+    "certificates": {
+      "cgnat_head_end_server_cert_ref": "local-pki://rpdb-empty-live/cgnat-head-end-server",
+      "cgnat_isp_head_end_client_cert_ref": "local-pki://rpdb-empty-live/cgnat-isp-head-end-client"
+    }
+  },
+  "sot": {
+    "service_id": "cgnat-scenario1-rpdb-empty-live",
+    "customer_id": "scenario1-pilot",
+    "identities": {
+      "outer_tunnel_identity_ref": "cgnat-isp-head-end/rpdb-empty-live/scenario1-pilot",
+      "inner_customer_identity": "scenario1-pilot-customer",
+      "customer_loopback_ip": "10.250.1.10"
+    },
+    "addressing": {
+      "customer_original_inside_space": [
+        "10.20.30.0/24"
+      ],
+      "platform_assigned_inside_space": [
+        "10.128.250.0/24"
+      ],
+      "translation_mode": "one_to_one"
+    },
+    "backend_selection": {
+      "preferred_class": "non_nat",
+      "customer_facing_public_ip": "23.20.31.151",
+      "termination_public_loopback": "23.20.31.151"
+    },
+    "customer_devices": [
+      {
+        "name": "scenario1-pilot-device-1",
+        "subnet_id": "subnet-0e6ae1d598e08d002",
+        "known_inside_identity": "10.20.30.10",
+        "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
+      }
+    ]
+  }
+}

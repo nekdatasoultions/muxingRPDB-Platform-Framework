@@ -38,6 +38,14 @@ def _render_readme(summary: dict[str, Any]) -> str:
     remote_line = ""
     if steps.get("remote_apply_output"):
         remote_line = f"- Remote apply plan: `{steps['remote_apply_output']}`"
+    aws_preflight_line = ""
+    if steps.get("aws_preflight_output"):
+        aws_preflight_line = f"- AWS live preflight: `{steps['aws_preflight_output']}`"
+    aws_preflight_status_line = ""
+    if "aws_preflight_ready_for_live_apply" in summary:
+        aws_preflight_status_line = (
+            f"- AWS preflight live-apply ready: `{summary['aws_preflight_ready_for_live_apply']}`"
+        )
     return "\n".join(
         [
             "# Scenario 1 Preparation Output",
@@ -47,12 +55,14 @@ def _render_readme(summary: dict[str, Any]) -> str:
             f"- Environment: `{summary['environment_name']}`",
             f"- Validation OK: `{summary['validation_ok']}`",
             f"- AWS plan live-create ready: `{summary['aws_live_create_allowed']}`",
+            aws_preflight_status_line,
             "",
             "## Generated Paths",
             "",
             f"- Framework render: `{steps['framework_render_output']}`",
             f"- AWS package: `{steps['aws_package_output']}`",
             f"- AWS deploy plan: `{steps['aws_deploy_plan_output']}`",
+            aws_preflight_line,
             f"- Server package: `{steps['server_package_output']}`",
             f"- Server configs: `{steps['server_config_output']}`",
             f"- Host apply package: `{steps['host_apply_output']}`",
@@ -84,6 +94,11 @@ def main() -> int:
         "--host-access-json",
         help="Optional host access JSON file. When supplied, also render a no-execution remote apply plan.",
     )
+    parser.add_argument(
+        "--aws-preflight",
+        action="store_true",
+        help="When supplied, also run a live AWS preflight against the rendered AWS package.",
+    )
     args = parser.parse_args()
 
     bundle_path = Path(args.bundle).resolve()
@@ -93,6 +108,7 @@ def main() -> int:
     framework_render_dir = output_dir / "framework-render"
     aws_package_dir = output_dir / "aws-package"
     aws_deploy_plan_dir = output_dir / "aws-deploy-plan"
+    aws_preflight_dir = output_dir / "aws-preflight"
     server_package_dir = output_dir / "server-package"
     server_config_dir = output_dir / "server-configs"
     host_apply_dir = output_dir / "host-apply"
@@ -115,6 +131,12 @@ def main() -> int:
         "--mode",
         "plan",
     )
+    if args.aws_preflight:
+        _run_script(
+            str(_script_path("aws", "scripts", "preflight_scenario1_aws.py")),
+            str(aws_package_dir),
+            str(aws_preflight_dir),
+        )
     _run_script(
         str(_script_path("server", "scripts", "render_server_package.py")),
         str(bundle_path),
@@ -152,6 +174,8 @@ def main() -> int:
     }
     if args.host_access_json:
         steps["remote_apply_output"] = str(remote_apply_dir)
+    if args.aws_preflight:
+        steps["aws_preflight_output"] = str(aws_preflight_dir)
 
     summary = {
         "orchestration_type": "scenario1_preparation",
@@ -165,6 +189,10 @@ def main() -> int:
         "aws_blocking_issue_count": aws_readiness["blocking_issue_count"],
         "steps": steps,
     }
+    if args.aws_preflight:
+        aws_preflight = _load_json(aws_preflight_dir / "preflight-readiness.json")
+        summary["aws_preflight_ready_for_live_apply"] = aws_preflight["ready_for_live_apply"]
+        summary["aws_preflight_blocking_issue_count"] = aws_preflight["blocking_issue_count"]
 
     dump_json(output_dir / "scenario1-preparation-summary.json", summary)
     dump_text(output_dir / "README.md", _render_readme(summary))

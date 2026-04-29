@@ -59,7 +59,8 @@ def _render_cgnat_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         "key_pair_name": operations["cgnat_head_end"]["key_pair_name"],
         "root_volume": operations["cgnat_head_end"]["root_volume"],
         "subnet_id": operations["cgnat_head_end"]["subnet_id"],
-        "public_eip_allocation_id": operations["cgnat_head_end"]["public_eip_allocation_id"],
+        "public_eip_strategy": operations["cgnat_head_end"].get("public_eip_strategy", "existing_allocation"),
+        "public_eip_allocation_id": operations["cgnat_head_end"].get("public_eip_allocation_id"),
         "interfaces": {
             "outer_tunnel_interface": operations["cgnat_head_end"]["outer_tunnel_interface"],
             "gre_source_interface": operations["cgnat_head_end"]["gre_source_interface"],
@@ -83,6 +84,8 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
             "transit_subnet_id": operations["cgnat_isp_head_end"]["transit_subnet_id"],
             "customer_subnet_id": operations["cgnat_isp_head_end"]["customer_subnet_id"],
         },
+        "public_eip_strategy": operations["cgnat_isp_head_end"].get("public_eip_strategy", "none"),
+        "public_eip_allocation_id": operations["cgnat_isp_head_end"].get("public_eip_allocation_id"),
         "interfaces": {
             "outer_tunnel_source_interface": operations["cgnat_isp_head_end"]["outer_tunnel_source_interface"],
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],

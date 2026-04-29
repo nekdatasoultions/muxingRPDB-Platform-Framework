@@ -21,6 +21,7 @@ Current orchestration entry point:
   - builds the AWS plan in plan mode only
   - renders server package and server config artifacts
   - prepares per-host apply bundles
+  - optionally runs a live AWS preflight against the rendered AWS package
   - optionally prepares a no-execution remote apply plan when host access data is supplied
   - does not deploy infrastructure
 
@@ -32,3 +33,4 @@ Useful references in this lane:
 - [Backend Contract Map](./docs/SHARED_INTEGRATION_MAP.md)
 - [Framework Config Example](./config/framework.example.json)
 - [Deployment Bundle Example](./config/deployment-bundle.example.json)
+- `config/deployment-bundle.rpdb-empty-live.json`

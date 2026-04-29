@@ -9,6 +9,8 @@ ALLOWED_PEER_IP_MODES = {"dynamic_or_unknown", "dynamic", "unknown", "cgnated"}
 ALLOWED_TRANSLATION_MODES = {"no_translation", "one_to_one", "subnet_pool"}
 ALLOWED_BACKEND_CLASSES = {"nat_t", "non_nat"}
 ALLOWED_GRE_ASSIGNMENT_MODES = {"next_available"}
+ALLOWED_HEAD_EIP_STRATEGIES = {"existing_allocation", "allocate_new"}
+ALLOWED_ISP_EIP_STRATEGIES = {"none", "existing_allocation", "allocate_new"}
 
 
 @dataclass
@@ -102,6 +104,8 @@ def _validate_operations(
     head_profile = _get(operations, "cgnat_head_end", "iam_instance_profile")
     head_key_pair = _get(operations, "cgnat_head_end", "key_pair_name")
     head_root = _get(operations, "cgnat_head_end", "root_volume") or {}
+    head_eip_strategy = _get(operations, "cgnat_head_end", "public_eip_strategy")
+    head_eip_alloc = _get(operations, "cgnat_head_end", "public_eip_allocation_id")
     if not head_ami:
         messages.append(_msg("error", "head_ami", "CGNAT HEAD END ami_id is required."))
     if not isinstance(head_sgs, list) or not head_sgs:
@@ -112,6 +116,17 @@ def _validate_operations(
         messages.append(_msg("error", "head_key_pair_name", "CGNAT HEAD END key_pair_name must be a string or null."))
     if not head_root.get("device_name") or not head_root.get("size_gb") or not head_root.get("volume_type"):
         messages.append(_msg("error", "head_root_volume", "CGNAT HEAD END root_volume must define device_name, size_gb, and volume_type."))
+    if head_eip_strategy and head_eip_strategy not in ALLOWED_HEAD_EIP_STRATEGIES:
+        messages.append(_msg("error", "head_public_eip_strategy", "CGNAT HEAD END public_eip_strategy is invalid."))
+    effective_head_eip_strategy = head_eip_strategy or "existing_allocation"
+    if effective_head_eip_strategy == "existing_allocation" and not head_eip_alloc:
+        messages.append(
+            _msg(
+                "error",
+                "head_public_eip_allocation_id",
+                "CGNAT HEAD END public_eip_allocation_id is required when public_eip_strategy is `existing_allocation`.",
+            )
+        )
 
     isp_transit_subnet = _get(operations, "cgnat_isp_head_end", "transit_subnet_id")
     isp_customer_subnet = _get(operations, "cgnat_isp_head_end", "customer_subnet_id")
@@ -126,6 +141,8 @@ def _validate_operations(
     isp_profile = _get(operations, "cgnat_isp_head_end", "iam_instance_profile")
     isp_key_pair = _get(operations, "cgnat_isp_head_end", "key_pair_name")
     isp_root = _get(operations, "cgnat_isp_head_end", "root_volume") or {}
+    isp_eip_strategy = _get(operations, "cgnat_isp_head_end", "public_eip_strategy")
+    isp_eip_alloc = _get(operations, "cgnat_isp_head_end", "public_eip_allocation_id")
     if not isp_ami:
         messages.append(_msg("error", "isp_ami", "CGNAT ISP HEAD END ami_id is required."))
     if not isinstance(isp_sgs, list) or not isp_sgs:
@@ -136,6 +153,17 @@ def _validate_operations(
         messages.append(_msg("error", "isp_key_pair_name", "CGNAT ISP HEAD END key_pair_name must be a string or null."))
     if not isp_root.get("device_name") or not isp_root.get("size_gb") or not isp_root.get("volume_type"):
         messages.append(_msg("error", "isp_root_volume", "CGNAT ISP HEAD END root_volume must define device_name, size_gb, and volume_type."))
+    if isp_eip_strategy and isp_eip_strategy not in ALLOWED_ISP_EIP_STRATEGIES:
+        messages.append(_msg("error", "isp_public_eip_strategy", "CGNAT ISP HEAD END public_eip_strategy is invalid."))
+    effective_isp_eip_strategy = isp_eip_strategy or "none"
+    if effective_isp_eip_strategy == "existing_allocation" and not isp_eip_alloc:
+        messages.append(
+            _msg(
+                "error",
+                "isp_public_eip_allocation_id",
+                "CGNAT ISP HEAD END public_eip_allocation_id is required when public_eip_strategy is `existing_allocation`.",
+            )
+        )
 
     backends = _get(operations, "backend_vpn_head_ends") or {}
     if not any(backends.get(name) for name in ALLOWED_BACKEND_CLASSES):

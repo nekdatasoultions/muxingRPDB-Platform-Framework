@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -64,12 +67,21 @@ def _detect_issues(package: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    if not cgnat_head_end.get("public_eip_allocation_id"):
+    head_eip_strategy = cgnat_head_end.get("public_eip_strategy") or "existing_allocation"
+    if head_eip_strategy not in {"existing_allocation", "allocate_new"}:
+        issues.append(
+            {
+                "code": "invalid_head_end_eip_strategy",
+                "severity": "error",
+                "message": "CGNAT HEAD END public_eip_strategy must be `existing_allocation` or `allocate_new`.",
+            }
+        )
+    if head_eip_strategy == "existing_allocation" and not cgnat_head_end.get("public_eip_allocation_id"):
         issues.append(
             {
                 "code": "missing_head_end_eip",
                 "severity": "error",
-                "message": "CGNAT HEAD END public EIP allocation is required.",
+                "message": "CGNAT HEAD END public EIP allocation is required when using `existing_allocation`.",
             }
         )
 
@@ -169,6 +181,24 @@ def _detect_issues(package: dict[str, Any]) -> list[dict[str, Any]]:
                     "message": f"CGNAT ISP HEAD END package is missing subnets.`{field_name}` for live EC2 creation.",
                 }
             )
+
+    isp_eip_strategy = cgnat_isp_head_end.get("public_eip_strategy") or "none"
+    if isp_eip_strategy not in {"none", "existing_allocation", "allocate_new"}:
+        issues.append(
+            {
+                "code": "invalid_isp_head_end_eip_strategy",
+                "severity": "error",
+                "message": "CGNAT ISP HEAD END public_eip_strategy must be `none`, `existing_allocation`, or `allocate_new`.",
+            }
+        )
+    if isp_eip_strategy == "existing_allocation" and not cgnat_isp_head_end.get("public_eip_allocation_id"):
+        issues.append(
+            {
+                "code": "missing_isp_head_end_eip",
+                "severity": "blocking_gap",
+                "message": "CGNAT ISP HEAD END public EIP allocation is required when using `existing_allocation`.",
+            }
+        )
 
     if cgnat_head_end.get("placement_rule") != "must_run_only_in_subnet-04a6b7f3a3855d438":
         issues.append(
@@ -301,16 +331,48 @@ def _build_isp_head_end_run_instances_request(package: dict[str, Any]) -> dict[s
 
 def _build_post_create_actions(package: dict[str, Any]) -> dict[str, Any]:
     head_end = package["cgnat_head_end"]
-    return {
-        "actions": [
+    isp_head_end = package["cgnat_isp_head_end"]
+    actions: list[dict[str, Any]] = []
+
+    head_strategy = head_end.get("public_eip_strategy") or "existing_allocation"
+    if head_strategy == "existing_allocation":
+        actions.append(
             {
                 "name": "associate_head_end_eip",
                 "service_role": "cgnat_head_end",
                 "allocation_id": head_end["public_eip_allocation_id"],
                 "association_target": "primary_network_interface",
             }
-        ]
-    }
+        )
+    elif head_strategy == "allocate_new":
+        actions.append(
+            {
+                "name": "allocate_and_associate_head_end_eip",
+                "service_role": "cgnat_head_end",
+                "association_target": "primary_network_interface",
+            }
+        )
+
+    isp_strategy = isp_head_end.get("public_eip_strategy") or "none"
+    if isp_strategy == "existing_allocation":
+        actions.append(
+            {
+                "name": "associate_isp_head_end_eip",
+                "service_role": "cgnat_isp_head_end",
+                "allocation_id": isp_head_end["public_eip_allocation_id"],
+                "association_target": "primary_network_interface",
+            }
+        )
+    elif isp_strategy == "allocate_new":
+        actions.append(
+            {
+                "name": "allocate_and_associate_isp_head_end_eip",
+                "service_role": "cgnat_isp_head_end",
+                "association_target": "primary_network_interface",
+            }
+        )
+
+    return {"actions": actions}
 
 
 def _build_plan(package: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any]:
@@ -383,12 +445,12 @@ def _render_readme(plan: dict[str, Any]) -> str:
     )
 
 
-def _apply_plan(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     try:
         import boto3  # type: ignore
         from botocore.exceptions import ClientError  # type: ignore
     except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise RuntimeError("boto3 and botocore are required for apply mode.") from exc
+        raise RuntimeError("boto3 unavailable") from exc
 
     region = plan["aws_context"]["region"]
     ec2 = boto3.client("ec2", region_name=region)
@@ -419,27 +481,246 @@ def _apply_plan(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
     result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
 
-    if not dry_run:
-        head_instances = result["head_end"].get("response", {}).get("Instances", [])
-        if head_instances:
-            primary_eni_id = head_instances[0].get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
-            if primary_eni_id:
-                for action in plan["post_create_actions"]["actions"]:
-                    if action["name"] == "associate_head_end_eip":
-                        association = ec2.associate_address(
-                            AllocationId=action["allocation_id"],
-                            NetworkInterfaceId=primary_eni_id,
-                            AllowReassociation=False,
-                        )
-                        result["post_create_actions"].append(
-                            {
-                                "name": action["name"],
-                                "status": "completed",
-                                "response": association,
-                            }
-                        )
+    def _primary_eni_id(role_result: dict[str, Any]) -> str | None:
+        instances = role_result.get("response", {}).get("Instances", [])
+        if not instances:
+            return None
+        return instances[0].get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
+
+    def _record_action(name: str, service_role: str, status: str, response: dict[str, Any]) -> None:
+        result["post_create_actions"].append(
+            {
+                "name": name,
+                "service_role": service_role,
+                "status": status,
+                "response": response,
+            }
+        )
+
+    if dry_run:
+        for action in plan["post_create_actions"]["actions"]:
+            if action["name"].startswith("allocate_and_associate_"):
+                try:
+                    response = ec2.allocate_address(DryRun=True, Domain="vpc")
+                    _record_action(action["name"], action["service_role"], "accepted", response)
+                except ClientError as exc:
+                    error_code = exc.response.get("Error", {}).get("Code")
+                    if error_code == "DryRunOperation":
+                        _record_action(action["name"], action["service_role"], "dry_run_ok", exc.response)
+                    else:
+                        raise RuntimeError(f"{action['name']} allocate_address failed: {exc}") from exc
+        return result
+
+    role_to_eni = {
+        "cgnat_head_end": _primary_eni_id(result["head_end"]),
+        "cgnat_isp_head_end": _primary_eni_id(result["isp_head_end"]),
+    }
+
+    for action in plan["post_create_actions"]["actions"]:
+        role_eni = role_to_eni.get(action["service_role"])
+        if not role_eni:
+            continue
+        if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
+            association = ec2.associate_address(
+                AllocationId=action["allocation_id"],
+                NetworkInterfaceId=role_eni,
+                AllowReassociation=False,
+            )
+            described = ec2.describe_addresses(AllocationIds=[action["allocation_id"]])
+            _record_action(
+                action["name"],
+                action["service_role"],
+                "completed",
+                {
+                    "association": association,
+                    "address": described,
+                },
+            )
+        elif action["name"] in {"allocate_and_associate_head_end_eip", "allocate_and_associate_isp_head_end_eip"}:
+            allocation = ec2.allocate_address(Domain="vpc")
+            association = ec2.associate_address(
+                AllocationId=allocation["AllocationId"],
+                NetworkInterfaceId=role_eni,
+                AllowReassociation=False,
+            )
+            _record_action(
+                action["name"],
+                action["service_role"],
+                "completed",
+                {
+                    "allocation": allocation,
+                    "association": association,
+                },
+            )
 
     return result
+
+
+def _aws_cli_json(
+    region: str,
+    service_args: list[str],
+    *,
+    input_payload: dict[str, Any] | None = None,
+    dry_run_expected: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    cmd = ["aws", "--region", region, *service_args, "--output", "json"]
+    temp_path: str | None = None
+    if input_payload is not None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
+            json.dump(input_payload, handle)
+            handle.flush()
+            temp_path = handle.name
+        cmd.extend(["--cli-input-json", f"file://{temp_path}"])
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    stdout = completed.stdout.strip()
+    stderr = completed.stderr.strip()
+    if completed.returncode == 0:
+        return "ok", json.loads(stdout) if stdout else {}
+    if dry_run_expected and "DryRunOperation" in stderr:
+        return "dry_run_ok", {"stderr": stderr}
+    raise RuntimeError(f"AWS CLI command failed: {' '.join(cmd)}\n{stderr}")
+
+
+def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    region = plan["aws_context"]["region"]
+    result: dict[str, Any] = {
+        "mode": "aws_dry_run" if dry_run else "live_apply",
+        "engine": "aws_cli",
+        "head_end": {},
+        "isp_head_end": {},
+        "post_create_actions": [],
+    }
+
+    def _run_instance_request(name: str, request: dict[str, Any]) -> dict[str, Any]:
+        args = ["ec2", "run-instances"]
+        if dry_run:
+            args.append("--dry-run")
+        status, response = _aws_cli_json(
+            region,
+            args,
+            input_payload=request,
+            dry_run_expected=dry_run,
+        )
+        return {
+            "status": "created" if not dry_run else status,
+            "response": response,
+        }
+
+    result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
+    result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
+
+    def _primary_eni_id(role_result: dict[str, Any]) -> str | None:
+        instances = role_result.get("response", {}).get("Instances", [])
+        if not instances:
+            return None
+        return instances[0].get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
+
+    def _record_action(name: str, service_role: str, status: str, response: dict[str, Any]) -> None:
+        result["post_create_actions"].append(
+            {
+                "name": name,
+                "service_role": service_role,
+                "status": status,
+                "response": response,
+            }
+        )
+
+    if dry_run:
+        for action in plan["post_create_actions"]["actions"]:
+            if action["name"].startswith("allocate_and_associate_"):
+                status, response = _aws_cli_json(
+                    region,
+                    ["ec2", "allocate-address", "--domain", "vpc", "--dry-run"],
+                    dry_run_expected=True,
+                )
+                _record_action(action["name"], action["service_role"], status, response)
+        return result
+
+    role_to_eni = {
+        "cgnat_head_end": _primary_eni_id(result["head_end"]),
+        "cgnat_isp_head_end": _primary_eni_id(result["isp_head_end"]),
+    }
+
+    for action in plan["post_create_actions"]["actions"]:
+        role_eni = role_to_eni.get(action["service_role"])
+        if not role_eni:
+            continue
+        if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
+            _, association = _aws_cli_json(
+                region,
+                [
+                    "ec2",
+                    "associate-address",
+                    "--allocation-id",
+                    action["allocation_id"],
+                    "--network-interface-id",
+                    role_eni,
+                    "--no-allow-reassociation",
+                ],
+            )
+            _, address = _aws_cli_json(
+                region,
+                ["ec2", "describe-addresses", "--allocation-ids", action["allocation_id"]],
+            )
+            _record_action(
+                action["name"],
+                action["service_role"],
+                "completed",
+                {
+                    "association": association,
+                    "address": address,
+                },
+            )
+        elif action["name"] in {"allocate_and_associate_head_end_eip", "allocate_and_associate_isp_head_end_eip"}:
+            _, allocation = _aws_cli_json(
+                region,
+                ["ec2", "allocate-address", "--domain", "vpc"],
+            )
+            _, association = _aws_cli_json(
+                region,
+                [
+                    "ec2",
+                    "associate-address",
+                    "--allocation-id",
+                    allocation["AllocationId"],
+                    "--network-interface-id",
+                    role_eni,
+                    "--no-allow-reassociation",
+                ],
+            )
+            _record_action(
+                action["name"],
+                action["service_role"],
+                "completed",
+                {
+                    "allocation": allocation,
+                    "association": association,
+                },
+            )
+
+    return result
+
+
+def _apply_plan(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    try:
+        result = _apply_plan_with_boto3(plan, dry_run)
+        result["engine"] = "boto3"
+        return result
+    except RuntimeError as exc:
+        if "boto3 unavailable" not in str(exc):
+            raise
+    return _apply_plan_with_aws_cli(plan, dry_run)
 
 
 def main() -> int:

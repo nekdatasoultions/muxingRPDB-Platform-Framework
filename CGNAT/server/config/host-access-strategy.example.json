@@ -1,0 +1,14 @@
+{
+  "cgnat_head_end": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/keys/cgnat-head-end.pem",
+    "remote_stage_dir": "/var/tmp/cgnat-service-example-head-end",
+    "address_source": "associated_public_ip"
+  },
+  "cgnat_isp_head_end": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/keys/cgnat-isp-head-end.pem",
+    "remote_stage_dir": "/var/tmp/cgnat-service-example-isp-head-end",
+    "address_source": "associated_public_ip"
+  }
+}

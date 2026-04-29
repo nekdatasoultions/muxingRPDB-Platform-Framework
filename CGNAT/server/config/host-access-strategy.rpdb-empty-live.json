@@ -1,0 +1,14 @@
+{
+  "cgnat_head_end": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/c/Users/Master/.ssh/abaines_muxer_ed25519",
+    "remote_stage_dir": "/var/tmp/cgnat-scenario1-rpdb-empty-live-head-end",
+    "address_source": "associated_public_ip"
+  },
+  "cgnat_isp_head_end": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/c/Users/Master/.ssh/abaines_muxer_ed25519",
+    "remote_stage_dir": "/var/tmp/cgnat-scenario1-rpdb-empty-live-isp-head-end",
+    "address_source": "associated_public_ip"
+  }
+}
