@@ -7,6 +7,9 @@ This document defines the first implementation target for CGNAT: Scenario 1.
 Scenario 1 is the simplest deployable model and the correct first proving
 ground for the CGNAT framework.
 
+It is a first demo slice of a larger hosted-ingress model in which multiple
+remote ISP-side CGNAT peers connect to the CGNAT HEAD END that we host.
+
 ## Scenario 1 Definition
 
 Scenario 1 assumes:
@@ -28,6 +31,8 @@ Scenario 1 assumes:
 - current demo target is `IKEv2`
 - expected to run in `NAT-T`
 - terminates on the CGNAT HEAD END public IP
+- is the first demo expression of the broader model where multiple ISP-side
+  CGNAT peers connect to the hosted CGNAT HEAD END tier
 
 ### Inner Tunnel
 
@@ -380,3 +385,9 @@ Its path rule remains:
 - CGNAT HEAD END
 - GRE
 - backend head end
+
+Its hosted-ingress rule also remains:
+
+- the CGNAT HEAD END is our hosted platform-side role
+- multiple remote ISP-side CGNAT devices must be supportable over time
+- certificate authentication on the outer tunnel is what preserves that model

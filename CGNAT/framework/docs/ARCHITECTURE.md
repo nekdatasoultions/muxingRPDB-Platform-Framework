@@ -15,6 +15,9 @@ The platform must support a two-layer access model:
 
 1. A CGNAT ISP HEAD END establishes an outer certificate-authenticated tunnel
    to the CGNAT HEAD END.
+   The CGNAT HEAD END is the hosted platform-side ingress role, and it must be
+   able to accept multiple remote ISP-side peers over independent outer
+   tunnels.
 2. Customer Devices behind the CGNAT ISP HEAD END send an inner S2S VPN
    through that outer tunnel toward the same customer-facing public IP used by
    the current muxer-backed service.
@@ -114,6 +117,8 @@ It:
 - establishes the outer certificate-authenticated tunnel
 - provides the transport path used by downstream Customer Devices
 - does not terminate the platform-side service intent of the inner VPN
+- is expected to be one of potentially many remote ISP-side peers connecting
+  into the hosted CGNAT HEAD END role
 
 ### CGNAT HEAD END
 
@@ -128,6 +133,9 @@ It:
 - preserves the existing customer-facing public service IP as the inner VPN
   target
 - forwards selected traffic over GRE to backend VPN head ends
+- is the platform-side role we host and operate
+- must preserve the ability to accept multiple certificate-authenticated
+  CGNAT ISP HEAD END peers
 
 ### Backend VPN Head Ends
 
@@ -227,6 +235,8 @@ It is responsible for:
 - accepting unknown, changing, or CGNATed public source identity
 - authenticating with certificates
 - creating the trusted transport channel into the platform
+- preserving the hosted-ingress model where multiple ISP-side CGNAT devices can
+  connect to the same CGNAT HEAD END tier
 
 ### Service Plane
 
@@ -309,6 +319,9 @@ translation boundary so that service-side routing stays deterministic.
 - One CGNAT HEAD END is enough for the initial prototype and lab topology.
 - One CGNAT ISP HEAD END is enough to prove the outer-tunnel and inner-VPN
   model.
+- The first demo may use one remote ISP-side peer, but the architecture must
+  preserve the production direction where multiple ISP CGNAT peers connect to
+  the hosted CGNAT HEAD END.
 - Backend NAT-T and non-NAT VPN head ends continue to provide public loopback
   identities.
 - The first prototype should prefer minimum moving pieces over premature

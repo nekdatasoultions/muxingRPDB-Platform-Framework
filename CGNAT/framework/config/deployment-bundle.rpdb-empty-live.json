@@ -27,12 +27,12 @@
       "cgnat_isp_head_end": {
         "allowed_subnets": [
           "subnet-04a6b7f3a3855d438",
-          "subnet-0e6ae1d598e08d002"
+          "subnet-0dbd0842618d43ab3"
         ]
       },
       "customer_devices": {
         "allowed_subnets": [
-          "subnet-0e6ae1d598e08d002"
+          "subnet-0dbd0842618d43ab3"
         ]
       }
     }
@@ -72,7 +72,7 @@
     "cgnat_isp_head_end": {
       "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
       "transit_subnet_id": "subnet-04a6b7f3a3855d438",
-      "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+      "customer_subnet_id": "subnet-0dbd0842618d43ab3",
       "instance_type": "c8gn.2xlarge",
       "ami_id": "ami-0b11e0ed3f8697f97",
       "security_group_ids": [
@@ -141,7 +141,7 @@
     "customer_devices": [
       {
         "name": "scenario1-pilot-device-1",
-        "subnet_id": "subnet-0e6ae1d598e08d002",
+        "subnet_id": "subnet-0dbd0842618d43ab3",
         "known_inside_identity": "10.20.30.10",
         "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
       }

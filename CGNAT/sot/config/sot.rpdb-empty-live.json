@@ -23,7 +23,7 @@
   "customer_devices": [
     {
       "name": "scenario1-pilot-device-1",
-      "subnet_id": "subnet-0e6ae1d598e08d002",
+      "subnet_id": "subnet-0dbd0842618d43ab3",
       "known_inside_identity": "10.20.30.10",
       "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
     }
