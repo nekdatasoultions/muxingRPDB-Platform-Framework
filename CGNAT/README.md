@@ -60,6 +60,7 @@ This means the project is not only about packet flow. It is also about:
 
 Useful script entry points:
 
+- [Scenario 1 local preparation orchestrator](./framework/scripts/prepare_scenario1.py)
 - [AWS package builder](./aws/scripts/README.md)
 - [Server package builder](./server/scripts/README.md)
 

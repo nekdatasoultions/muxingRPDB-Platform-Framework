@@ -10,6 +10,7 @@ Current coverage:
   - framework artifacts
   - AWS package artifacts
   - server package artifacts
+- Scenario 1 local preparation orchestration without deployment
 
 Run with:
 

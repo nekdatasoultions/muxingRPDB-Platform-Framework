@@ -214,6 +214,28 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertNotIn("<resolve", isp_head_end_swanctl)
         self.assertNotIn("placeholder", route_script.lower())
 
+    def test_prepare_scenario1_orchestrates_local_artifacts(self) -> None:
+        prep_output = self.tempdir_path / "scenario1-prep"
+
+        self._run(
+            str(CGNAT_ROOT / "framework" / "scripts" / "prepare_scenario1.py"),
+            str(self.bundle_path),
+            str(prep_output),
+        )
+
+        summary = json.loads((prep_output / "scenario1-preparation-summary.json").read_text(encoding="utf-8"))
+        readme = (prep_output / "README.md").read_text(encoding="utf-8")
+
+        self.assertEqual(summary["orchestration_type"], "scenario1_preparation")
+        self.assertTrue(summary["validation_ok"])
+        self.assertTrue(summary["aws_live_create_allowed"])
+        self.assertTrue((prep_output / "framework-render" / "framework" / "validation-result.json").exists())
+        self.assertTrue((prep_output / "aws-package" / "package-manifest.json").exists())
+        self.assertTrue((prep_output / "aws-deploy-plan" / "deployment-plan.json").exists())
+        self.assertTrue((prep_output / "server-package" / "package-manifest.json").exists())
+        self.assertTrue((prep_output / "server-configs" / "scenario1-runtime.env").exists())
+        self.assertIn("does not deploy infrastructure", readme)
+
 
 if __name__ == "__main__":
     unittest.main()
