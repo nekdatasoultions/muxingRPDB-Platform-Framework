@@ -4,6 +4,12 @@
   "customer_name_template": "cgnat-s1-be-r{index}",
   "backend_psk_secret_ref": "/muxingrpdb/customers/cgnat-scenario1-rpdb-empty-live-backend/psk",
   "backend_psk_secret_ref_template": "/muxingrpdb/customers/{customer_name}/psk",
+  "service_local_subnets": [
+    "23.20.31.151/32",
+    "194.138.36.86/32"
+  ],
+  "outside_nat_route_via": "172.31.63.44",
+  "outside_nat_route_dev": "ens36",
   "service_local_subnets_mode": "customer_facing_public_ip_loopback",
   "ipsec": {
     "ike_version": "ikev2",

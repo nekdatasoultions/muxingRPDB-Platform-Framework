@@ -48,6 +48,7 @@ class BackendIntegrationTests(unittest.TestCase):
         self.assertEqual(request["customer"]["selectors"]["local_subnets"], ["198.51.100.10/32"])
         self.assertEqual(request["customer"]["selectors"]["remote_subnets"], ["10.20.30.10/32"])
         self.assertEqual(request["customer"]["ipsec"]["local_id"], "198.51.100.10")
+        self.assertEqual(request["customer"]["dynamic_provisioning"], {"enabled": False})
         self.assertTrue(request["customer"]["post_ipsec_nat"]["enabled"])
         self.assertEqual(request["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.10/32"])
 
@@ -109,6 +110,38 @@ class BackendIntegrationTests(unittest.TestCase):
         request = build_backend_customer_request(bundle, self.integration, device=device, index=1)
 
         self.assertEqual(request["customer"]["post_ipsec_nat"], {"enabled": False, "mode": "disabled"})
+        self.assertEqual(request["customer"]["dynamic_provisioning"], {"enabled": False})
+
+    def test_build_backend_customer_request_uses_noop_outside_nat_for_route_via_when_translation_is_disabled(self) -> None:
+        bundle = json.loads(
+            (CGNAT_ROOT / "framework" / "config" / "deployment-bundle.example.json").read_text(encoding="utf-8")
+        )
+        bundle["sot"]["addressing"]["translation_mode"] = "no_translation"
+        bundle["sot"]["addressing"]["platform_assigned_inside_space"] = []
+        bundle["sot"]["backend_selection"]["service_reachable_subnets"] = [
+            "198.51.100.10/32",
+            "194.138.36.86/32",
+        ]
+        integration = dict(self.integration)
+        integration["outside_nat_route_via"] = "172.31.63.44"
+        integration["outside_nat_route_dev"] = "ens36"
+
+        device = bundle["sot"]["customer_devices"][0]
+        request = build_backend_customer_request(bundle, integration, device=device, index=1)
+
+        self.assertEqual(request["customer"]["post_ipsec_nat"], {"enabled": False, "mode": "disabled"})
+        self.assertEqual(
+            request["customer"]["outside_nat"],
+            {
+                "enabled": True,
+                "mode": "netmap",
+                "mapping_strategy": "one_to_one",
+                "real_subnets": ["194.138.36.86/32"],
+                "translated_subnets": ["194.138.36.86/32"],
+                "route_via": "172.31.63.44",
+                "route_dev": "ens36",
+            },
+        )
 
     def test_build_backend_integration_summary_reports_multiple_devices(self) -> None:
         request_records = [

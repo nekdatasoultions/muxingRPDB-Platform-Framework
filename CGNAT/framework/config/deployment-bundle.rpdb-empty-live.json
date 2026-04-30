@@ -185,7 +185,7 @@
       "termination_public_loopback": "23.20.31.151",
         "service_reachable_subnets": [
           "23.20.31.151/32",
-          "194.138.36.80/28"
+          "194.138.36.86/32"
         ]
       },
     "customer_devices": [

@@ -190,6 +190,10 @@ def build_backend_customer_request(
         platform_assigned_inside_space=platform_assigned_inside_space,
     )
     translation_mode = str(bundle["sot"]["addressing"]["translation_mode"] or "no_translation")
+    backend_public_loopback_cidr = _as_host_cidr(backend_public_loopback)
+    downstream_service_subnets = [subnet for subnet in service_local_subnets if _as_host_cidr(subnet) != backend_public_loopback_cidr]
+    downstream_route_via = str(integration.get("outside_nat_route_via") or "").strip()
+    downstream_route_dev = str(integration.get("outside_nat_route_dev") or "").strip()
 
     request: dict[str, Any] = {
         "schema_version": 1,
@@ -205,6 +209,9 @@ def build_backend_customer_request(
                 "remote_subnets": device_real_subnets,
             },
             "ipsec": dict(integration.get("ipsec") or {}),
+            "dynamic_provisioning": {
+                "enabled": False,
+            },
         },
     }
 
@@ -226,6 +233,18 @@ def build_backend_customer_request(
         }
     else:
         request["customer"]["post_ipsec_nat"] = {"enabled": False, "mode": "disabled"}
+        if downstream_route_via and downstream_service_subnets:
+            request["customer"]["outside_nat"] = {
+                "enabled": True,
+                "mode": "netmap",
+                "mapping_strategy": "one_to_one",
+                "real_subnets": downstream_service_subnets,
+                "translated_subnets": downstream_service_subnets,
+                "route_via": downstream_route_via,
+                "route_dev": downstream_route_dev or "ens36",
+            }
+        else:
+            request["customer"]["outside_nat"] = {"enabled": False, "mode": "disabled"}
 
     return request
 
