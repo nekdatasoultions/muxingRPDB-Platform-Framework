@@ -10,6 +10,7 @@ from typing import Any
 
 
 HEAD_END_PUBLIC_IP_PLACEHOLDER = "__CGNAT_HEAD_END_PUBLIC_IP__"
+STRONGSWAN_RUNTIME_TARBALL_NAME = "cgnat-strongswan-runtime.tgz"
 
 
 def _framework_src_root() -> Path:
@@ -38,6 +39,7 @@ def _load_server_configs(config_dir: Path) -> dict[str, Any]:
         "head_end_runtime_env": _load_text(config_dir / "cgnat-head-end-runtime.env"),
         "isp_head_end_runtime_env": _load_text(config_dir / "cgnat-isp-head-end-runtime.env"),
         "head_end_swanctl_conf": _load_text(config_dir / "cgnat-head-end-swanctl.conf"),
+        "head_end_strongswan_conf": _load_text(config_dir / "cgnat-head-end-strongswan.conf"),
         "isp_head_end_ipsec_conf": _load_text(config_dir / "cgnat-isp-head-end-swanctl.conf"),
         "head_end_xfrm_script": _load_text(config_dir / "cgnat-head-end-xfrm.sh"),
         "head_end_gre_script": _load_text(config_dir / "cgnat-head-end-gre.sh"),
@@ -55,6 +57,10 @@ def _load_server_configs(config_dir: Path) -> dict[str, Any]:
         },
         "customer_router_inner_confs": {
             role: _load_text(config_dir / f"{role}-inner-swanctl.conf")
+            for role in customer_router_roles
+        },
+        "customer_router_strongswan_confs": {
+            role: _load_text(config_dir / f"{role}-strongswan.conf")
             for role in customer_router_roles
         },
         "customer_router_xfrm_scripts": {
@@ -195,18 +201,78 @@ def _render_customer_router_preflight(role: str) -> str:
 
 def _render_strongswan_bootstrap() -> list[str]:
     return [
+        "install_strongswan_from_source() {",
+        "  local version=\"6.0.6\"",
+        "  local archive=\"strongswan-${version}.tar.gz\"",
+        "  local url=\"https://download.strongswan.org/${archive}\"",
+        "  local workdir",
+        "  local -a deps=()",
+        "  workdir=\"$(mktemp -d)\"",
+        "  trap \"rm -rf '$workdir'\" RETURN",
+        "  command -v gcc >/dev/null || deps+=(gcc)",
+        "  command -v make >/dev/null || deps+=(make)",
+        "  command -v pkg-config >/dev/null || deps+=(pkgconf)",
+        "  rpm -q gettext-devel >/dev/null 2>&1 || deps+=(gettext-devel)",
+        "  rpm -q openssl-devel >/dev/null 2>&1 || deps+=(openssl-devel)",
+        "  rpm -q gmp-devel >/dev/null 2>&1 || deps+=(gmp-devel)",
+        "  rpm -q systemd-devel >/dev/null 2>&1 || deps+=(systemd-devel)",
+        "  command -v curl >/dev/null || deps+=(curl)",
+        "  command -v tar >/dev/null || deps+=(tar)",
+        "  command -v gzip >/dev/null || deps+=(gzip)",
+        "  if command -v dnf >/dev/null; then",
+        "    if (( ${#deps[@]} )); then",
+        "      dnf -y install \"${deps[@]}\"",
+        "    fi",
+        "  elif command -v yum >/dev/null; then",
+        "    if (( ${#deps[@]} )); then",
+        "      yum -y install \"${deps[@]}\"",
+        "    fi",
+        "  else",
+        "    echo \"No supported package manager found for strongSwan source-build dependencies\" >&2",
+        "    return 1",
+        "  fi",
+        "  cd \"$workdir\"",
+        "  if command -v curl >/dev/null; then",
+        "    curl -fsSL \"$url\" -o \"$archive\"",
+        "  elif command -v wget >/dev/null; then",
+        "    wget -qO \"$archive\" \"$url\"",
+        "  else",
+        "    echo \"Neither curl nor wget is available for the strongSwan source download\" >&2",
+        "    return 1",
+        "  fi",
+        "  tar xzf \"$archive\"",
+        "  cd \"strongswan-${version}\"",
+        "  ./configure --prefix=/usr --sysconfdir=/etc --enable-systemd --enable-swanctl --enable-vici --disable-charon --disable-stroke",
+        "  make -j\"$(nproc)\"",
+        "  make install",
+        "  hash -r",
+        "}",
+        "",
         "install_strongswan() {",
         "  if command -v swanctl >/dev/null; then",
         "    return 0",
         "  fi",
         "  if command -v dnf >/dev/null; then",
-        "    dnf -y install strongswan strongswan-swanctl || dnf -y install strongswan",
+        "    if dnf -y install strongswan strongswan-swanctl || dnf -y install strongswan; then",
+        "      return 0",
+        "    fi",
         "  elif command -v yum >/dev/null; then",
-        "    yum -y install strongswan strongswan-swanctl || yum -y install strongswan",
-        "  else",
-        "    echo \"No supported package manager found for strongSwan installation\" >&2",
-        "    exit 1",
+        "    if yum -y install strongswan strongswan-swanctl || yum -y install strongswan; then",
+        "      return 0",
+        "    fi",
         "  fi",
+        "  install_strongswan_from_source",
+        "  command -v swanctl >/dev/null",
+        "}",
+        "",
+        "install_strongswan_from_bundle() {",
+        f"  local bundle_tarball=\"$SCRIPT_DIR/{STRONGSWAN_RUNTIME_TARBALL_NAME}\"",
+        "  if [[ ! -f \"$bundle_tarball\" ]]; then",
+        "    return 1",
+        "  fi",
+        "  tar xzf \"$bundle_tarball\" -C /",
+        "  hash -r",
+        "  command -v swanctl >/dev/null",
         "}",
         "",
         "strongswan_service_name() {",
@@ -220,8 +286,31 @@ def _render_strongswan_bootstrap() -> list[str]:
         "  printf '%s\\n' strongswan",
         "}",
         "",
-        "install_strongswan",
+        "install_strongswan_from_bundle || install_strongswan",
         "STRONGSWAN_SERVICE=\"$(strongswan_service_name)\"",
+    ]
+
+
+def _render_strongswan_layout_lines() -> list[str]:
+    return [
+        "install -d /etc/swanctl/conf.d /etc/swanctl/x509 /etc/swanctl/private /etc/swanctl/x509ca "
+        "/etc/swanctl/x509ocsp /etc/swanctl/x509aa /etc/swanctl/x509ac /etc/swanctl/x509crl "
+        "/etc/swanctl/pubkey /etc/swanctl/rsa /etc/swanctl/ecdsa /etc/swanctl/pkcs8 /etc/swanctl/pkcs12",
+        "cat > /etc/swanctl/swanctl.conf <<'EOF'",
+        "include conf.d/*.conf",
+        "EOF",
+    ]
+
+
+def _render_stop_conflicting_ipsec_lines() -> list[str]:
+    return [
+        "for service in ipsec strongswan-starter; do",
+        "  systemctl stop \"$service\" >/dev/null 2>&1 || true",
+        "  systemctl disable \"$service\" >/dev/null 2>&1 || true",
+        "done",
+        "pkill -x pluto >/dev/null 2>&1 || true",
+        "pkill -f /usr/libexec/ipsec/pluto >/dev/null 2>&1 || true",
+        "sleep 1",
     ]
 
 
@@ -235,18 +324,26 @@ def _render_head_end_apply() -> str:
         "",
     ]
     lines.extend(_render_strongswan_bootstrap())
+    lines.extend(_render_strongswan_layout_lines())
     lines.extend(
         [
-            "install -d /etc/swanctl/conf.d /etc/swanctl/x509 /etc/swanctl/private /etc/swanctl/x509ca",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_CERT_PATH\")\" \"$CGNAT_HEAD_END_SERVER_CERT_PATH\"",
             "install -m 0600 \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_KEY_PATH\")\" \"$CGNAT_HEAD_END_SERVER_KEY_PATH\"",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CA_CERT_PATH\")\" \"$CGNAT_OUTER_CA_CERT_PATH\"",
             "install -m 0644 \"$SCRIPT_DIR/cgnat-head-end-swanctl.conf\" \"/etc/swanctl/conf.d/${CGNAT_SERVICE_ID}-outer.conf\"",
+            "install -d /etc/strongswan.d",
+            "install -m 0644 \"$SCRIPT_DIR/cgnat-head-end-strongswan.conf\" \"/etc/strongswan.d/${CGNAT_SERVICE_ID}.conf\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-forwarding.sh\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-xfrm.sh\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-gre.sh\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-routes.sh\"",
+        ]
+    )
+    lines.extend(_render_stop_conflicting_ipsec_lines())
+    lines.extend(
+        [
             "systemctl enable \"$STRONGSWAN_SERVICE\" >/dev/null 2>&1 || true",
+            "systemctl daemon-reload >/dev/null 2>&1 || true",
             "systemctl restart \"$STRONGSWAN_SERVICE\"",
             "swanctl --load-all",
             "",
@@ -286,9 +383,9 @@ def _render_customer_router_apply(role: str) -> str:
         "",
     ]
     lines.extend(_render_strongswan_bootstrap())
+    lines.extend(_render_strongswan_layout_lines())
     lines.extend(
         [
-            "install -d /etc/swanctl/conf.d /etc/swanctl/x509 /etc/swanctl/private /etc/swanctl/x509ca",
             f"bash \"$SCRIPT_DIR/{loop_name}\"",
             f"bash \"$SCRIPT_DIR/{route_name}\"",
             f"bash \"$SCRIPT_DIR/{xfrm_script_name}\"",
@@ -297,11 +394,13 @@ def _render_customer_router_apply(role: str) -> str:
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CA_CERT_PATH\")\" \"$CGNAT_OUTER_CA_CERT_PATH\"",
             f"install -m 0644 \"$SCRIPT_DIR/{outer_conf_name}\" \"/etc/swanctl/conf.d/${{CGNAT_OUTER_CONNECTION_NAME}}.conf\"",
             f"install -m 0644 \"$SCRIPT_DIR/{inner_conf_name}\" \"/etc/swanctl/conf.d/${{CGNAT_INNER_CONNECTION_NAME}}.conf\"",
+            "install -d /etc/strongswan.d",
+            f"install -m 0644 \"$SCRIPT_DIR/{role}-strongswan.conf\" \"/etc/strongswan.d/${{CGNAT_SERVICE_ID}}-{role}.conf\"",
             "RAW_SECRET_FILE=\"$SCRIPT_DIR/$CGNAT_INNER_VPN_SECRET_STAGE_NAME\"",
             "SECRET_VALUE=\"$(tr -d '\\r\\n' < \"$RAW_SECRET_FILE\")\"",
             "cat > \"$CGNAT_INNER_VPN_SECRET_CONF_PATH\" <<EOF",
             "secrets {",
-            "  ${CGNAT_INNER_CONNECTION_NAME} {",
+            "  ike-${CGNAT_INNER_CONNECTION_NAME} {",
             "    id-1 = ${CGNAT_CUSTOMER_LOOPBACK_IP}",
             "    id-2 = ${CGNAT_CUSTOMER_FACING_PUBLIC_IP}",
             "    secret = \"$SECRET_VALUE\"",
@@ -309,7 +408,13 @@ def _render_customer_router_apply(role: str) -> str:
             "}",
             "EOF",
             "chmod 600 \"$CGNAT_INNER_VPN_SECRET_CONF_PATH\"",
+        ]
+    )
+    lines.extend(_render_stop_conflicting_ipsec_lines())
+    lines.extend(
+        [
             "systemctl enable \"$STRONGSWAN_SERVICE\" >/dev/null 2>&1 || true",
+            "systemctl daemon-reload >/dev/null 2>&1 || true",
             "systemctl restart \"$STRONGSWAN_SERVICE\"",
             "swanctl --load-all",
             "swanctl --initiate --ike \"$CGNAT_OUTER_CONNECTION_NAME\"",
@@ -436,6 +541,7 @@ def _stage_materials(
     host_dirs: dict[str, Path],
     server_configs: dict[str, Any],
     materials_manifest: dict[str, Any],
+    strongswan_runtime_tarball: Path | None = None,
 ) -> None:
     runtime = server_configs["runtime_inputs"]
     certs = materials_manifest["certificate_material"]
@@ -480,6 +586,8 @@ def _stage_materials(
         if material is None:
             raise ValueError(f"materials manifest is missing inner_vpn_materials entry for router role `{role}`")
         _copy_material(Path(material["secret_path"]), router_dir / _inner_secret_name(router_runtime))
+        if strongswan_runtime_tarball is not None:
+            _copy_material(strongswan_runtime_tarball, router_dir / STRONGSWAN_RUNTIME_TARBALL_NAME)
 
 
 def main() -> int:
@@ -503,6 +611,9 @@ def main() -> int:
     server_config_dir = Path(args.server_config_dir).resolve()
     output_dir = ensure_path_within_cgnat(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    strongswan_runtime_tarball = server_config_dir.parent / STRONGSWAN_RUNTIME_TARBALL_NAME
+    if not strongswan_runtime_tarball.exists():
+        strongswan_runtime_tarball = None
 
     server_configs = _load_server_configs(server_config_dir)
     host_access = _load_host_access(Path(args.host_access_json).resolve()) if args.host_access_json else None
@@ -534,6 +645,7 @@ def main() -> int:
     head_dir = host_dirs["cgnat_head_end"]
     dump_text(head_dir / "cgnat-head-end-runtime.env", server_configs["head_end_runtime_env"])
     dump_text(head_dir / "cgnat-head-end-swanctl.conf", server_configs["head_end_swanctl_conf"])
+    dump_text(head_dir / "cgnat-head-end-strongswan.conf", server_configs["head_end_strongswan_conf"])
     dump_text(head_dir / "cgnat-head-end-xfrm.sh", server_configs["head_end_xfrm_script"])
     dump_text(head_dir / "cgnat-head-end-gre.sh", server_configs["head_end_gre_script"])
     dump_text(head_dir / "cgnat-head-end-forwarding.sh", server_configs["head_end_forwarding_script"])
@@ -556,6 +668,7 @@ def main() -> int:
         dump_text(router_dir / f"{role}-runtime.env", server_configs["customer_router_runtime_envs"][role])
         dump_text(router_dir / f"{role}-outer-swanctl.conf", server_configs["customer_router_outer_confs"][role])
         dump_text(router_dir / f"{role}-inner-swanctl.conf", server_configs["customer_router_inner_confs"][role])
+        dump_text(router_dir / f"{role}-strongswan.conf", server_configs["customer_router_strongswan_confs"][role])
         dump_text(router_dir / f"{role}-xfrm.sh", server_configs["customer_router_xfrm_scripts"][role])
         dump_text(router_dir / f"{role}-loopback.sh", server_configs["customer_router_loopback_scripts"][role])
         dump_text(router_dir / f"{role}-routes.sh", server_configs["customer_router_route_scripts"][role])
@@ -564,7 +677,7 @@ def main() -> int:
         dump_text(router_dir / "rollback-notes.md", _render_customer_router_rollback(role))
 
     if materials_manifest is not None:
-        _stage_materials(host_dirs, server_configs, materials_manifest)
+        _stage_materials(host_dirs, server_configs, materials_manifest, strongswan_runtime_tarball)
 
     dump_json(validation_dir / "backend-validation.json", server_configs["backend_validation"])
     dump_text(validation_dir / "validation-commands.md", server_configs["validation_commands"])

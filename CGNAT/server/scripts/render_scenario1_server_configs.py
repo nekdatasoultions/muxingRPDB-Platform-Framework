@@ -40,7 +40,8 @@ def _sanitize_identity(value: str) -> str:
     candidate = str(value or "").strip()
     if not candidate:
         return candidate
-    return candidate.replace("/", ".")
+    candidate = candidate.replace("/", ".")
+    return "".join(char if char.isalnum() or char in ("-", ".") else "-" for char in candidate)
 
 
 def _basename(path_value: str) -> str:
@@ -59,7 +60,7 @@ def _xfrm_if_id(role: str) -> int:
 
 
 def _xfrm_interface_name(role: str) -> str:
-    return f"cgnat-s1-xfrm-r{_role_index(role)}"
+    return f"cgxfrm-r{_role_index(role)}"
 
 
 def _service_public_selector(package: dict[str, Any]) -> str:
@@ -259,6 +260,7 @@ def _render_backend_validation(package: dict[str, Any]) -> dict[str, Any]:
 
 def _render_head_end_swanctl_conf(runtime: dict[str, Any]) -> str:
     cert_material = runtime["certificate_material"]["head_end_server"]
+    ca_material = runtime["certificate_material"]["outer_tunnel_ca"]
     lines = [
         f"# Scenario 1 CGNAT HEAD END route-based outer transport for {runtime['service_id']}",
         "# Target syntax: strongSwan swanctl.conf fragment",
@@ -302,6 +304,16 @@ def _render_head_end_swanctl_conf(runtime: dict[str, Any]) -> str:
         )
     lines.append("}")
     lines.append("")
+    lines.extend(
+        [
+            "authorities {",
+            "  outer-ca {",
+            f"    cacert = {ca_material['certificate_name']}",
+            "  }",
+            "}",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -318,6 +330,7 @@ def _render_isp_head_end_ipsec_conf(package: dict[str, Any]) -> str:
 
 def _render_customer_router_outer_swanctl_conf(runtime: dict[str, Any]) -> str:
     cert_material = runtime["certificate_material"]["outer_client"]
+    ca_material = runtime["certificate_material"]["outer_tunnel_ca"]
     outer = runtime["outer_tunnel"]
     return "\n".join(
         [
@@ -354,6 +367,12 @@ def _render_customer_router_outer_swanctl_conf(runtime: dict[str, Any]) -> str:
             "        rekey_time = 0s",
             "      }",
             "    }",
+            "  }",
+            "}",
+            "",
+            "authorities {",
+            "  outer-ca {",
+            f"    cacert = {ca_material['certificate_name']}",
             "  }",
             "}",
             "",
@@ -750,6 +769,22 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_strongswan_settings() -> str:
+    return "\n".join(
+        [
+            "# Scenario 1 strongSwan runtime settings",
+            "# Route ownership stays with the explicit xfrm/route scripts.",
+            "charon {",
+            "  install_routes = no",
+            "}",
+            "charon-systemd {",
+            "  install_routes = no",
+            "}",
+            "",
+        ]
+    )
+
+
 def main() -> int:
     sys.path.insert(0, str(_framework_src_root()))
 
@@ -784,6 +819,7 @@ def main() -> int:
         },
     )
     dump_text(output_dir / "cgnat-head-end-swanctl.conf", _render_head_end_swanctl_conf(head_runtime))
+    dump_text(output_dir / "cgnat-head-end-strongswan.conf", _render_strongswan_settings())
     dump_text(output_dir / "cgnat-isp-head-end-swanctl.conf", _render_isp_head_end_ipsec_conf(package))
     dump_text(output_dir / "cgnat-head-end-xfrm.sh", _render_head_end_xfrm_script(head_runtime))
     dump_text(output_dir / "cgnat-head-end-gre.sh", _render_head_end_gre_script())
@@ -796,6 +832,7 @@ def main() -> int:
         role = router_runtime["role"]
         dump_text(output_dir / f"{role}-outer-swanctl.conf", _render_customer_router_outer_swanctl_conf(router_runtime))
         dump_text(output_dir / f"{role}-inner-swanctl.conf", _render_customer_router_inner_swanctl_conf(router_runtime))
+        dump_text(output_dir / f"{role}-strongswan.conf", _render_strongswan_settings())
         dump_text(output_dir / f"{role}-xfrm.sh", _render_customer_router_xfrm_script(router_runtime))
         dump_text(output_dir / f"{role}-loopback.sh", _render_customer_router_loopback_script(router_runtime))
         dump_text(output_dir / f"{role}-routes.sh", _render_customer_router_route_script(router_runtime))
