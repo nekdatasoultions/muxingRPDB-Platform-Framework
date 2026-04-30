@@ -74,28 +74,6 @@ def _customer_facing_public_selector(bundle: dict[str, Any]) -> str:
     return f"{bundle['sot']['backend_selection']['customer_facing_public_ip']}/32"
 
 
-def _derive_translated_identity(
-    *,
-    known_inside_identity: str,
-    customer_original_inside_space: list[str],
-    platform_assigned_inside_space: list[str],
-) -> str:
-    device_net = ipaddress.ip_network(known_inside_identity, strict=False)
-    for source_cidr, target_cidr in zip(customer_original_inside_space, platform_assigned_inside_space):
-        source_net = ipaddress.ip_network(source_cidr, strict=False)
-        target_net = ipaddress.ip_network(target_cidr, strict=False)
-        if device_net.version != source_net.version or source_net.version != target_net.version:
-            continue
-        if not device_net.subnet_of(source_net):
-            continue
-        offset = int(device_net.network_address) - int(source_net.network_address)
-        translated_network_address = ipaddress.ip_address(int(target_net.network_address) + offset)
-        candidate = ipaddress.ip_network(f"{translated_network_address}/{device_net.prefixlen}", strict=False)
-        if candidate.subnet_of(target_net):
-            return str(candidate)
-    return known_inside_identity
-
-
 def _downstream_validation_targets(bundle: dict[str, Any]) -> dict[str, Any] | None:
     service_reachable_subnets = _service_reachable_subnets(bundle)
     customer_facing_selector = _customer_facing_public_selector(bundle)
@@ -103,28 +81,20 @@ def _downstream_validation_targets(bundle: dict[str, Any]) -> dict[str, Any] | N
     if not downstream_subnets:
         return None
 
-    customer_original_inside_space = list(bundle["sot"]["addressing"].get("customer_original_inside_space") or [])
-    platform_assigned_inside_space = list(bundle["sot"]["addressing"].get("platform_assigned_inside_space") or [])
-    translated_sources: list[dict[str, str]] = []
+    source_identities: list[dict[str, str]] = []
     for device in bundle["sot"]["customer_devices"]:
-        known_inside_identity = str(device["known_inside_identity"])
-        translated_sources.append(
+        source_identities.append(
             {
                 "role": str(device["router_role"]),
-                "known_inside_identity": known_inside_identity,
-                "translated_identity": _derive_translated_identity(
-                    known_inside_identity=known_inside_identity,
-                    customer_original_inside_space=customer_original_inside_space,
-                    platform_assigned_inside_space=platform_assigned_inside_space,
-                ),
+                "source_identity": str(device["known_inside_identity"]),
             }
         )
     return {
         "mode": "smartgateway_encrypts_optional_reply",
-        "success_signal": "outbound_encrypts_visible_for_all_translated_sources",
+        "success_signal": "outbound_encrypts_visible_for_all_customer_identities",
         "reply_required": False,
         "downstream_reachable_subnets": downstream_subnets,
-        "translated_sources": translated_sources,
+        "source_identities": source_identities,
     }
 
 
@@ -295,7 +265,7 @@ def _render_validation_targets(bundle: dict[str, Any]) -> dict[str, Any]:
     ]
     downstream_validation = _downstream_validation_targets(bundle)
     if downstream_validation:
-        required_checks.append("smartgateway_downstream_encrypts_visible_for_translated_sources")
+        required_checks.append("smartgateway_downstream_encrypts_visible_for_customer_identities")
 
     rendered = {
         "scenario": "scenario1",

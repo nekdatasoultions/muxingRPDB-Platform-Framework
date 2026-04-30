@@ -98,6 +98,18 @@ class BackendIntegrationTests(unittest.TestCase):
         self.assertEqual(requests[0]["request"]["customer"]["peer"]["psk_secret_ref"], "/demo/backend/scenario1-backend-customer_vpn_router_1/psk")
         self.assertEqual(requests[1]["request"]["customer"]["peer"]["psk_secret_ref"], "/demo/backend/scenario1-backend-customer_vpn_router_2/psk")
 
+    def test_build_backend_customer_request_disables_post_ipsec_nat_when_translation_is_disabled(self) -> None:
+        bundle = json.loads(
+            (CGNAT_ROOT / "framework" / "config" / "deployment-bundle.example.json").read_text(encoding="utf-8")
+        )
+        bundle["sot"]["addressing"]["translation_mode"] = "no_translation"
+        bundle["sot"]["addressing"]["platform_assigned_inside_space"] = []
+
+        device = bundle["sot"]["customer_devices"][0]
+        request = build_backend_customer_request(bundle, self.integration, device=device, index=1)
+
+        self.assertEqual(request["customer"]["post_ipsec_nat"], {"enabled": False, "mode": "disabled"})
+
     def test_build_backend_integration_summary_reports_multiple_devices(self) -> None:
         request_records = [
             {

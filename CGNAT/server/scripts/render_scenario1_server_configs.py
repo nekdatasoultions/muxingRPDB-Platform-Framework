@@ -735,23 +735,23 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
         )
     downstream_validation = package["validation_targets"].get("downstream_validation")
     if isinstance(downstream_validation, dict):
-        translated_sources = list(downstream_validation.get("translated_sources") or [])
+        source_identities = list(downstream_validation.get("source_identities") or [])
         downstream_subnets = ", ".join(str(value) for value in downstream_validation.get("downstream_reachable_subnets") or [])
-        translated_labels = ", ".join(
-            f"{entry['role']}={entry['translated_identity']}"
-            for entry in translated_sources
-            if isinstance(entry, dict) and entry.get("role") and entry.get("translated_identity")
+        source_labels = ", ".join(
+            f"{entry['role']}={entry['source_identity']}"
+            for entry in source_identities
+            if isinstance(entry, dict) and entry.get("role") and entry.get("source_identity")
         )
         lines.extend(
             [
                 "For downstream SmartGateway validation:",
                 "```bash",
                 f"# downstream reachable subnets: {downstream_subnets}",
-                f"# translated customer identities: {translated_labels}",
+                f"# customer source identities: {source_labels}",
                 "# On SmartGateway 3, confirm outbound IPsec/xfrm encrypt counters increase",
-                "# for each translated customer identity while traffic is generated.",
+                "# for each original customer identity while traffic is generated.",
                 "# Replies are optional for this downstream check as long as encrypts move",
-                "# for every translated customer identity listed above.",
+                "# for every customer identity listed above.",
                 "```",
                 "",
             ]

@@ -207,15 +207,15 @@ class PackageRenderingTests(unittest.TestCase):
             backend_expectations["service_reachable_subnets"],
             ["198.51.100.10/32", "194.138.36.80/28"],
         )
-        self.assertIn("smartgateway_downstream_encrypts_visible_for_translated_sources", validation_targets["required_checks"])
-        self.assertEqual(validation_targets["downstream_validation"]["success_signal"], "outbound_encrypts_visible_for_all_translated_sources")
+        self.assertIn("smartgateway_downstream_encrypts_visible_for_customer_identities", validation_targets["required_checks"])
+        self.assertEqual(validation_targets["downstream_validation"]["success_signal"], "outbound_encrypts_visible_for_all_customer_identities")
         self.assertFalse(validation_targets["downstream_validation"]["reply_required"])
-        translated_sources = {
-            entry["role"]: entry["translated_identity"]
-            for entry in validation_targets["downstream_validation"]["translated_sources"]
+        source_identities = {
+            entry["role"]: entry["source_identity"]
+            for entry in validation_targets["downstream_validation"]["source_identities"]
         }
-        self.assertEqual(translated_sources["customer_vpn_router_1"], "10.128.10.10/32")
-        self.assertEqual(translated_sources["customer_vpn_router_2"], "10.128.10.11/32")
+        self.assertEqual(source_identities["customer_vpn_router_1"], "10.20.30.10/32")
+        self.assertEqual(source_identities["customer_vpn_router_2"], "10.20.30.11/32")
         self.assertIn("Replies are optional for this downstream check", validation_commands)
 
     def test_prepare_scenario1_host_apply_outputs_four_host_bundles(self) -> None:

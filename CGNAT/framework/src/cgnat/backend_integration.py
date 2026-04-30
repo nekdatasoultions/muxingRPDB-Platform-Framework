@@ -189,7 +189,7 @@ def build_backend_customer_request(
         customer_original_inside_space=customer_original_inside_space,
         platform_assigned_inside_space=platform_assigned_inside_space,
     )
-    translation_mode = str(bundle["sot"]["addressing"]["translation_mode"] or "disabled")
+    translation_mode = str(bundle["sot"]["addressing"]["translation_mode"] or "no_translation")
 
     request: dict[str, Any] = {
         "schema_version": 1,
@@ -214,7 +214,7 @@ def build_backend_customer_request(
     if isinstance(ipsec_initiation, dict) and ipsec_initiation:
         request["customer"]["ipsec"]["initiation"] = ipsec_initiation
 
-    if translation_mode != "disabled":
+    if translation_mode not in {"disabled", "no_translation"}:
         request["customer"]["post_ipsec_nat"] = {
             "enabled": True,
             "mode": str((integration.get("post_ipsec_nat") or {}).get("mode") or "netmap"),

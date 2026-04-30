@@ -14,7 +14,7 @@
         "transport": "gre"
       },
       "translation": {
-        "default_mode": "one_to_one",
+        "default_mode": "no_translation",
         "boundary": "backend_vpn_head_end"
       }
     },
@@ -176,10 +176,8 @@
       "customer_original_inside_space": [
         "10.20.30.0/24"
       ],
-      "platform_assigned_inside_space": [
-        "10.128.250.0/24"
-      ],
-      "translation_mode": "one_to_one"
+      "platform_assigned_inside_space": [],
+      "translation_mode": "no_translation"
     },
     "backend_selection": {
       "preferred_class": "non_nat",
