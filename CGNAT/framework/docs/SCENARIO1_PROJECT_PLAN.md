@@ -242,6 +242,30 @@ At minimum, the Scenario 1 review package should include:
   - CGNAT HEAD END GRE path
   - selected backend head end
 
+### Downstream Service Exception
+
+When Scenario 1 is extended beyond the base customer-facing public endpoint and
+the inner tunnel is also used to reach downstream service space behind the
+selected backend head end, such as `194.138.36.80/28` via SmartGateway 3, the
+success signal is different for that downstream leg.
+
+For that downstream leg:
+
+- the CGNAT HEAD END still only needs to carry the inner-tunnel packets
+- the selected non-NAT backend head end must forward the downstream traffic
+  after inner-tunnel termination
+- backend post-IPsec NAT must present the expected translated customer source
+  identities
+- SmartGateway-side outbound IPsec/xfrm encrypt counters increasing for each
+  translated customer source identity are sufficient proof that the traffic is
+  reaching the downstream tunnel
+- downstream ping replies are optional when the far-side return path is outside
+  the current demo boundary
+
+This exception applies only to the downstream service leg. The base
+customer-facing public endpoint path still uses request/reply evidence when it
+is the validation target.
+
 ### What This Resolves
 
 This means the previous blocker:
@@ -254,6 +278,9 @@ It is now replaced by a concrete assumption:
 
 - "Scenario 1 reverse-path proof requires visible request and reply traversal
   across both the outer tunnel path and the GRE handoff path"
+- "for downstream service space behind SmartGateway 3, outbound encrypts for
+  each translated customer identity are an accepted success signal even if
+  replies are not observed"
 
 ## Success Criteria
 

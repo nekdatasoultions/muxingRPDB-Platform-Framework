@@ -42,14 +42,34 @@ def _resolve_selected_backend_public_loopback(bundle: dict[str, Any]) -> str:
     return chosen
 
 
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        normalized = _as_host_cidr(value)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _resolve_bundle_service_reachable_subnets(bundle: dict[str, Any]) -> list[str]:
+    backend_selection = dict(bundle["sot"].get("backend_selection") or {})
+    configured = list(backend_selection.get("service_reachable_subnets") or [])
+    if configured:
+        return _dedupe_preserve_order(configured)
+    return [_as_host_cidr(_resolve_selected_backend_public_loopback(bundle))]
+
+
 def _resolve_service_local_subnets(bundle: dict[str, Any], integration: dict[str, Any]) -> list[str]:
     explicit = list(integration.get("service_local_subnets") or [])
     if explicit:
-        return explicit
+        return _dedupe_preserve_order(explicit)
 
     mode = str(integration.get("service_local_subnets_mode") or "customer_facing_public_ip_loopback").strip()
     if mode == "customer_facing_public_ip_loopback":
-        return [_as_host_cidr(_resolve_selected_backend_public_loopback(bundle))]
+        return _resolve_bundle_service_reachable_subnets(bundle)
     raise ValueError(f"unsupported integration.service_local_subnets_mode: {mode}")
 
 

@@ -296,3 +296,96 @@ to `23.20.31.151` and confirming:
 - successful ping responses
 - live ESP byte counters on both customer routers
 - live child-SA counters on the backend head end
+
+## Issue 8: SmartGateway 3 Downstream Replies Are Not Present For The New CGNAT Demo Sources
+
+### Status
+
+- accepted external dependency for the current live demo
+
+### Summary
+
+The current live CGNAT Scenario 1 path now proves all of the local pieces we
+own:
+
+- the customer routers install the inner-tunnel selectors for the
+  SmartGateway-reachable destination
+- the backend non-NAT head end installs the matching child SAs
+- SmartGateway-bound traffic leaves the backend over `ens36`
+- backend post-IPsec NAT can translate the new demo customer sources to the
+  configured translated host identities
+
+For example, after the current live fixes:
+
+- router 1 egresses toward `194.138.36.86` as `10.128.250.10`
+- router 2 egresses toward `194.138.36.86` as `10.128.250.11`
+
+### What We Verified Live
+
+- the backend non-NAT head end has a route for `194.138.36.80/28` via
+  SmartGateway 3
+- SmartGateway 3 has the downstream IPsec SA up
+- SmartGateway 3 shows an outbound tunnel policy of:
+  - `10.0.0.0/8 === 194.138.36.80/28`
+- after adding host return routes on SmartGateway 3 for:
+  - `10.128.250.10/32`
+  - `10.128.250.11/32`
+  traffic still receives no reply
+
+We also verified that SmartGateway 3 shows outbound use of its downstream
+tunnel, but zero inbound bytes from the far side for the new CGNAT demo
+sources.
+
+### Why This Matters
+
+At this point the remaining failure is no longer in:
+
+- the hosted CGNAT HEAD END
+- the inner tunnel selectors
+- the GRE handoff
+- the backend non-NAT head end routing
+- or the local post-IPsec NAT on the backend
+
+The remaining dependency is downstream of the non-NAT head end:
+
+- either SmartGateway 3's far-side peer does not yet return traffic for the
+  new translated source identities
+- or the far destination host/network does not answer those sources
+
+### Current Handling
+
+We should treat this as an external integration dependency, not as another
+CGNAT transport bug.
+
+The next debugging and integration steps belong on the SmartGateway 3 / far-end
+tunnel side:
+
+- confirm the far-side peer accepts and returns `10.128.250.10/32`
+- confirm the far-side peer accepts and returns `10.128.250.11/32`
+- or choose translated source identities already permitted by that downstream
+  integration
+
+### Accepted Demo Success Signal
+
+For the current live demo, outbound SmartGateway tunnel encrypts for both
+translated customer identities are sufficient proof that the inner tunnel and
+backend handoff are carrying the downstream traffic correctly:
+
+- `10.128.250.10/32`
+- `10.128.250.11/32`
+
+That means the absence of ping replies from `194.138.36.86` is not, by itself,
+a CGNAT failure once all of the following are true:
+
+- the inner tunnel selectors include the downstream service space
+- backend post-IPsec NAT translates the two customer sources correctly
+- SmartGateway 3 shows outbound tunnel use for those translated identities
+
+### Resolution Path
+
+Do not keep changing the CGNAT HEAD END or inner-tunnel transport model for
+this symptom.
+
+The correct next move is to align the SmartGateway 3 downstream integration
+with the translated source identities the new CGNAT-backed customers use, or
+to explicitly choose source identities that are already permitted there.

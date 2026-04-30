@@ -152,6 +152,7 @@ def _customer_router_runtime(package: dict[str, Any], router: dict[str, Any]) ->
         "customer_default_gateway_ip": router["default_gateway_ip"],
         "customer_loopback_ip": inner["customer_loopback_ip"],
         "customer_facing_public_ip": inner["remote_public_ip"],
+        "remote_selectors": list(inner.get("remote_selectors") or [f"{inner['remote_public_ip']}/32"]),
         "known_inside_identity": inner["known_inside_identity"],
         "secret_ref": inner["secret_ref"],
         "secret_path": f"/etc/ipsec.d/{service_id}-{role}-inner.secrets",
@@ -282,6 +283,9 @@ def _render_isp_head_end_ipsec_conf(package: dict[str, Any]) -> str:
 
 
 def _render_customer_router_inner_ipsec_conf(runtime: dict[str, Any]) -> str:
+    selectors = [str(selector) for selector in runtime["remote_selectors"]]
+    remote_selector_key = "rightsubnets" if len(selectors) > 1 else "rightsubnet"
+    remote_selectors = ",".join(selectors)
     return "\n".join(
         [
             f"# Scenario 1 customer-router inner-tunnel config for {runtime['role']}",
@@ -297,7 +301,7 @@ def _render_customer_router_inner_ipsec_conf(runtime: dict[str, Any]) -> str:
             f"    leftsubnet={runtime['known_inside_identity']}",
             f"    right={runtime['customer_facing_public_ip']}",
             f"    rightid={_libreswan_identity(runtime['customer_facing_public_ip'])}",
-            f"    rightsubnet={runtime['customer_facing_public_ip']}/32",
+            f"    {remote_selector_key}={remote_selectors}",
             "    dpddelay=30s",
             "    dpdtimeout=120s",
             "    dpdaction=restart",
@@ -453,6 +457,7 @@ def _render_customer_router_runtime_env(runtime: dict[str, Any]) -> str:
             f"CGNAT_INNER_VPN_SECRET_PATH=\"{runtime['secret_path']}\"",
             f"CGNAT_CUSTOMER_LOOPBACK_IP=\"{runtime['customer_loopback_ip']}\"",
             f"CGNAT_CUSTOMER_FACING_PUBLIC_IP=\"{runtime['customer_facing_public_ip']}\"",
+            f"CGNAT_INNER_REMOTE_SELECTORS=\"{','.join(str(selector) for selector in runtime['remote_selectors'])}\"",
             f"CGNAT_KNOWN_INSIDE_IDENTITY=\"{runtime['known_inside_identity']}\"",
             "",
         ]
@@ -471,7 +476,7 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
         "- both customer-router inner tunnels established",
         "- backend responder behavior confirmed",
         "- GRE handoff visible",
-        "- request and reply path visible",
+        "- request and reply path visible for the base customer-facing public IP",
         "",
         "## Example Checks",
         "",
@@ -498,6 +503,30 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
                 f"# customer loopback identity: {router['customer_loopback_ip']}",
                 f"# interesting traffic identity: {router['known_inside_identity']}",
                 f"# destination public IP: {package['validation_targets']['customer_facing_public_ip']}",
+                f"# reachable inner-tunnel destinations: {', '.join(package['backend_expectations'].get('service_reachable_subnets') or [])}",
+                "```",
+                "",
+            ]
+        )
+    downstream_validation = package["validation_targets"].get("downstream_validation")
+    if isinstance(downstream_validation, dict):
+        translated_sources = list(downstream_validation.get("translated_sources") or [])
+        downstream_subnets = ", ".join(str(value) for value in downstream_validation.get("downstream_reachable_subnets") or [])
+        translated_labels = ", ".join(
+            f"{entry['role']}={entry['translated_identity']}"
+            for entry in translated_sources
+            if isinstance(entry, dict) and entry.get("role") and entry.get("translated_identity")
+        )
+        lines.extend(
+            [
+                "For downstream SmartGateway validation:",
+                "```bash",
+                f"# downstream reachable subnets: {downstream_subnets}",
+                f"# translated customer identities: {translated_labels}",
+                "# On SmartGateway 3, confirm outbound IPsec/xfrm encrypt counters increase",
+                "# for each translated customer identity while traffic is generated.",
+                "# Replies are optional for this downstream check as long as encrypts move",
+                "# for every translated customer identity listed above.",
                 "```",
                 "",
             ]

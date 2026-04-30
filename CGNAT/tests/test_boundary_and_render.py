@@ -152,6 +152,44 @@ class PackageRenderingTests(unittest.TestCase):
         runtime_inputs = json.loads((config_output / "runtime-inputs.json").read_text(encoding="utf-8"))
         self.assertEqual(runtime_inputs["head_end"]["gre_runtime"]["remote_ip"], "172.31.69.214")
 
+    def test_server_config_renderer_uses_service_reachable_subnets_for_inner_tunnel_selectors(self) -> None:
+        bundle = json.loads(self.bundle_path.read_text(encoding="utf-8"))
+        bundle["sot"]["backend_selection"]["service_reachable_subnets"] = [
+            "198.51.100.10/32",
+            "194.138.36.80/28",
+        ]
+        bundle_path = self.tempdir_path / "deployment-bundle.reachable-subnets.json"
+        bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        server_output = self.tempdir_path / "server-package-reachable-subnets"
+        config_output = self.tempdir_path / "server-configs-reachable-subnets"
+
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"), str(bundle_path), str(server_output))
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"), str(server_output), str(config_output))
+
+        router1_conf = (config_output / "customer_vpn_router_1-inner-swanctl.conf").read_text(encoding="utf-8")
+        router1_env = (config_output / "customer_vpn_router_1-runtime.env").read_text(encoding="utf-8")
+        backend_expectations = json.loads((server_output / "backend-expectations.json").read_text(encoding="utf-8"))
+        validation_targets = json.loads((server_output / "validation-targets.json").read_text(encoding="utf-8"))
+        validation_commands = (config_output / "validation-commands.md").read_text(encoding="utf-8")
+
+        self.assertIn("rightsubnets=198.51.100.10/32,194.138.36.80/28", router1_conf)
+        self.assertIn('CGNAT_INNER_REMOTE_SELECTORS="198.51.100.10/32,194.138.36.80/28"', router1_env)
+        self.assertEqual(
+            backend_expectations["service_reachable_subnets"],
+            ["198.51.100.10/32", "194.138.36.80/28"],
+        )
+        self.assertIn("smartgateway_downstream_encrypts_visible_for_translated_sources", validation_targets["required_checks"])
+        self.assertEqual(validation_targets["downstream_validation"]["success_signal"], "outbound_encrypts_visible_for_all_translated_sources")
+        self.assertFalse(validation_targets["downstream_validation"]["reply_required"])
+        translated_sources = {
+            entry["role"]: entry["translated_identity"]
+            for entry in validation_targets["downstream_validation"]["translated_sources"]
+        }
+        self.assertEqual(translated_sources["customer_vpn_router_1"], "10.128.10.10/32")
+        self.assertEqual(translated_sources["customer_vpn_router_2"], "10.128.10.11/32")
+        self.assertIn("Replies are optional for this downstream check", validation_commands)
+
     def test_prepare_scenario1_host_apply_outputs_four_host_bundles(self) -> None:
         server_output = self.tempdir_path / "server-package"
         config_output = self.tempdir_path / "server-configs"
@@ -205,6 +243,23 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertTrue(router1_secret)
         self.assertTrue(router2_secret)
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.secrets").exists())
+
+    def test_materialize_demo_materials_prefers_explicit_inner_vpn_psk(self) -> None:
+        materials_output = self.tempdir_path / "demo-materials-explicit-psk"
+        bundle = json.loads(self.bundle_path.read_text(encoding="utf-8"))
+        bundle["sot"]["customer_devices"][0]["inner_vpn_psk"] = "router1-live-psk"
+        bundle["sot"]["customer_devices"][1]["inner_vpn_psk"] = "router2-live-psk"
+        explicit_bundle_path = self.tempdir_path / "deployment-bundle.explicit-psk.json"
+        explicit_bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "materialize_scenario1_demo_materials.py"), str(explicit_bundle_path), str(materials_output))
+
+        materials_manifest = json.loads((materials_output / "materials-manifest.json").read_text(encoding="utf-8"))
+        router1_secret = Path(materials_manifest["inner_vpn_materials"][0]["secret_path"]).read_text(encoding="utf-8").strip()
+        router2_secret = Path(materials_manifest["inner_vpn_materials"][1]["secret_path"]).read_text(encoding="utf-8").strip()
+
+        self.assertEqual(router1_secret, "router1-live-psk")
+        self.assertEqual(router2_secret, "router2-live-psk")
 
     def test_prepare_scenario1_remote_apply_plan_outputs_proxyjump_roles(self) -> None:
         server_output = self.tempdir_path / "server-package"

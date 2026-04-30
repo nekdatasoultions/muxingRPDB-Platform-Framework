@@ -193,7 +193,8 @@ def main() -> int:
         router_role = str(device["router_role"])
         role_slug = _sanitize(router_role)
         inner_psk = secrets_dir / f"{safe_service_id}-{role_slug}-inner.psk"
-        _write_text(inner_psk, secrets.token_hex(24) + "\n")
+        explicit_inner_psk = str(device.get("inner_vpn_psk") or "").strip()
+        _write_text(inner_psk, (explicit_inner_psk or secrets.token_hex(24)) + "\n")
         inner_vpn_materials.append(
             {
                 "router_role": router_role,

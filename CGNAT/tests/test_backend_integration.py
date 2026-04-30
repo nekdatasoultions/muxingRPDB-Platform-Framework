@@ -51,6 +51,32 @@ class BackendIntegrationTests(unittest.TestCase):
         self.assertTrue(request["customer"]["post_ipsec_nat"]["enabled"])
         self.assertEqual(request["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.10/32"])
 
+    def test_build_backend_customer_request_prefers_explicit_service_local_subnets(self) -> None:
+        device = self.bundle["sot"]["customer_devices"][0]
+        integration = dict(self.integration)
+        integration["service_local_subnets"] = ["198.51.100.10/32", "194.138.36.86/32"]
+
+        request = build_backend_customer_request(self.bundle, integration, device=device, index=1)
+
+        self.assertEqual(
+            request["customer"]["selectors"]["local_subnets"],
+            ["198.51.100.10/32", "194.138.36.86/32"],
+        )
+
+    def test_build_backend_customer_request_uses_bundle_service_reachable_subnets(self) -> None:
+        device = self.bundle["sot"]["customer_devices"][0]
+        self.bundle["sot"]["backend_selection"]["service_reachable_subnets"] = [
+            "198.51.100.10/32",
+            "194.138.36.86/32",
+        ]
+
+        request = build_backend_customer_request(self.bundle, self.integration, device=device, index=1)
+
+        self.assertEqual(
+            request["customer"]["selectors"]["local_subnets"],
+            ["198.51.100.10/32", "194.138.36.86/32"],
+        )
+
     def test_build_backend_customer_requests_returns_one_request_per_customer_router(self) -> None:
         requests = build_backend_customer_requests(self.bundle, self.integration)
 

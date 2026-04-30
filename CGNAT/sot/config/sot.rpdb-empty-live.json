@@ -18,7 +18,11 @@
   "backend_selection": {
     "preferred_class": "non_nat",
     "customer_facing_public_ip": "23.20.31.151",
-    "termination_public_loopback": "23.20.31.151"
+    "termination_public_loopback": "23.20.31.151",
+    "service_reachable_subnets": [
+      "23.20.31.151/32",
+      "194.138.36.80/28"
+    ]
   },
   "customer_devices": [
     {
@@ -27,7 +31,8 @@
       "subnet_id": "subnet-0dbd0842618d43ab3",
       "customer_loopback_ip": "10.250.1.10",
       "known_inside_identity": "10.20.30.10/32",
-      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
+      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key",
+      "inner_vpn_psk": "e0a975feb2d2c1abc0a20035bc65b1eaee35b9e97ec89389"
     },
     {
       "name": "scenario1-pilot-device-2",
@@ -35,7 +40,8 @@
       "subnet_id": "subnet-0dbd0842618d43ab3",
       "customer_loopback_ip": "10.250.1.11",
       "known_inside_identity": "10.20.30.11/32",
-      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-2/ipsec-key"
+      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-2/ipsec-key",
+      "inner_vpn_psk": "47bc3b62c392433debe413473625eaaaa71ddba85783d53f"
     }
   ]
 }

@@ -112,6 +112,28 @@ The minimum Scenario 1 evidence set should include:
   - the CGNAT HEAD END GRE path
   - the selected backend head end
 
+### Downstream Service Exception
+
+When Scenario 1 is extended to carry downstream service reachability behind the
+selected backend head end, such as `194.138.36.80/28` behind SmartGateway 3,
+the acceptance signal may differ from the base `customer_facing_public_ip`
+check.
+
+For that downstream path:
+
+- the CGNAT transport and inner-tunnel path are considered validated when
+  traffic reaches the selected backend head end
+- backend post-IPsec NAT is considered validated when the translated customer
+  source identities egress the backend toward the downstream gateway
+- SmartGateway-side validation is considered sufficient when outbound
+  IPsec/xfrm encrypt counters increase for each translated customer identity
+- downstream replies are optional for this check when the far-side integration
+  is outside the current demo boundary
+
+This exception does not weaken the base Scenario 1 requirement that the normal
+customer-facing public endpoint path should still prove request/reply behavior
+when that endpoint itself is the validation target.
+
 ## Required Checks for the First Working Version
 
 ### Input Checks
@@ -157,6 +179,10 @@ The minimum Scenario 1 evidence set should include:
   loopback
 - reverse-path evidence shows request and reply traversing both the outer
   tunnel path and the GRE handoff path
+- when downstream service-reachable subnets are configured behind the backend,
+  SmartGateway-side outbound encrypt visibility for each translated customer
+  identity is an accepted downstream validation signal even if replies are not
+  observed
 
 ## Go / No-Go Support
 
