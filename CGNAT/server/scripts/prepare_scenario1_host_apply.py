@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -36,8 +37,9 @@ def _load_server_configs(config_dir: Path) -> dict[str, Any]:
         "runtime_inputs": runtime_inputs,
         "head_end_runtime_env": _load_text(config_dir / "cgnat-head-end-runtime.env"),
         "isp_head_end_runtime_env": _load_text(config_dir / "cgnat-isp-head-end-runtime.env"),
-        "head_end_ipsec_conf": _load_text(config_dir / "cgnat-head-end-swanctl.conf"),
+        "head_end_swanctl_conf": _load_text(config_dir / "cgnat-head-end-swanctl.conf"),
         "isp_head_end_ipsec_conf": _load_text(config_dir / "cgnat-isp-head-end-swanctl.conf"),
+        "head_end_xfrm_script": _load_text(config_dir / "cgnat-head-end-xfrm.sh"),
         "head_end_gre_script": _load_text(config_dir / "cgnat-head-end-gre.sh"),
         "head_end_forwarding_script": _load_text(config_dir / "cgnat-head-end-forwarding.sh"),
         "isp_head_end_forwarding_script": _load_text(config_dir / "cgnat-isp-head-end-forwarding.sh"),
@@ -47,12 +49,16 @@ def _load_server_configs(config_dir: Path) -> dict[str, Any]:
             role: _load_text(config_dir / f"{role}-runtime.env")
             for role in customer_router_roles
         },
-        "customer_router_outer_ipsec_confs": {
+        "customer_router_outer_confs": {
             role: _load_text(config_dir / f"{role}-outer-swanctl.conf")
             for role in customer_router_roles
         },
-        "customer_router_inner_ipsec_confs": {
+        "customer_router_inner_confs": {
             role: _load_text(config_dir / f"{role}-inner-swanctl.conf")
+            for role in customer_router_roles
+        },
+        "customer_router_xfrm_scripts": {
+            role: _load_text(config_dir / f"{role}-xfrm.sh")
             for role in customer_router_roles
         },
         "customer_router_loopback_scripts": {
@@ -99,7 +105,7 @@ def _render_manifest(server_configs: dict[str, Any], materials_manifest_path: st
 def _render_apply_order(server_configs: dict[str, Any]) -> dict[str, Any]:
     steps = [
         {"id": 1, "role": "cgnat_head_end", "action": "run_preflight", "script": "preflight.sh"},
-        {"id": 2, "role": "cgnat_head_end", "action": "stage_and_apply_ipsec_gre", "script": "apply.sh"},
+        {"id": 2, "role": "cgnat_head_end", "action": "stage_and_apply_strongswan_outer_transport", "script": "apply.sh"},
         {"id": 3, "role": "cgnat_isp_head_end", "action": "run_preflight", "script": "preflight.sh"},
         {"id": 4, "role": "cgnat_isp_head_end", "action": "stage_and_apply_transit_only", "script": "apply.sh"},
     ]
@@ -107,7 +113,7 @@ def _render_apply_order(server_configs: dict[str, Any]) -> dict[str, Any]:
     for router in server_configs["runtime_inputs"]["customer_vpn_routers"]:
         steps.append({"id": step_id, "role": router["role"], "action": "run_preflight", "script": "preflight.sh"})
         step_id += 1
-        steps.append({"id": step_id, "role": router["role"], "action": "stage_and_apply_outer_and_inner_tunnels", "script": "apply.sh"})
+        steps.append({"id": step_id, "role": router["role"], "action": "stage_and_apply_outer_and_inner_strongswan_tunnels", "script": "apply.sh"})
         step_id += 1
     steps.append({"id": step_id, "role": "operator", "action": "run_validation_checks", "reference": "validation/validation-commands.md"})
     return {"steps": steps}
@@ -124,9 +130,10 @@ def _render_head_end_preflight() -> str:
             "",
             "command -v ip >/dev/null",
             "command -v openssl >/dev/null",
-            "if ! command -v ipsec >/dev/null; then",
-            "  command -v dnf >/dev/null",
+            "if ! command -v swanctl >/dev/null; then",
+            "  command -v dnf >/dev/null || command -v yum >/dev/null",
             "fi",
+            "ip link show \"$CGNAT_HEAD_END_OUTER_INTERFACE\" >/dev/null",
             "ip link show \"$CGNAT_HEAD_END_GRE_SOURCE_INTERFACE\" >/dev/null",
             "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_CERT_PATH\")\" ]]",
             "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_KEY_PATH\")\" ]]",
@@ -150,6 +157,7 @@ def _render_isp_head_end_preflight(server_configs: dict[str, Any]) -> str:
             "",
             "command -v ip >/dev/null",
             "command -v sysctl >/dev/null",
+            f"ip link show \"{customer_path['uplink_interface']}\" >/dev/null",
             f"ip link show \"{customer_path['customer_facing_interface']}\" >/dev/null",
             "",
             "echo \"Preflight OK for CGNAT ISP HEAD END\"",
@@ -169,15 +177,15 @@ def _render_customer_router_preflight(role: str) -> str:
             f"source \"$SCRIPT_DIR/{env_name}\"",
             "",
             "command -v ip >/dev/null",
-            "if ! command -v ipsec >/dev/null; then",
-            "  command -v dnf >/dev/null",
+            "if ! command -v swanctl >/dev/null; then",
+            "  command -v dnf >/dev/null || command -v yum >/dev/null",
             "fi",
             "ip link show \"$CGNAT_CUSTOMER_INTERFACE\" >/dev/null",
             "[[ \"$CGNAT_OUTER_REMOTE_PUBLIC_IP\" != \"" + HEAD_END_PUBLIC_IP_PLACEHOLDER + "\" ]]",
             "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CLIENT_CERT_PATH\")\" ]]",
             "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CLIENT_KEY_PATH\")\" ]]",
             "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CA_CERT_PATH\")\" ]]",
-            "[[ -f \"$SCRIPT_DIR/$(basename \"$CGNAT_INNER_VPN_SECRET_PATH\")\" ]]",
+            "[[ -f \"$SCRIPT_DIR/$CGNAT_INNER_VPN_SECRET_STAGE_NAME\" ]]",
             "",
             f"echo \"Preflight OK for {role}\"",
             "",
@@ -185,13 +193,35 @@ def _render_customer_router_preflight(role: str) -> str:
     )
 
 
-def _render_libreswan_bootstrap() -> list[str]:
+def _render_strongswan_bootstrap() -> list[str]:
     return [
-        "if ! command -v ipsec >/dev/null; then",
-        "  dnf -y install libreswan nss-tools",
-        "fi",
-        "ipsec checknss >/dev/null",
-        "systemctl stop ipsec >/dev/null 2>&1 || true",
+        "install_strongswan() {",
+        "  if command -v swanctl >/dev/null; then",
+        "    return 0",
+        "  fi",
+        "  if command -v dnf >/dev/null; then",
+        "    dnf -y install strongswan strongswan-swanctl || dnf -y install strongswan",
+        "  elif command -v yum >/dev/null; then",
+        "    yum -y install strongswan strongswan-swanctl || yum -y install strongswan",
+        "  else",
+        "    echo \"No supported package manager found for strongSwan installation\" >&2",
+        "    exit 1",
+        "  fi",
+        "}",
+        "",
+        "strongswan_service_name() {",
+        "  local candidate",
+        "  for candidate in strongswan-starter strongswan charon-systemd; do",
+        "    if systemctl list-unit-files \"${candidate}.service\" >/dev/null 2>&1; then",
+        "      printf '%s\\n' \"$candidate\"",
+        "      return 0",
+        "    fi",
+        "  done",
+        "  printf '%s\\n' strongswan",
+        "}",
+        "",
+        "install_strongswan",
+        "STRONGSWAN_SERVICE=\"$(strongswan_service_name)\"",
     ]
 
 
@@ -204,37 +234,21 @@ def _render_head_end_apply() -> str:
         "source \"$SCRIPT_DIR/cgnat-head-end-runtime.env\"",
         "",
     ]
-    lines.extend(_render_libreswan_bootstrap())
+    lines.extend(_render_strongswan_bootstrap())
     lines.extend(
         [
-            "while read -r NICKNAME TRUST; do",
-            "  case \"$TRUST\" in",
-            "    u,u,u) certutil -D -d sql:/var/lib/ipsec/nss -n \"$NICKNAME\" >/dev/null 2>&1 || true ;;",
-            "    CT,,) certutil -D -d sql:/var/lib/ipsec/nss -n \"$NICKNAME\" >/dev/null 2>&1 || true ;;",
-            "  esac",
-            "done < <(certutil -L -d sql:/var/lib/ipsec/nss | awk 'NR>4 && NF >= 2 {print $1, $NF}')",
-            "install -d /etc/ipsec.d /etc/ipsec.d/certs /etc/ipsec.d/private /etc/ipsec.d/cacerts",
+            "install -d /etc/swanctl/conf.d /etc/swanctl/x509 /etc/swanctl/private /etc/swanctl/x509ca",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_CERT_PATH\")\" \"$CGNAT_HEAD_END_SERVER_CERT_PATH\"",
             "install -m 0600 \"$SCRIPT_DIR/$(basename \"$CGNAT_HEAD_END_SERVER_KEY_PATH\")\" \"$CGNAT_HEAD_END_SERVER_KEY_PATH\"",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CA_CERT_PATH\")\" \"$CGNAT_OUTER_CA_CERT_PATH\"",
-            "TMP_DIR=\"$(mktemp -d)\"",
-            "trap 'rm -rf \"$TMP_DIR\"' EXIT",
-            "printf '%s' 'cgnatdemo' > \"$TMP_DIR/pk12.pass\"",
-            "openssl pkcs12 -export -out \"$TMP_DIR/head-end.p12\" -inkey \"$CGNAT_HEAD_END_SERVER_KEY_PATH\" -in \"$CGNAT_HEAD_END_SERVER_CERT_PATH\" -certfile \"$CGNAT_OUTER_CA_CERT_PATH\" -name \"$CGNAT_HEAD_END_CERT_NICKNAME\" -passout file:\"$TMP_DIR/pk12.pass\"",
-            "certutil -D -d sql:/var/lib/ipsec/nss -n \"$CGNAT_OUTER_CA_NICKNAME\" >/dev/null 2>&1 || true",
-            "certutil -A -d sql:/var/lib/ipsec/nss -n \"$CGNAT_OUTER_CA_NICKNAME\" -t 'CT,,' -i \"$CGNAT_OUTER_CA_CERT_PATH\"",
-            "certutil -D -d sql:/var/lib/ipsec/nss -n \"$CGNAT_HEAD_END_CERT_NICKNAME\" >/dev/null 2>&1 || true",
-            "pk12util -i \"$TMP_DIR/head-end.p12\" -d sql:/var/lib/ipsec/nss -k /dev/null -w \"$TMP_DIR/pk12.pass\"",
-            "CURRENT_CERT_NICKNAME=\"$(certutil -L -d sql:/var/lib/ipsec/nss | awk 'NR>4 && $NF == \"u,u,u\" {print $1; exit}')\"",
-            "if [[ -n \"$CURRENT_CERT_NICKNAME\" && \"$CURRENT_CERT_NICKNAME\" != \"$CGNAT_HEAD_END_CERT_NICKNAME\" ]]; then",
-            "  certutil --rename -d sql:/var/lib/ipsec/nss -n \"$CURRENT_CERT_NICKNAME\" --new-n \"$CGNAT_HEAD_END_CERT_NICKNAME\"",
-            "fi",
-            "install -m 0644 \"$SCRIPT_DIR/cgnat-head-end-swanctl.conf\" \"/etc/ipsec.d/${CGNAT_SERVICE_ID}-outer.conf\"",
-            "systemctl enable ipsec >/dev/null 2>&1 || true",
-            "systemctl restart ipsec",
+            "install -m 0644 \"$SCRIPT_DIR/cgnat-head-end-swanctl.conf\" \"/etc/swanctl/conf.d/${CGNAT_SERVICE_ID}-outer.conf\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-forwarding.sh\"",
+            "bash \"$SCRIPT_DIR/cgnat-head-end-xfrm.sh\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-gre.sh\"",
             "bash \"$SCRIPT_DIR/cgnat-head-end-routes.sh\"",
+            "systemctl enable \"$STRONGSWAN_SERVICE\" >/dev/null 2>&1 || true",
+            "systemctl restart \"$STRONGSWAN_SERVICE\"",
+            "swanctl --load-all",
             "",
         ]
     )
@@ -259,7 +273,8 @@ def _render_isp_head_end_apply() -> str:
 def _render_customer_router_apply(role: str) -> str:
     env_name = f"{role}-runtime.env"
     outer_conf_name = f"{role}-outer-swanctl.conf"
-    conf_name = f"{role}-inner-swanctl.conf"
+    inner_conf_name = f"{role}-inner-swanctl.conf"
+    xfrm_script_name = f"{role}-xfrm.sh"
     loop_name = f"{role}-loopback.sh"
     route_name = f"{role}-routes.sh"
     lines = [
@@ -270,45 +285,35 @@ def _render_customer_router_apply(role: str) -> str:
         f"source \"$SCRIPT_DIR/{env_name}\"",
         "",
     ]
-    lines.extend(_render_libreswan_bootstrap())
+    lines.extend(_render_strongswan_bootstrap())
     lines.extend(
         [
-            "while read -r NICKNAME TRUST; do",
-            "  case \"$TRUST\" in",
-            "    u,u,u) certutil -D -d sql:/var/lib/ipsec/nss -n \"$NICKNAME\" >/dev/null 2>&1 || true ;;",
-            "    CT,,) certutil -D -d sql:/var/lib/ipsec/nss -n \"$NICKNAME\" >/dev/null 2>&1 || true ;;",
-            "  esac",
-            "done < <(certutil -L -d sql:/var/lib/ipsec/nss | awk 'NR>4 && NF >= 2 {print $1, $NF}')",
-            "install -d /etc/ipsec.d /etc/ipsec.d/certs /etc/ipsec.d/private /etc/ipsec.d/cacerts",
+            "install -d /etc/swanctl/conf.d /etc/swanctl/x509 /etc/swanctl/private /etc/swanctl/x509ca",
             f"bash \"$SCRIPT_DIR/{loop_name}\"",
             f"bash \"$SCRIPT_DIR/{route_name}\"",
+            f"bash \"$SCRIPT_DIR/{xfrm_script_name}\"",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CLIENT_CERT_PATH\")\" \"$CGNAT_OUTER_CLIENT_CERT_PATH\"",
             "install -m 0600 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CLIENT_KEY_PATH\")\" \"$CGNAT_OUTER_CLIENT_KEY_PATH\"",
             "install -m 0644 \"$SCRIPT_DIR/$(basename \"$CGNAT_OUTER_CA_CERT_PATH\")\" \"$CGNAT_OUTER_CA_CERT_PATH\"",
-            "TMP_DIR=\"$(mktemp -d)\"",
-            "trap 'rm -rf \"$TMP_DIR\"' EXIT",
-            "printf '%s' 'cgnatdemo' > \"$TMP_DIR/pk12.pass\"",
-            "openssl pkcs12 -export -out \"$TMP_DIR/customer-router.p12\" -inkey \"$CGNAT_OUTER_CLIENT_KEY_PATH\" -in \"$CGNAT_OUTER_CLIENT_CERT_PATH\" -certfile \"$CGNAT_OUTER_CA_CERT_PATH\" -name \"$CGNAT_OUTER_CERT_NICKNAME\" -passout file:\"$TMP_DIR/pk12.pass\"",
-            "certutil -D -d sql:/var/lib/ipsec/nss -n \"$CGNAT_OUTER_CA_NICKNAME\" >/dev/null 2>&1 || true",
-            "certutil -A -d sql:/var/lib/ipsec/nss -n \"$CGNAT_OUTER_CA_NICKNAME\" -t 'CT,,' -i \"$CGNAT_OUTER_CA_CERT_PATH\"",
-            "certutil -D -d sql:/var/lib/ipsec/nss -n \"$CGNAT_OUTER_CERT_NICKNAME\" >/dev/null 2>&1 || true",
-            "pk12util -i \"$TMP_DIR/customer-router.p12\" -d sql:/var/lib/ipsec/nss -k /dev/null -w \"$TMP_DIR/pk12.pass\"",
-            "CURRENT_CERT_NICKNAME=\"$(certutil -L -d sql:/var/lib/ipsec/nss | awk 'NR>4 && $NF == \"u,u,u\" {print $1; exit}')\"",
-            "if [[ -n \"$CURRENT_CERT_NICKNAME\" && \"$CURRENT_CERT_NICKNAME\" != \"$CGNAT_OUTER_CERT_NICKNAME\" ]]; then",
-            "  certutil --rename -d sql:/var/lib/ipsec/nss -n \"$CURRENT_CERT_NICKNAME\" --new-n \"$CGNAT_OUTER_CERT_NICKNAME\"",
-            "fi",
-            f"install -m 0644 \"$SCRIPT_DIR/{outer_conf_name}\" \"/etc/ipsec.d/${{CGNAT_OUTER_CONNECTION_NAME}}.conf\"",
-            "install -m 0644 \"$SCRIPT_DIR/" + conf_name + "\" \"/etc/ipsec.d/${CGNAT_INNER_CONNECTION_NAME}.conf\"",
-            "RAW_SECRET_FILE=\"$SCRIPT_DIR/$(basename \"$CGNAT_INNER_VPN_SECRET_PATH\")\"",
-            "grep -q '/etc/ipsec.d/*.secrets' /etc/ipsec.secrets || printf '\\ninclude /etc/ipsec.d/*.secrets\\n' >> /etc/ipsec.secrets",
-            "printf '%s %s : PSK \"' \"$CGNAT_CUSTOMER_LOOPBACK_IP\" \"$CGNAT_CUSTOMER_FACING_PUBLIC_IP\" > /etc/ipsec.d/${CGNAT_INNER_CONNECTION_NAME}.secrets",
-            "tr -d '\\r\\n' < \"$RAW_SECRET_FILE\" >> /etc/ipsec.d/${CGNAT_INNER_CONNECTION_NAME}.secrets",
-            "printf '\"\\n' >> /etc/ipsec.d/${CGNAT_INNER_CONNECTION_NAME}.secrets",
-            "chmod 600 /etc/ipsec.d/${CGNAT_INNER_CONNECTION_NAME}.secrets",
-            "systemctl enable ipsec >/dev/null 2>&1 || true",
-            "systemctl restart ipsec",
-            "ipsec auto --up \"$CGNAT_OUTER_CONNECTION_NAME\"",
-            "ipsec auto --up \"$CGNAT_INNER_CONNECTION_NAME\"",
+            f"install -m 0644 \"$SCRIPT_DIR/{outer_conf_name}\" \"/etc/swanctl/conf.d/${{CGNAT_OUTER_CONNECTION_NAME}}.conf\"",
+            f"install -m 0644 \"$SCRIPT_DIR/{inner_conf_name}\" \"/etc/swanctl/conf.d/${{CGNAT_INNER_CONNECTION_NAME}}.conf\"",
+            "RAW_SECRET_FILE=\"$SCRIPT_DIR/$CGNAT_INNER_VPN_SECRET_STAGE_NAME\"",
+            "SECRET_VALUE=\"$(tr -d '\\r\\n' < \"$RAW_SECRET_FILE\")\"",
+            "cat > \"$CGNAT_INNER_VPN_SECRET_CONF_PATH\" <<EOF",
+            "secrets {",
+            "  ${CGNAT_INNER_CONNECTION_NAME} {",
+            "    id-1 = ${CGNAT_CUSTOMER_LOOPBACK_IP}",
+            "    id-2 = ${CGNAT_CUSTOMER_FACING_PUBLIC_IP}",
+            "    secret = \"$SECRET_VALUE\"",
+            "  }",
+            "}",
+            "EOF",
+            "chmod 600 \"$CGNAT_INNER_VPN_SECRET_CONF_PATH\"",
+            "systemctl enable \"$STRONGSWAN_SERVICE\" >/dev/null 2>&1 || true",
+            "systemctl restart \"$STRONGSWAN_SERVICE\"",
+            "swanctl --load-all",
+            "swanctl --initiate --ike \"$CGNAT_OUTER_CONNECTION_NAME\"",
+            "swanctl --initiate --ike \"$CGNAT_INNER_CONNECTION_NAME\"",
             "",
         ]
     )
@@ -320,11 +325,12 @@ def _render_head_end_rollback() -> str:
         [
             "# CGNAT HEAD END Rollback Notes",
             "",
-            "1. Remove or disable the staged libreswan connection file in `/etc/ipsec.d/`.",
-            "2. Restart the `ipsec` service to unload the outer tunnel config.",
-            "3. Remove the GRE interface created by `cgnat-head-end-gre.sh`.",
-            "4. Remove the route installed by `cgnat-head-end-routes.sh`.",
-            "5. Disable forwarding if the host should no longer carry the Scenario 1 path.",
+            "1. Remove the staged strongSwan fragment from `/etc/swanctl/conf.d/`.",
+            "2. Remove the staged cert/key/CA material from `/etc/swanctl/` if needed.",
+            "3. Remove the xfrm interfaces created for each customer router.",
+            "4. Remove the GRE interface created by `cgnat-head-end-gre.sh`.",
+            "5. Remove the route installed by `cgnat-head-end-routes.sh`.",
+            "6. Restart the strongSwan service to unload the transport config.",
             "",
         ]
     )
@@ -336,7 +342,7 @@ def _render_isp_head_end_rollback() -> str:
             "# CGNAT ISP HEAD END Rollback Notes",
             "",
             "1. Disable forwarding if this host should no longer transit customer-router traffic.",
-            "2. Remove any demo-only NAT or gateway changes if they were applied out of band.",
+            "2. Remove any demo-only NAT changes if they were applied out of band.",
             "3. Re-run transit validation to confirm customer-router traffic no longer crosses this node.",
             "",
         ]
@@ -348,11 +354,13 @@ def _render_customer_router_rollback(role: str) -> str:
         [
             f"# {role} Rollback Notes",
             "",
-            "1. Remove or disable the staged libreswan outer- and inner-tunnel configs in `/etc/ipsec.d/`.",
-            "2. Remove the staged PSK entry from `/etc/ipsec.d/` and restart `ipsec`.",
-            "3. Remove the imported demo client cert and demo CA from the NSS database if needed.",
-            "4. Remove the loopback identity if it was demo-only.",
-            "5. Restore the pre-demo default route if needed.",
+            "1. Remove the staged strongSwan outer and inner fragments from `/etc/swanctl/conf.d/`.",
+            "2. Remove the staged PSK secret fragment from `/etc/swanctl/conf.d/`.",
+            "3. Remove the client cert, key, and CA from `/etc/swanctl/` if needed.",
+            "4. Remove the xfrm interface and route to the customer-facing public IP.",
+            "5. Remove the demo loopback identity if it was demo-only.",
+            "6. Restore the pre-demo default route if needed.",
+            "7. Restart the strongSwan service to unload the Scenario 1 tunnels.",
             "",
         ]
     )
@@ -385,7 +393,7 @@ def _copy_material(source: Path, destination: Path) -> None:
 
 
 def _inner_secret_name(runtime: dict[str, Any]) -> str:
-    return Path(runtime["secret_path"]).name
+    return str(runtime["inner_vpn"]["raw_secret_stage_name"])
 
 
 def _apply_live_host_access_overrides(
@@ -401,16 +409,27 @@ def _apply_live_host_access_overrides(
 
     runtime_inputs = server_configs["runtime_inputs"]
     for router in runtime_inputs["customer_vpn_routers"]:
-        router["outer_tunnel"]["remote_public_ip"] = target_host
+        router["outer_tunnel"]["remote_addrs"] = [target_host]
         role = router["role"]
-        server_configs["customer_router_runtime_envs"][role] = server_configs["customer_router_runtime_envs"][role].replace(
-            HEAD_END_PUBLIC_IP_PLACEHOLDER,
-            target_host,
+        env_text = server_configs["customer_router_runtime_envs"][role]
+        env_text = env_text.replace(HEAD_END_PUBLIC_IP_PLACEHOLDER, target_host)
+        env_text = re.sub(
+            r'^CGNAT_OUTER_REMOTE_PUBLIC_IP="[^"]*"$',
+            f'CGNAT_OUTER_REMOTE_PUBLIC_IP="{target_host}"',
+            env_text,
+            flags=re.MULTILINE,
         )
-        server_configs["customer_router_outer_ipsec_confs"][role] = server_configs["customer_router_outer_ipsec_confs"][role].replace(
-            HEAD_END_PUBLIC_IP_PLACEHOLDER,
-            target_host,
+        server_configs["customer_router_runtime_envs"][role] = env_text
+
+        outer_conf = server_configs["customer_router_outer_confs"][role]
+        outer_conf = outer_conf.replace(HEAD_END_PUBLIC_IP_PLACEHOLDER, target_host)
+        outer_conf = re.sub(
+            r"^(\s*remote_addrs = ).*$",
+            rf"\g<1>{target_host}",
+            outer_conf,
+            flags=re.MULTILINE,
         )
+        server_configs["customer_router_outer_confs"][role] = outer_conf
 
 
 def _stage_materials(
@@ -514,7 +533,8 @@ def main() -> int:
 
     head_dir = host_dirs["cgnat_head_end"]
     dump_text(head_dir / "cgnat-head-end-runtime.env", server_configs["head_end_runtime_env"])
-    dump_text(head_dir / "cgnat-head-end-swanctl.conf", server_configs["head_end_ipsec_conf"])
+    dump_text(head_dir / "cgnat-head-end-swanctl.conf", server_configs["head_end_swanctl_conf"])
+    dump_text(head_dir / "cgnat-head-end-xfrm.sh", server_configs["head_end_xfrm_script"])
     dump_text(head_dir / "cgnat-head-end-gre.sh", server_configs["head_end_gre_script"])
     dump_text(head_dir / "cgnat-head-end-forwarding.sh", server_configs["head_end_forwarding_script"])
     dump_text(head_dir / "cgnat-head-end-routes.sh", server_configs["head_end_route_script"])
@@ -534,8 +554,9 @@ def main() -> int:
         role = router_runtime["role"]
         router_dir = host_dirs[role]
         dump_text(router_dir / f"{role}-runtime.env", server_configs["customer_router_runtime_envs"][role])
-        dump_text(router_dir / f"{role}-outer-swanctl.conf", server_configs["customer_router_outer_ipsec_confs"][role])
-        dump_text(router_dir / f"{role}-inner-swanctl.conf", server_configs["customer_router_inner_ipsec_confs"][role])
+        dump_text(router_dir / f"{role}-outer-swanctl.conf", server_configs["customer_router_outer_confs"][role])
+        dump_text(router_dir / f"{role}-inner-swanctl.conf", server_configs["customer_router_inner_confs"][role])
+        dump_text(router_dir / f"{role}-xfrm.sh", server_configs["customer_router_xfrm_scripts"][role])
         dump_text(router_dir / f"{role}-loopback.sh", server_configs["customer_router_loopback_scripts"][role])
         dump_text(router_dir / f"{role}-routes.sh", server_configs["customer_router_route_scripts"][role])
         dump_text(router_dir / "preflight.sh", _render_customer_router_preflight(role))

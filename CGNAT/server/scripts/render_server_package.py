@@ -196,6 +196,7 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         "role": "cgnat_isp_head_end",
         "transport_role": "nat_and_forwarding_only",
         "customer_service_path": {
+            "uplink_interface": operations["cgnat_isp_head_end"]["outer_tunnel_source_interface"],
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],
             "customer_facing_private_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
             "customer_devices": sot["customer_devices"],

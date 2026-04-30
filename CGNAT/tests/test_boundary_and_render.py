@@ -114,32 +114,46 @@ class PackageRenderingTests(unittest.TestCase):
         router2_outer_conf = (config_output / "customer_vpn_router_2-outer-swanctl.conf").read_text(encoding="utf-8")
         router1_env = (config_output / "customer_vpn_router_1-runtime.env").read_text(encoding="utf-8")
         router1_loopback = (config_output / "customer_vpn_router_1-loopback.sh").read_text(encoding="utf-8")
+        router1_xfrm = (config_output / "customer_vpn_router_1-xfrm.sh").read_text(encoding="utf-8")
         head_conf = (config_output / "cgnat-head-end-swanctl.conf").read_text(encoding="utf-8")
+        head_xfrm = (config_output / "cgnat-head-end-xfrm.sh").read_text(encoding="utf-8")
         isp_runtime = (config_output / "cgnat-isp-head-end-runtime.env").read_text(encoding="utf-8")
         isp_conf = (config_output / "cgnat-isp-head-end-swanctl.conf").read_text(encoding="utf-8")
-        expected_head_local_selector = runtime_inputs["head_end"]["outer_tunnel"]["local_selector"]
+        isp_forwarding = (config_output / "cgnat-isp-head-end-forwarding.sh").read_text(encoding="utf-8")
         expected_peer_count = len(runtime_inputs["head_end"]["outer_tunnel"]["accepted_peers"])
-        expected_router1_outer_selector = runtime_inputs["customer_vpn_routers"][0]["outer_tunnel"]["local_selector"]
-        expected_router2_outer_selector = runtime_inputs["customer_vpn_routers"][1]["outer_tunnel"]["local_selector"]
+        expected_router1_remote = runtime_inputs["customer_vpn_routers"][0]["outer_tunnel"]["remote_addrs"][0]
+        expected_router2_remote = runtime_inputs["customer_vpn_routers"][1]["outer_tunnel"]["remote_addrs"][0]
 
         self.assertEqual(len(runtime_inputs["customer_vpn_routers"]), 2)
         self.assertEqual(len(customer_router_configs), 2)
-        self.assertEqual(runtime_inputs["runtime_style"]["ipsec"], "libreswan_ipsec_conf")
-        self.assertIn("authby=secret", router1_conf)
-        self.assertIn("authby=secret", router2_conf)
-        self.assertIn("authby=rsasig", router1_outer_conf)
-        self.assertIn("authby=rsasig", router2_outer_conf)
-        self.assertIn(f"leftsubnet={expected_head_local_selector}", head_conf)
-        self.assertEqual(head_conf.count("conn "), expected_peer_count)
-        self.assertIn(f"leftsubnet={expected_router1_outer_selector}", router1_outer_conf)
-        self.assertIn(f"leftsubnet={expected_router2_outer_selector}", router2_outer_conf)
+        self.assertEqual(runtime_inputs["runtime_style"]["outer_transport"], "strongswan_swanctl_xfrmi")
+        self.assertEqual(runtime_inputs["runtime_style"]["inner_vpn"], "strongswan_swanctl_psk")
+        self.assertEqual(runtime_inputs["customer_vpn_routers"][0]["outer_tunnel"]["xfrm_if_id"], 101)
+        self.assertEqual(runtime_inputs["customer_vpn_routers"][1]["outer_tunnel"]["xfrm_if_id"], 102)
+        self.assertIn("auth = psk", router1_conf)
+        self.assertIn("auth = psk", router2_conf)
+        self.assertIn("auth = pubkey", router1_outer_conf)
+        self.assertIn("auth = pubkey", router2_outer_conf)
+        self.assertIn("local_ts = 0.0.0.0/0", head_conf)
+        self.assertIn("remote_addrs = %any", head_conf)
+        self.assertEqual(head_conf.count("version = 2"), expected_peer_count)
+        self.assertIn(f"remote_addrs = {expected_router1_remote}", router1_outer_conf)
+        self.assertIn(f"remote_addrs = {expected_router2_remote}", router2_outer_conf)
+        self.assertIn("ip link add \"$CGNAT_OUTER_XFRM_INTERFACE\" type xfrm", router1_xfrm)
+        self.assertIn("ip route replace \"${CGNAT_TERMINATION_PUBLIC_LOOPBACK}/32\" dev \"$CGNAT_GRE_NAME\"", (config_output / "cgnat-head-end-routes.sh").read_text(encoding="utf-8"))
+        self.assertIn("ip route replace \"172.31.48.20/32\" dev \"cgnat-s1-xfrm-r1\"", head_xfrm)
         self.assertIn("CGNAT_CUSTOMER_DEFAULT_GATEWAY_IP", router1_env)
         self.assertIn("CGNAT_OUTER_REMOTE_PUBLIC_IP", router1_env)
+        self.assertIn("CGNAT_OUTER_XFRM_INTERFACE", router1_env)
+        self.assertIn("CGNAT_INNER_VPN_SECRET_CONF_PATH", router1_env)
         self.assertIn("10.20.30.10/32", router1_loopback)
         self.assertIn("CGNAT_ISP_CUSTOMER_PRIVATE_IP", isp_runtime)
+        self.assertIn("CGNAT_ISP_UPLINK_INTERFACE", isp_runtime)
         self.assertIn("CGNAT_TRANSPORT_ROLE=", isp_runtime)
         self.assertNotIn("CGNAT_OUTER_LOCAL_IDENTITY=", isp_runtime)
         self.assertIn("NAT/transit only", isp_conf)
+        self.assertIn("masquerade", isp_forwarding)
+        self.assertIn("nft -f /etc/nftables.d/cgnat-scenario1-isp.nft", isp_forwarding)
         self.assertFalse((config_output / "cgnat-isp-head-end-inner-swanctl.conf").exists())
 
     def test_server_config_renderer_prefers_explicit_cgnat_handoff_remote(self) -> None:
@@ -179,7 +193,7 @@ class PackageRenderingTests(unittest.TestCase):
         validation_targets = json.loads((server_output / "validation-targets.json").read_text(encoding="utf-8"))
         validation_commands = (config_output / "validation-commands.md").read_text(encoding="utf-8")
 
-        self.assertIn("rightsubnets=198.51.100.10/32,194.138.36.80/28", router1_conf)
+        self.assertIn("remote_ts = 198.51.100.10/32,194.138.36.80/28", router1_conf)
         self.assertIn('CGNAT_INNER_REMOTE_SELECTORS="198.51.100.10/32,194.138.36.80/28"', router1_env)
         self.assertEqual(
             backend_expectations["service_reachable_subnets"],
@@ -217,15 +231,50 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-outer-swanctl.conf").exists())
         self.assertEqual(apply_order["steps"][0]["role"], "cgnat_head_end")
         self.assertIn("customer_vpn_router_1", [step["role"] for step in apply_order["steps"] if "role" in step])
-        self.assertIn("certutil --rename", head_apply)
+        self.assertIn("swanctl --load-all", head_apply)
+        self.assertIn("cgnat-head-end-xfrm.sh", head_apply)
         self.assertIn("stage_and_apply_transit_only", json.dumps(apply_order))
         self.assertIn("CGNAT_OUTER_CLIENT_CERT_PATH", router_apply)
-        self.assertIn("ipsec auto --up \"$CGNAT_OUTER_CONNECTION_NAME\"", router_apply)
+        self.assertIn("swanctl --initiate --ike \"$CGNAT_OUTER_CONNECTION_NAME\"", router_apply)
+        self.assertIn("swanctl --initiate --ike \"$CGNAT_INNER_CONNECTION_NAME\"", router_apply)
         self.assertIn("RAW_SECRET_FILE=", router_apply)
+        self.assertIn("CGNAT_INNER_VPN_SECRET_CONF_PATH", router_apply)
         self.assertNotIn("CGNAT_ISP_HEAD_END_CLIENT_CERT_PATH", isp_apply)
         self.assertNotIn("ipsec auto --up", isp_apply)
-        self.assertNotIn("tr -d '\\\\r\\\\n' < \"$CGNAT_INNER_VPN_SECRET_PATH\"", router_apply)
+        self.assertNotIn("certutil", router_apply)
         self.assertNotIn(b"\r\n", (host_apply_output / "hosts" / "cgnat-head-end" / "apply.sh").read_bytes())
+
+    def test_prepare_scenario1_host_apply_overrides_router_outer_remote_ip_from_host_access(self) -> None:
+        server_output = self.tempdir_path / "server-package"
+        config_output = self.tempdir_path / "server-configs"
+        host_apply_output = self.tempdir_path / "host-apply-live"
+        host_access_path = self.tempdir_path / "host-access.json"
+
+        host_access = {
+            "cgnat_head_end": {
+                "ssh_user": "ec2-user",
+                "target_host": "44.198.245.90",
+                "private_key_path": "/keys/shared.pem",
+                "remote_stage_dir": "/var/tmp/cgnat-head-end",
+            }
+        }
+        host_access_path.write_text(json.dumps(host_access, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"), str(self.bundle_path), str(server_output))
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"), str(server_output), str(config_output))
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_host_apply.py"),
+            str(config_output),
+            str(host_apply_output),
+            "--host-access-json",
+            str(host_access_path),
+        )
+
+        router1_env = (host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-runtime.env").read_text(encoding="utf-8")
+        router1_outer_conf = (host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-outer-swanctl.conf").read_text(encoding="utf-8")
+
+        self.assertIn('CGNAT_OUTER_REMOTE_PUBLIC_IP="44.198.245.90"', router1_env)
+        self.assertIn("remote_addrs = 44.198.245.90", router1_outer_conf)
 
     def test_materialize_demo_materials_stages_per_router_psks(self) -> None:
         materials_output = self.tempdir_path / "demo-materials"
@@ -248,17 +297,17 @@ class PackageRenderingTests(unittest.TestCase):
         router1_conf = (host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-inner-swanctl.conf").read_text(encoding="utf-8")
         router2_conf = (host_apply_output / "hosts" / "customer-vpn-router-2" / "customer_vpn_router_2-inner-swanctl.conf").read_text(encoding="utf-8")
         router1_outer_conf = (host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-outer-swanctl.conf").read_text(encoding="utf-8")
-        router1_secret = (host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.secrets").read_text(encoding="utf-8").strip()
-        router2_secret = (host_apply_output / "hosts" / "customer-vpn-router-2" / f"{materials_manifest['service_id']}-customer_vpn_router_2-inner.secrets").read_text(encoding="utf-8").strip()
+        router1_secret = (host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.psk").read_text(encoding="utf-8").strip()
+        router2_secret = (host_apply_output / "hosts" / "customer-vpn-router-2" / f"{materials_manifest['service_id']}-customer_vpn_router_2-inner.psk").read_text(encoding="utf-8").strip()
 
         self.assertEqual(len(materials_manifest["inner_vpn_materials"]), 2)
         self.assertEqual(len(materials_manifest["certificate_material"]["customer_router_outer_clients"]), 2)
-        self.assertIn("authby=secret", router1_conf)
-        self.assertIn("authby=secret", router2_conf)
-        self.assertIn("authby=rsasig", router1_outer_conf)
+        self.assertIn("auth = psk", router1_conf)
+        self.assertIn("auth = psk", router2_conf)
+        self.assertIn("auth = pubkey", router1_outer_conf)
         self.assertTrue(router1_secret)
         self.assertTrue(router2_secret)
-        self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.secrets").exists())
+        self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.psk").exists())
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-outer.crt").exists())
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-outer-ca.crt").exists())
 
