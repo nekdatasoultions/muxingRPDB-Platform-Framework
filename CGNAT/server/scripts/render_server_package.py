@@ -17,10 +17,13 @@ def _selected_backend_entry(bundle: dict[str, Any]) -> dict[str, Any]:
     backend_pool = list(bundle["operations"]["backend_vpn_head_ends"].get(preferred_class) or [])
     for entry in backend_pool:
         if isinstance(entry, dict) and entry.get("public_loopback") == loopback:
-            return entry
+            normalized = dict(entry)
+            normalized["gre_remote"] = str(entry.get("cgnat_handoff_remote") or entry.get("gre_remote") or "").strip()
+            return normalized
     return {
         "name": f"unmatched-{preferred_class}-backend",
         "gre_remote": "",
+        "cgnat_handoff_remote": "",
         "public_loopback": loopback,
     }
 
@@ -31,6 +34,15 @@ def _router_index(operations: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for router in list(operations.get("customer_vpn_routers") or [])
         if isinstance(router, dict) and router.get("role")
     }
+
+
+def _resolved_head_end_public_ip(operations: dict[str, Any]) -> str | None:
+    head_end = dict(operations.get("cgnat_head_end") or {})
+    for field in ("allocated_public_ip", "resolved_public_ip", "public_ip"):
+        value = str(head_end.get(field) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _render_package_manifest(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -93,6 +105,7 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
             "client_certificate_ref": operations["certificates"]["cgnat_isp_head_end_client_cert_ref"],
             "local_identity_ref": sot["identities"]["outer_tunnel_identity_ref"],
             "remote_identity": f"cgnat-head-end/{sot['service_id']}",
+            "remote_public_ip": _resolved_head_end_public_ip(operations),
         },
         "customer_service_path": {
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],

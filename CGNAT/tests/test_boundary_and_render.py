@@ -79,6 +79,14 @@ class PackageRenderingTests(unittest.TestCase):
         readiness = json.loads((deploy_output / "deployment-readiness.json").read_text(encoding="utf-8"))
         router_requests = json.loads((deploy_output / "customer-vpn-router-run-instances-requests.json").read_text(encoding="utf-8"))
         action_names = {action["name"] for action in plan["post_create_actions"]["actions"]}
+        isp_eip_action = next(
+            (
+                action
+                for action in plan["post_create_actions"]["actions"]
+                if action["name"] in {"associate_isp_head_end_eip", "allocate_and_associate_isp_head_end_eip"}
+            ),
+            None,
+        )
 
         self.assertTrue(plan["deployment_ready_for_live_create"])
         self.assertTrue(readiness["live_create_allowed"])
@@ -87,6 +95,8 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(router_requests[1]["role"], "customer_vpn_router_2")
         self.assertIn("disable_source_dest_check_head_end", action_names)
         self.assertIn("disable_source_dest_check_isp_head_end", action_names)
+        if isp_eip_action is not None:
+            self.assertEqual(isp_eip_action["association_target"], "transit_network_interface")
 
     def test_server_config_renderer_outputs_per_router_artifacts(self) -> None:
         server_output = self.tempdir_path / "server-package"
@@ -100,15 +110,47 @@ class PackageRenderingTests(unittest.TestCase):
         router1_conf = (config_output / "customer_vpn_router_1-inner-swanctl.conf").read_text(encoding="utf-8")
         router2_conf = (config_output / "customer_vpn_router_2-inner-swanctl.conf").read_text(encoding="utf-8")
         router1_env = (config_output / "customer_vpn_router_1-runtime.env").read_text(encoding="utf-8")
+        router1_loopback = (config_output / "customer_vpn_router_1-loopback.sh").read_text(encoding="utf-8")
+        head_conf = (config_output / "cgnat-head-end-swanctl.conf").read_text(encoding="utf-8")
         isp_runtime = (config_output / "cgnat-isp-head-end-runtime.env").read_text(encoding="utf-8")
+        isp_conf = (config_output / "cgnat-isp-head-end-swanctl.conf").read_text(encoding="utf-8")
+        expected_head_local_selector = runtime_inputs["head_end"]["outer_tunnel"]["local_selector"]
+        expected_head_remote_selector = runtime_inputs["head_end"]["outer_tunnel"]["remote_selector"]
+        expected_isp_local_selector = runtime_inputs["isp_head_end"]["outer_tunnel"]["local_selector"]
+        expected_isp_remote_selector = runtime_inputs["isp_head_end"]["outer_tunnel"]["remote_selector"]
 
         self.assertEqual(len(runtime_inputs["customer_vpn_routers"]), 2)
         self.assertEqual(len(customer_router_configs), 2)
-        self.assertIn("__CGNAT_INNER_PSK__", router1_conf)
-        self.assertIn("__CGNAT_INNER_PSK__", router2_conf)
+        self.assertEqual(runtime_inputs["runtime_style"]["ipsec"], "libreswan_ipsec_conf")
+        self.assertIn("authby=secret", router1_conf)
+        self.assertIn("authby=secret", router2_conf)
+        self.assertIn(f"leftsubnet={expected_head_local_selector}", head_conf)
+        self.assertIn(f"rightsubnet={expected_head_remote_selector}", head_conf)
+        self.assertIn(f"leftsubnet={expected_isp_local_selector}", isp_conf)
+        self.assertIn(f"rightsubnet={expected_isp_remote_selector}", isp_conf)
         self.assertIn("CGNAT_CUSTOMER_DEFAULT_GATEWAY_IP", router1_env)
+        self.assertIn("10.20.30.10/32", router1_loopback)
+        self.assertIn("CGNAT_OUTER_REMOTE_PUBLIC_IP", isp_runtime)
         self.assertIn("CGNAT_ISP_CUSTOMER_PRIVATE_IP", isp_runtime)
+        self.assertIn("CGNAT_OUTER_LOCAL_IDENTITY=", isp_runtime)
+        self.assertNotIn("/", isp_runtime.split("CGNAT_OUTER_LOCAL_IDENTITY=\"", 1)[1].split("\"", 1)[0])
         self.assertFalse((config_output / "cgnat-isp-head-end-inner-swanctl.conf").exists())
+
+    def test_server_config_renderer_prefers_explicit_cgnat_handoff_remote(self) -> None:
+        bundle = json.loads(self.bundle_path.read_text(encoding="utf-8"))
+        preferred_class = bundle["sot"]["backend_selection"]["preferred_class"]
+        bundle["operations"]["backend_vpn_head_ends"][preferred_class][0]["cgnat_handoff_remote"] = "172.31.69.214"
+        bundle_path = self.tempdir_path / "deployment-bundle.override.json"
+        bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        server_output = self.tempdir_path / "server-package-override"
+        config_output = self.tempdir_path / "server-configs-override"
+
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_server_package.py"), str(bundle_path), str(server_output))
+        self._run(str(CGNAT_ROOT / "server" / "scripts" / "render_scenario1_server_configs.py"), str(server_output), str(config_output))
+
+        runtime_inputs = json.loads((config_output / "runtime-inputs.json").read_text(encoding="utf-8"))
+        self.assertEqual(runtime_inputs["head_end"]["gre_runtime"]["remote_ip"], "172.31.69.214")
 
     def test_prepare_scenario1_host_apply_outputs_four_host_bundles(self) -> None:
         server_output = self.tempdir_path / "server-package"
@@ -121,12 +163,18 @@ class PackageRenderingTests(unittest.TestCase):
 
         manifest = json.loads((host_apply_output / "package-manifest.json").read_text(encoding="utf-8"))
         apply_order = json.loads((host_apply_output / "apply-order.json").read_text(encoding="utf-8"))
+        head_apply = (host_apply_output / "hosts" / "cgnat-head-end" / "apply.sh").read_text(encoding="utf-8")
+        router_apply = (host_apply_output / "hosts" / "customer-vpn-router-1" / "apply.sh").read_text(encoding="utf-8")
 
         self.assertEqual(len(manifest["hosts"]), 4)
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / "apply.sh").exists())
         self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-2" / "preflight.sh").exists())
         self.assertEqual(apply_order["steps"][0]["role"], "cgnat_head_end")
         self.assertIn("customer_vpn_router_1", [step["role"] for step in apply_order["steps"] if "role" in step])
+        self.assertIn("certutil --rename", head_apply)
+        self.assertIn("RAW_SECRET_FILE=", router_apply)
+        self.assertNotIn("tr -d '\\\\r\\\\n' < \"$CGNAT_INNER_VPN_SECRET_PATH\"", router_apply)
+        self.assertNotIn(b"\r\n", (host_apply_output / "hosts" / "cgnat-head-end" / "apply.sh").read_bytes())
 
     def test_materialize_demo_materials_stages_per_router_psks(self) -> None:
         materials_output = self.tempdir_path / "demo-materials"
@@ -148,11 +196,15 @@ class PackageRenderingTests(unittest.TestCase):
         materials_manifest = json.loads((materials_output / "materials-manifest.json").read_text(encoding="utf-8"))
         router1_conf = (host_apply_output / "hosts" / "customer-vpn-router-1" / "customer_vpn_router_1-inner-swanctl.conf").read_text(encoding="utf-8")
         router2_conf = (host_apply_output / "hosts" / "customer-vpn-router-2" / "customer_vpn_router_2-inner-swanctl.conf").read_text(encoding="utf-8")
+        router1_secret = (host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.secrets").read_text(encoding="utf-8").strip()
+        router2_secret = (host_apply_output / "hosts" / "customer-vpn-router-2" / f"{materials_manifest['service_id']}-customer_vpn_router_2-inner.secrets").read_text(encoding="utf-8").strip()
 
         self.assertEqual(len(materials_manifest["inner_vpn_materials"]), 2)
-        self.assertNotIn("__CGNAT_INNER_PSK__", router1_conf)
-        self.assertNotIn("__CGNAT_INNER_PSK__", router2_conf)
-        self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.psk").exists())
+        self.assertIn("authby=secret", router1_conf)
+        self.assertIn("authby=secret", router2_conf)
+        self.assertTrue(router1_secret)
+        self.assertTrue(router2_secret)
+        self.assertTrue((host_apply_output / "hosts" / "customer-vpn-router-1" / f"{materials_manifest['service_id']}-customer_vpn_router_1-inner.secrets").exists())
 
     def test_prepare_scenario1_remote_apply_plan_outputs_proxyjump_roles(self) -> None:
         server_output = self.tempdir_path / "server-package"
@@ -205,8 +257,10 @@ class PackageRenderingTests(unittest.TestCase):
         router1_stage = (remote_apply_output / "commands" / "customer_vpn_router_1-stage.sh").read_text(encoding="utf-8")
 
         self.assertEqual(len(manifest["hosts"]), 4)
-        self.assertIn("ProxyJump", router1_stage)
+        self.assertIn("ProxyCommand", router1_stage)
         self.assertIn("172.31.48.20", router1_stage)
+        self.assertIn("LOCAL_BUNDLE_DIR=", router1_stage)
+        self.assertNotIn("SCRIPT_DIR=", router1_stage)
 
     def test_derive_host_access_from_aws_apply_uses_private_ips_for_customer_routers(self) -> None:
         apply_result_path = self.tempdir_path / "apply-result.json"
@@ -279,6 +333,106 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(derived["cgnat_isp_head_end"]["target_host"], "54.10.10.11")
         self.assertEqual(derived["customer_vpn_router_1"]["target_host"], "172.31.48.20")
         self.assertEqual(derived["customer_vpn_router_1"]["proxy_jump_role"], "cgnat_isp_head_end")
+
+    def test_update_bundle_public_ips_from_aws_apply_updates_effective_live_bundle(self) -> None:
+        apply_result_path = self.tempdir_path / "apply-result.json"
+        output_bundle_path = self.tempdir_path / "deployment-bundle.updated.json"
+
+        apply_result = {
+            "post_create_actions": [
+                {
+                    "service_role": "cgnat_head_end",
+                    "response": {"allocation": {"PublicIp": "54.10.10.10", "AllocationId": "eipalloc-head"}},
+                },
+                {
+                    "service_role": "cgnat_isp_head_end",
+                    "response": {"allocation": {"PublicIp": "54.10.10.11", "AllocationId": "eipalloc-isp"}},
+                },
+            ]
+        }
+        apply_result_path.write_text(json.dumps(apply_result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "framework" / "scripts" / "update_bundle_public_ips_from_aws_apply.py"),
+            str(self.bundle_path),
+            str(apply_result_path),
+            str(output_bundle_path),
+        )
+
+        updated_bundle = json.loads(output_bundle_path.read_text(encoding="utf-8"))
+        self.assertEqual(updated_bundle["operations"]["cgnat_head_end"]["allocated_public_ip"], "54.10.10.10")
+        self.assertEqual(updated_bundle["operations"]["cgnat_head_end"]["public_eip_allocation_id"], "eipalloc-head")
+        self.assertEqual(updated_bundle["operations"]["cgnat_isp_head_end"]["allocated_public_ip"], "54.10.10.11")
+        self.assertEqual(updated_bundle["operations"]["cgnat_isp_head_end"]["public_eip_allocation_id"], "eipalloc-isp")
+
+    def test_prepare_scenario1_muxer_ingress_shim_outputs_peer_specific_rules(self) -> None:
+        bundle = json.loads(self.bundle_path.read_text(encoding="utf-8"))
+        preferred_class = bundle["sot"]["backend_selection"]["preferred_class"]
+        bundle["operations"]["backend_vpn_head_ends"][preferred_class][0]["cgnat_handoff_remote"] = "172.31.69.214"
+        bundle_path = self.tempdir_path / "deployment-bundle.muxer-shim.json"
+        summary_path = self.tempdir_path / "backend-integration-summary.json"
+        aws_apply_path = self.tempdir_path / "aws-apply-result.json"
+        output_dir = self.tempdir_path / "muxer-ingress-shim"
+
+        backend_summary = {
+            "request_records": [
+                {
+                    "deploy_plan": {
+                        "selected_targets": {
+                            "muxer": {
+                                "selector": {
+                                    "private_ip": "172.31.69.214",
+                                    "public_ip": "23.20.31.151",
+                                }
+                            },
+                            "headend_active": {
+                                "selector": {
+                                    "private_ip": "172.31.40.223",
+                                }
+                            },
+                        }
+                    }
+                }
+            ]
+        }
+        aws_apply = {
+            "head_end": {
+                "response": {
+                    "Instances": [
+                        {"PrivateIpAddress": "172.31.38.227"}
+                    ]
+                }
+            }
+        }
+        bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summary_path.write_text(json.dumps(backend_summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        aws_apply_path.write_text(json.dumps(aws_apply, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        self._run(
+            str(CGNAT_ROOT / "server" / "scripts" / "prepare_scenario1_muxer_ingress_shim.py"),
+            str(bundle_path),
+            str(summary_path),
+            str(aws_apply_path),
+            str(output_dir),
+        )
+
+        runtime = json.loads((output_dir / "runtime-inputs.json").read_text(encoding="utf-8"))
+        nft_apply = (output_dir / "nftables.apply.nft").read_text(encoding="utf-8")
+        runtime_env = (output_dir / "runtime.env").read_text(encoding="utf-8")
+        apply_sh = (output_dir / "apply.sh").read_text(encoding="utf-8")
+
+        self.assertEqual(runtime["cgnat_head_end"]["private_ip"], "172.31.38.227")
+        self.assertEqual(runtime["backend_head_end"]["private_ip"], "172.31.40.223")
+        self.assertEqual(runtime["muxer"]["inside_ip"], "172.31.69.214")
+        self.assertEqual(runtime["muxer"]["public_ip"], "23.20.31.151")
+        self.assertIn("172.31.48.20", nft_apply)
+        self.assertIn("172.31.48.21", nft_apply)
+        self.assertIn("23.20.31.151", nft_apply)
+        self.assertIn("172.31.40.223", nft_apply)
+        self.assertIn("udp dport 4500", nft_apply)
+        self.assertIn("udp sport 4500", nft_apply)
+        self.assertIn('CGNAT_HEAD_END_PRIVATE_IP="172.31.38.227"', runtime_env)
+        self.assertIn('ip tunnel add "$CGNAT_MUXER_SHIM_INTERFACE" mode gre local "$CGNAT_MUXER_INSIDE_IP" remote "$CGNAT_HEAD_END_PRIVATE_IP"', apply_sh)
 
     def test_aws_live_preflight_detects_router_private_ip_outside_subnet(self) -> None:
         package = {

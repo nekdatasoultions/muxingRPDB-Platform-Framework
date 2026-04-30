@@ -39,6 +39,12 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _runtime_outer_identity(value: str) -> str:
+    candidate = str(value or "").strip()
+    sanitized = candidate.replace("/", ".")
+    return "".join(char if char.isalnum() or char in ("-", ".") else "-" for char in sanitized)
+
+
 def main() -> int:
     sys.path.insert(0, str(_framework_src_root()))
 
@@ -56,6 +62,8 @@ def main() -> int:
     openssl_bin = _find_openssl()
     service_id = bundle["sot"]["service_id"]
     safe_service_id = _sanitize(service_id)
+    head_end_identity = _runtime_outer_identity(f"cgnat-head-end/{service_id}")
+    isp_head_end_identity = _runtime_outer_identity(bundle["sot"]["identities"]["outer_tunnel_identity_ref"])
 
     pki_dir = output_dir / "pki"
     secrets_dir = output_dir / "secrets"
@@ -70,6 +78,8 @@ def main() -> int:
     isp_key = pki_dir / f"{safe_service_id}-isp-client.key"
     isp_csr = pki_dir / f"{safe_service_id}-isp-client.csr"
     isp_crt = pki_dir / f"{safe_service_id}-isp-client.crt"
+    head_ext = pki_dir / f"{safe_service_id}-head-end.ext"
+    isp_ext = pki_dir / f"{safe_service_id}-isp-client.ext"
     inner_vpn_materials: list[dict[str, str]] = []
 
     _run(
@@ -102,6 +112,18 @@ def main() -> int:
         "-subj",
         f"/CN={safe_service_id}-head-end",
     )
+    _write_text(
+        head_ext,
+        "\n".join(
+            [
+                "basicConstraints=CA:FALSE",
+                "keyUsage=digitalSignature,keyEncipherment",
+                "extendedKeyUsage=serverAuth,clientAuth",
+                f"subjectAltName=DNS:{head_end_identity}",
+                "",
+            ]
+        ),
+    )
     _run(
         openssl_bin,
         "x509",
@@ -118,6 +140,8 @@ def main() -> int:
         "-days",
         "365",
         "-sha256",
+        "-extfile",
+        str(head_ext),
     )
     _run(
         openssl_bin,
@@ -132,6 +156,18 @@ def main() -> int:
         str(isp_csr),
         "-subj",
         f"/CN={safe_service_id}-isp-client",
+    )
+    _write_text(
+        isp_ext,
+        "\n".join(
+            [
+                "basicConstraints=CA:FALSE",
+                "keyUsage=digitalSignature,keyEncipherment",
+                "extendedKeyUsage=serverAuth,clientAuth",
+                f"subjectAltName=DNS:{isp_head_end_identity}",
+                "",
+            ]
+        ),
     )
     _run(
         openssl_bin,
@@ -149,6 +185,8 @@ def main() -> int:
         "-days",
         "365",
         "-sha256",
+        "-extfile",
+        str(isp_ext),
     )
 
     for device in bundle["sot"]["customer_devices"]:

@@ -34,4 +34,6 @@ def dump_json(path: str | Path, payload: Any) -> None:
 def dump_text(path: str | Path, text: str) -> None:
     output_path = ensure_path_within_cgnat(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(text, encoding="utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    with output_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(normalized)

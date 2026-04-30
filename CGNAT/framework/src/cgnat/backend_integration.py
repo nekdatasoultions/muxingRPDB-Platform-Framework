@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 
@@ -56,6 +57,57 @@ def _device_loopback_ip(bundle: dict[str, Any], device: dict[str, Any]) -> str:
     return str(device.get("customer_loopback_ip") or bundle["sot"]["identities"]["customer_loopback_ip"])
 
 
+def _device_peer_public_ip(bundle: dict[str, Any], device: dict[str, Any], loopback_ip: str) -> str:
+    candidate = str(device.get("customer_private_ip_address") or "").strip()
+    if candidate:
+        return candidate
+    router_role = str(device.get("router_role") or "").strip()
+    for router in list(bundle["operations"].get("customer_vpn_routers") or []):
+        if str(router.get("role") or "").strip() != router_role:
+            continue
+        candidate = str(router.get("private_ip_address") or "").strip()
+        if candidate:
+            return candidate
+    return candidate or loopback_ip
+
+
+def _device_real_subnets(bundle: dict[str, Any], device: dict[str, Any]) -> list[str]:
+    known_inside_identity = str(device.get("known_inside_identity") or "").strip()
+    if known_inside_identity:
+        return [known_inside_identity]
+    return list(bundle["sot"]["addressing"]["customer_original_inside_space"] or [])
+
+
+def _derive_translated_subnets(
+    *,
+    device_real_subnets: list[str],
+    customer_original_inside_space: list[str],
+    platform_assigned_inside_space: list[str],
+) -> list[str]:
+    if not device_real_subnets or not customer_original_inside_space or not platform_assigned_inside_space:
+        return list(platform_assigned_inside_space)
+
+    derived: list[str] = []
+    for device_cidr in device_real_subnets:
+        device_net = ipaddress.ip_network(device_cidr, strict=False)
+        mapped_cidr = ""
+        for source_cidr, target_cidr in zip(customer_original_inside_space, platform_assigned_inside_space):
+            source_net = ipaddress.ip_network(source_cidr, strict=False)
+            target_net = ipaddress.ip_network(target_cidr, strict=False)
+            if device_net.version != source_net.version or source_net.version != target_net.version:
+                continue
+            if not device_net.subnet_of(source_net):
+                continue
+            offset = int(device_net.network_address) - int(source_net.network_address)
+            mapped_network_address = ipaddress.ip_address(int(target_net.network_address) + offset)
+            candidate = ipaddress.ip_network(f"{mapped_network_address}/{device_net.prefixlen}", strict=False)
+            if candidate.subnet_of(target_net):
+                mapped_cidr = str(candidate)
+                break
+        derived.append(mapped_cidr or device_cidr)
+    return derived
+
+
 def _customer_name_for_device(bundle: dict[str, Any], integration: dict[str, Any], device: dict[str, Any], index: int) -> str:
     base_name = str(integration.get("customer_name") or f"{bundle['sot']['service_id']}-backend")
     template = str(integration.get("customer_name_template") or "").strip()
@@ -105,10 +157,18 @@ def build_backend_customer_request(
     selected_device = device or list(bundle["sot"]["customer_devices"] or [])[0]
     customer_name = _customer_name_for_device(bundle, integration, selected_device, index)
     service_local_subnets = _resolve_service_local_subnets(bundle, integration)
+    backend_public_loopback = _resolve_selected_backend_public_loopback(bundle)
     psk_secret_ref = _backend_psk_secret_ref_for_device(bundle, integration, selected_device, index, customer_name)
     customer_loopback_ip = _device_loopback_ip(bundle, selected_device)
+    customer_peer_public_ip = _device_peer_public_ip(bundle, selected_device, customer_loopback_ip)
     customer_original_inside_space = list(bundle["sot"]["addressing"]["customer_original_inside_space"] or [])
     platform_assigned_inside_space = list(bundle["sot"]["addressing"]["platform_assigned_inside_space"] or [])
+    device_real_subnets = _device_real_subnets(bundle, selected_device)
+    device_translated_subnets = _derive_translated_subnets(
+        device_real_subnets=device_real_subnets,
+        customer_original_inside_space=customer_original_inside_space,
+        platform_assigned_inside_space=platform_assigned_inside_space,
+    )
     translation_mode = str(bundle["sot"]["addressing"]["translation_mode"] or "disabled")
 
     request: dict[str, Any] = {
@@ -116,17 +176,19 @@ def build_backend_customer_request(
         "customer": {
             "name": customer_name,
             "peer": {
-                "public_ip": customer_loopback_ip,
+                "public_ip": customer_peer_public_ip,
                 "remote_id": customer_loopback_ip,
                 "psk_secret_ref": psk_secret_ref,
             },
             "selectors": {
                 "local_subnets": service_local_subnets,
-                "remote_subnets": customer_original_inside_space,
+                "remote_subnets": device_real_subnets,
             },
             "ipsec": dict(integration.get("ipsec") or {}),
         },
     }
+
+    request["customer"]["ipsec"].setdefault("local_id", backend_public_loopback)
 
     ipsec_initiation = integration.get("ipsec_initiation")
     if isinstance(ipsec_initiation, dict) and ipsec_initiation:
@@ -137,8 +199,8 @@ def build_backend_customer_request(
             "enabled": True,
             "mode": str((integration.get("post_ipsec_nat") or {}).get("mode") or "netmap"),
             "mapping_strategy": str((integration.get("post_ipsec_nat") or {}).get("mapping_strategy") or "one_to_one"),
-            "real_subnets": customer_original_inside_space,
-            "translated_subnets": platform_assigned_inside_space,
+            "real_subnets": device_real_subnets,
+            "translated_subnets": device_translated_subnets,
             "core_subnets": service_local_subnets,
             "tcp_mss_clamp": int((integration.get("post_ipsec_nat") or {}).get("tcp_mss_clamp") or 1360),
         }
@@ -185,12 +247,14 @@ def build_backend_integration_summary(
     generated_request_paths = [record["request_path"] for record in request_records]
     backend_customer_names = [record["customer_name"] for record in request_records]
     customer_loopbacks = [record["customer_loopback_ip"] for record in request_records]
+    customer_peer_public_ips = [record["customer_peer_public_ip"] for record in request_records]
     device_summaries = [
         {
             "device_name": record["device_name"],
             "router_role": record["router_role"],
             "customer_name": record["customer_name"],
             "customer_loopback_ip": record["customer_loopback_ip"],
+            "customer_peer_public_ip": record["customer_peer_public_ip"],
             "request_path": record["request_path"],
             "validation_ok": record["validation_ok"],
             "deploy_dry_run_ok": record["deploy_dry_run_ok"],
@@ -213,12 +277,14 @@ def build_backend_integration_summary(
         "service_local_subnets": service_local_subnets,
         "customer_loopback_backend_identity": customer_loopbacks[0] if customer_loopbacks else None,
         "customer_loopback_backend_identities": customer_loopbacks,
+        "customer_peer_public_ip": customer_peer_public_ips[0] if customer_peer_public_ips else None,
+        "customer_peer_public_ips": customer_peer_public_ips,
         "customer_facing_public_ip": _resolve_selected_backend_public_loopback(bundle),
         "customer_router_count": len(request_records),
         "device_summaries": device_summaries,
         "notes": [
             "Backend customer requests are generated per customer router and handed to the existing deploy_customer dry-run flow.",
-            "peer.public_ip and remote_id are intentionally mapped to each customer loopback identity for the CGNAT-carried inner tunnel.",
+            "peer.public_ip follows the customer router WAN address while peer.remote_id stays pinned to the customer loopback identity.",
             "No muxer/backend code changes are required for this reuse seam.",
             "Backend local_subnets are derived from the selected customer-facing public loopback unless explicitly overridden.",
         ],

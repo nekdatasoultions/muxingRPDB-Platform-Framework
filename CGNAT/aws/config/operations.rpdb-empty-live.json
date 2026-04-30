@@ -26,9 +26,10 @@
       "delete_on_termination": true
     },
     "public_eip_strategy": "allocate_new",
+    "allocated_public_ip": "18.213.109.133",
     "public_eip_allocation_id": null,
-    "outer_tunnel_interface": "eth0",
-    "gre_source_interface": "eth0"
+    "outer_tunnel_interface": "ens34",
+    "gre_source_interface": "ens34"
   },
   "cgnat_isp_head_end": {
     "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
@@ -49,9 +50,10 @@
       "delete_on_termination": true
     },
     "public_eip_strategy": "allocate_new",
+    "allocated_public_ip": "98.90.247.254",
     "public_eip_allocation_id": null,
-    "outer_tunnel_source_interface": "eth0",
-    "customer_facing_interface": "eth1"
+    "outer_tunnel_source_interface": "ens34",
+    "customer_facing_interface": "ens35"
   },
   "customer_vpn_routers": [
     {
@@ -72,7 +74,7 @@
         "volume_type": "gp3",
         "delete_on_termination": true
       },
-      "customer_facing_interface": "eth0",
+      "customer_facing_interface": "ens34",
       "public_eip_strategy": "none"
     },
     {
@@ -93,7 +95,7 @@
         "volume_type": "gp3",
         "delete_on_termination": true
       },
-      "customer_facing_interface": "eth0",
+      "customer_facing_interface": "ens34",
       "public_eip_strategy": "none"
     }
   ],
@@ -108,6 +110,7 @@
     "non_nat": [
       {
         "name": "vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-a",
+        "cgnat_handoff_remote": "172.31.69.214",
         "gre_remote": "172.31.40.223",
         "public_loopback": "23.20.31.151"
       }

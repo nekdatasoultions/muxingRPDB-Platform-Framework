@@ -214,3 +214,85 @@ For the current Scenario 1 contract, the host-apply package now carries:
 
 The remaining work before host-side apply is operational review and live host
 reachability, not missing inner-tunnel artifacts.
+
+## Issue 6: Muxer Ingress Shim Initially Forwarded Only UDP 500 and ESP
+
+### Status
+
+- resolved for the current Scenario 1 live path
+
+### Summary
+
+The first live muxer-ingress shim correctly forwarded:
+
+- UDP 500 for `IKE_SA_INIT`
+- protocol 50 / ESP
+
+but it did not forward UDP 4500.
+
+In the live Scenario 1 path, once the responder forced the exchange onto
+NAT-T, the customer routers sent `IKE_AUTH` over UDP 4500. That meant the
+initial exchange succeeded, but the encrypted/authenticated phase stalled.
+
+### Why This Matters
+
+This was a real data-plane gap, not a cosmetic review issue:
+
+- the inner tunnel appeared close to working
+- the customer routers retransmitted `IKE_AUTH`
+- the backend responder never received that phase of the exchange
+
+### Resolution
+
+The muxer-ingress shim renderer now includes UDP 4500 alongside UDP 500 and
+ESP in its:
+
+- forward filter rules
+- DNAT maps
+- SNAT maps
+
+That change was validated live:
+
+- the inner tunnels now establish through the shim
+- the backend head end sees the responder-side SAs
+- customer traffic reaches the existing public endpoint through the CGNAT path
+
+## Issue 7: Demo Routers Advertised Interesting-Traffic Selectors That Did Not Exist Locally
+
+### Status
+
+- resolved for the current Scenario 1 demo path
+
+### Summary
+
+The inner tunnel model intentionally separated:
+
+- `customer_loopback_ip` as the stable identity
+- `known_inside_identity` as the interesting-traffic selector
+
+In the first live apply, the customer routers only had the loopback identity
+address staged locally. Their `known_inside_identity` addresses were present in
+the policy selectors but did not exist on the host.
+
+That allowed the SAs to establish, but left them with zero payload traffic.
+
+### Why This Matters
+
+A tunnel that establishes but never carries bytes is a poor demo and an easy
+place to fool ourselves. We needed the demo routers to actually host the
+interesting-traffic address they were claiming.
+
+### Resolution
+
+The server-side renderer now stages both addresses on the demo routers when
+they differ:
+
+- the customer loopback identity
+- the known-inside / interesting-traffic host prefix
+
+That fix was validated live by sending traffic from both demo customer routers
+to `23.20.31.151` and confirming:
+
+- successful ping responses
+- live ESP byte counters on both customer routers
+- live child-SA counters on the backend head end

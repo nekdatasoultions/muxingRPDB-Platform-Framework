@@ -1,7 +1,7 @@
 {
   "environment": "rpdb-empty-live",
-  "customer_name": "cgnat-scenario1-rpdb-empty-live-backend",
-  "customer_name_template": "cgnat-scenario1-rpdb-empty-live-backend-{router_role}",
+  "customer_name": "cgnat-s1-backend",
+  "customer_name_template": "cgnat-s1-be-r{index}",
   "backend_psk_secret_ref": "/muxingrpdb/customers/cgnat-scenario1-rpdb-empty-live-backend/psk",
   "backend_psk_secret_ref_template": "/muxingrpdb/customers/{customer_name}/psk",
   "service_local_subnets_mode": "customer_facing_public_ip_loopback",

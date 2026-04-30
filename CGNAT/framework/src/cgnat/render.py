@@ -22,10 +22,14 @@ def _selected_backend_entry(bundle: dict[str, Any]) -> dict[str, Any]:
     loopback = bundle["sot"]["backend_selection"]["termination_public_loopback"]
     for entry in _backend_pool(bundle):
         if isinstance(entry, dict) and entry.get("public_loopback") == loopback:
-            return entry
+            chosen_remote = str(entry.get("cgnat_handoff_remote") or entry.get("gre_remote") or "").strip()
+            normalized = dict(entry)
+            normalized["gre_remote"] = chosen_remote
+            return normalized
     return {
         "name": f"unmatched-{preferred_class}-backend",
         "gre_remote": "",
+        "cgnat_handoff_remote": "",
         "public_loopback": loopback,
     }
 

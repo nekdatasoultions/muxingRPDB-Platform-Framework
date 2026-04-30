@@ -39,16 +39,17 @@ class BackendIntegrationTests(unittest.TestCase):
             },
         }
 
-    def test_build_backend_customer_request_uses_device_loopback_and_translation(self) -> None:
+    def test_build_backend_customer_request_uses_device_wan_peer_and_loopback_identity(self) -> None:
         device = self.bundle["sot"]["customer_devices"][0]
         request = build_backend_customer_request(self.bundle, self.integration, device=device, index=1)
 
-        self.assertEqual(request["customer"]["peer"]["public_ip"], "10.250.1.10")
+        self.assertEqual(request["customer"]["peer"]["public_ip"], "172.31.48.20")
         self.assertEqual(request["customer"]["peer"]["remote_id"], "10.250.1.10")
         self.assertEqual(request["customer"]["selectors"]["local_subnets"], ["198.51.100.10/32"])
-        self.assertEqual(request["customer"]["selectors"]["remote_subnets"], ["10.20.30.0/24"])
+        self.assertEqual(request["customer"]["selectors"]["remote_subnets"], ["10.20.30.10/32"])
+        self.assertEqual(request["customer"]["ipsec"]["local_id"], "198.51.100.10")
         self.assertTrue(request["customer"]["post_ipsec_nat"]["enabled"])
-        self.assertEqual(request["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.0/24"])
+        self.assertEqual(request["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.10/32"])
 
     def test_build_backend_customer_requests_returns_one_request_per_customer_router(self) -> None:
         requests = build_backend_customer_requests(self.bundle, self.integration)
@@ -56,8 +57,16 @@ class BackendIntegrationTests(unittest.TestCase):
         self.assertEqual(len(requests), 2)
         self.assertEqual(requests[0]["router_role"], "customer_vpn_router_1")
         self.assertEqual(requests[1]["router_role"], "customer_vpn_router_2")
-        self.assertEqual(requests[0]["request"]["customer"]["peer"]["public_ip"], "10.250.1.10")
-        self.assertEqual(requests[1]["request"]["customer"]["peer"]["public_ip"], "10.250.1.11")
+        self.assertEqual(requests[0]["request"]["customer"]["peer"]["public_ip"], "172.31.48.20")
+        self.assertEqual(requests[1]["request"]["customer"]["peer"]["public_ip"], "172.31.48.21")
+        self.assertEqual(requests[0]["request"]["customer"]["peer"]["remote_id"], "10.250.1.10")
+        self.assertEqual(requests[1]["request"]["customer"]["peer"]["remote_id"], "10.250.1.11")
+        self.assertEqual(requests[0]["request"]["customer"]["selectors"]["remote_subnets"], ["10.20.30.10/32"])
+        self.assertEqual(requests[1]["request"]["customer"]["selectors"]["remote_subnets"], ["10.20.30.11/32"])
+        self.assertEqual(requests[0]["request"]["customer"]["ipsec"]["local_id"], "198.51.100.10")
+        self.assertEqual(requests[1]["request"]["customer"]["ipsec"]["local_id"], "198.51.100.10")
+        self.assertEqual(requests[0]["request"]["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.10/32"])
+        self.assertEqual(requests[1]["request"]["customer"]["post_ipsec_nat"]["translated_subnets"], ["10.128.10.11/32"])
         self.assertEqual(requests[0]["customer_name"], "scenario1-backend-customer_vpn_router_1")
         self.assertEqual(requests[1]["customer_name"], "scenario1-backend-customer_vpn_router_2")
         self.assertEqual(requests[0]["request"]["customer"]["peer"]["psk_secret_ref"], "/demo/backend/scenario1-backend-customer_vpn_router_1/psk")
@@ -70,6 +79,7 @@ class BackendIntegrationTests(unittest.TestCase):
                 "router_role": "customer_vpn_router_1",
                 "customer_name": "scenario1-backend-customer_vpn_router_1",
                 "customer_loopback_ip": "10.250.1.10",
+                "customer_peer_public_ip": "172.31.48.20",
                 "request_path": "E:/fake/customer1.yaml",
                 "validation_ok": True,
                 "deploy_dry_run_ok": True,
@@ -83,6 +93,7 @@ class BackendIntegrationTests(unittest.TestCase):
                 "router_role": "customer_vpn_router_2",
                 "customer_name": "scenario1-backend-customer_vpn_router_2",
                 "customer_loopback_ip": "10.250.1.11",
+                "customer_peer_public_ip": "172.31.48.21",
                 "request_path": "E:/fake/customer2.yaml",
                 "validation_ok": True,
                 "deploy_dry_run_ok": True,
@@ -104,6 +115,7 @@ class BackendIntegrationTests(unittest.TestCase):
         self.assertEqual(summary["customer_router_count"], 2)
         self.assertEqual(summary["backend_customer_names"], ["scenario1-backend-customer_vpn_router_1", "scenario1-backend-customer_vpn_router_2"])
         self.assertEqual(summary["customer_loopback_backend_identities"], ["10.250.1.10", "10.250.1.11"])
+        self.assertEqual(summary["customer_peer_public_ips"], ["172.31.48.20", "172.31.48.21"])
         self.assertEqual(summary["service_local_subnets"], ["198.51.100.10/32"])
 
 

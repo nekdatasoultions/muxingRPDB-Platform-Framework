@@ -76,7 +76,7 @@ launch-shape definition.
 
 ### Status
 
-- open hard no-go for `rpdb-empty-live`
+- resolved for the current `rpdb-empty-live` demo layout
 
 ### Discovered During
 
@@ -84,7 +84,7 @@ launch-shape definition.
 
 ### Summary
 
-The current Scenario 1 placement rule says the CGNAT ISP HEAD END must attach
+The original Scenario 1 placement rule said the CGNAT ISP HEAD END must attach
 to:
 
 - transit subnet `subnet-04a6b7f3a3855d438`
@@ -106,12 +106,24 @@ single-instance CGNAT ISP HEAD END model in `rpdb-empty-live`.
 
 ### Current Handling
 
-The live preflight now detects this condition and raises:
+The live preflight detects this condition and raises:
 
 - `isp_head_end_subnet_az_mismatch`
 - severity: `hard_no_go`
 
-### What Must Change Before Live Apply
+### Resolution
+
+For the current live demo environment, we resolved this by moving the
+demo/customer side onto a same-AZ subnet layout while preserving the hosted
+CGNAT HEAD END model.
+
+The important architectural rule remains:
+
+- the hosted `CGNAT HEAD END` is fixed
+- demo ISP/customer placement is operations-defined
+- any single-instance demo ISP node must use a same-AZ subnet pair
+
+### What Must Stay True Before Live Apply
 
 At least one of these must happen:
 
@@ -120,5 +132,5 @@ At least one of these must happen:
 - redesign the CGNAT ISP HEAD END away from a single EC2 instance with ENIs in
   both subnets
 
-Until one of those changes is made, Scenario 1 cannot safely move into live
-infrastructure apply for this environment.
+If a future environment reintroduces a cross-AZ subnet pair for a single demo
+ISP instance, the same live preflight check should stop deployment again.

@@ -43,7 +43,7 @@ def _validate_access(access: dict[str, Any], required_roles: list[str]) -> None:
         raise ValueError(f"Host access config is missing required entries: {', '.join(missing)}")
 
 
-def _render_manifest(package_manifest: dict[str, Any], access: dict[str, Any]) -> dict[str, Any]:
+def _render_manifest(host_apply_dir: Path, package_manifest: dict[str, Any], access: dict[str, Any]) -> dict[str, Any]:
     hosts = []
     for host in package_manifest["hosts"]:
         role = host["role"]
@@ -53,6 +53,8 @@ def _render_manifest(package_manifest: dict[str, Any], access: dict[str, Any]) -
             "ssh_user": host_access["ssh_user"],
             "target_host": host_access["target_host"],
             "remote_stage_dir": host_access["remote_stage_dir"],
+            "private_key_path": host_access["private_key_path"],
+            "local_bundle_dir": str((host_apply_dir / host["bundle_dir"]).resolve()),
         }
         if host_access.get("proxy_jump_role"):
             payload["proxy_jump_role"] = host_access["proxy_jump_role"]
@@ -72,7 +74,11 @@ def _ssh_opts(role: str, access: dict[str, Any]) -> str:
     if proxy_jump_role:
         jump_access = access[proxy_jump_role]
         proxy_target = f"{jump_access['ssh_user']}@{jump_access['target_host']}"
-        base += f" -o ProxyJump={shlex.quote(proxy_target)}"
+        proxy_command = (
+            f"ssh -i {shlex.quote(jump_access['private_key_path'])} "
+            f"-o StrictHostKeyChecking=accept-new -W %h:%p {shlex.quote(proxy_target)}"
+        )
+        base += f" -o ProxyCommand={shlex.quote(proxy_command)}"
     return base
 
 
@@ -81,15 +87,16 @@ def _render_stage_commands(role: str, bundle_dir: Path, access: dict[str, Any]) 
     ssh_target = f"{role_access['ssh_user']}@{role_access['target_host']}"
     remote_dir = shlex.quote(role_access["remote_stage_dir"])
     ssh_opts = _ssh_opts(role, access)
+    local_bundle_dir = bundle_dir.resolve().as_posix()
     local_files = " ".join(shlex.quote(path.name) for path in sorted(bundle_dir.iterdir()) if path.is_file())
     return "\n".join(
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
             "",
-            "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
+            f"LOCAL_BUNDLE_DIR={shlex.quote(local_bundle_dir)}",
             f"ssh {ssh_opts} {shlex.quote(ssh_target)} \"mkdir -p {remote_dir}\"",
-            f"(cd \"$SCRIPT_DIR\" && scp {ssh_opts} {local_files} {shlex.quote(ssh_target)}:{remote_dir}/)",
+            f"(cd \"$LOCAL_BUNDLE_DIR\" && scp {ssh_opts} {local_files} {shlex.quote(ssh_target)}:{remote_dir}/)",
             "",
         ]
     )
@@ -168,7 +175,7 @@ def main() -> int:
     access = _load_json(host_access_path)
     required_roles = [host["role"] for host in package_manifest["hosts"]]
     _validate_access(access, required_roles)
-    manifest = _render_manifest(package_manifest, access)
+    manifest = _render_manifest(host_apply_dir, package_manifest, access)
 
     dump_json(output_dir / "package-manifest.json", manifest)
     dump_json(output_dir / "execution-order.json", _render_execution_order(package_manifest))

@@ -426,7 +426,7 @@ def _build_post_create_actions(package: dict[str, Any]) -> dict[str, Any]:
                 "name": "associate_isp_head_end_eip",
                 "service_role": "cgnat_isp_head_end",
                 "allocation_id": isp_head_end["public_eip_allocation_id"],
-                "association_target": "primary_network_interface",
+                "association_target": "transit_network_interface",
             }
         )
     elif isp_strategy == "allocate_new":
@@ -434,7 +434,7 @@ def _build_post_create_actions(package: dict[str, Any]) -> dict[str, Any]:
             {
                 "name": "allocate_and_associate_isp_head_end_eip",
                 "service_role": "cgnat_isp_head_end",
-                "association_target": "primary_network_interface",
+                "association_target": "transit_network_interface",
             }
         )
 
@@ -535,6 +535,25 @@ def _primary_eni_id(role_result: dict[str, Any]) -> str | None:
     return instances[0].get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
 
 
+def _network_interface_id_by_device_index(role_result: dict[str, Any], device_index: int) -> str | None:
+    instances = role_result.get("response", {}).get("Instances", [])
+    if not instances:
+        return None
+    for network_interface in instances[0].get("NetworkInterfaces", []):
+        attachment = network_interface.get("Attachment") or {}
+        if attachment.get("DeviceIndex") == device_index:
+            return network_interface.get("NetworkInterfaceId")
+    return None
+
+
+def _network_interface_ids(role_result: dict[str, Any]) -> list[str]:
+    instances = role_result.get("response", {}).get("Instances", [])
+    if not instances:
+        return []
+    network_interfaces = instances[0].get("NetworkInterfaces", [])
+    return [eni.get("NetworkInterfaceId") for eni in network_interfaces if eni.get("NetworkInterfaceId")]
+
+
 def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     try:
         import boto3  # type: ignore
@@ -600,14 +619,22 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
         "cgnat_head_end": _primary_eni_id(result["head_end"]),
         "cgnat_isp_head_end": _primary_eni_id(result["isp_head_end"]),
     }
-    role_to_instance = {
-        "cgnat_head_end": _instance_id(result["head_end"]),
-        "cgnat_isp_head_end": _instance_id(result["isp_head_end"]),
+    role_to_transit_eni = {
+        "cgnat_head_end": _network_interface_id_by_device_index(result["head_end"], 0),
+        "cgnat_isp_head_end": _network_interface_id_by_device_index(result["isp_head_end"], 0),
+    }
+    role_to_enis = {
+        "cgnat_head_end": _network_interface_ids(result["head_end"]),
+        "cgnat_isp_head_end": _network_interface_ids(result["isp_head_end"]),
     }
 
     for action in plan["post_create_actions"]["actions"]:
         if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
-            role_eni = role_to_eni.get(action["service_role"])
+            role_eni = (
+                role_to_transit_eni.get(action["service_role"])
+                if action.get("association_target") == "transit_network_interface"
+                else role_to_eni.get(action["service_role"])
+            )
             if not role_eni:
                 continue
             association = ec2.associate_address(
@@ -618,7 +645,11 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
             described = ec2.describe_addresses(AllocationIds=[action["allocation_id"]])
             _record_action(action["name"], action["service_role"], "completed", {"association": association, "address": described})
         elif action["name"] in {"allocate_and_associate_head_end_eip", "allocate_and_associate_isp_head_end_eip"}:
-            role_eni = role_to_eni.get(action["service_role"])
+            role_eni = (
+                role_to_transit_eni.get(action["service_role"])
+                if action.get("association_target") == "transit_network_interface"
+                else role_to_eni.get(action["service_role"])
+            )
             if not role_eni:
                 continue
             allocation = ec2.allocate_address(Domain="vpc")
@@ -629,11 +660,17 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
             )
             _record_action(action["name"], action["service_role"], "completed", {"allocation": allocation, "association": association})
         elif action["name"] in {"disable_source_dest_check_head_end", "disable_source_dest_check_isp_head_end"}:
-            instance_id = role_to_instance.get(action["service_role"])
-            if not instance_id:
+            network_interface_ids = role_to_enis.get(action["service_role"]) or []
+            if not network_interface_ids:
                 continue
-            response = ec2.modify_instance_attribute(InstanceId=instance_id, SourceDestCheck={"Value": False})
-            _record_action(action["name"], action["service_role"], "completed", response)
+            responses: list[dict[str, Any]] = []
+            for network_interface_id in network_interface_ids:
+                response = ec2.modify_network_interface_attribute(
+                    NetworkInterfaceId=network_interface_id,
+                    SourceDestCheck={"Value": False},
+                )
+                responses.append({"network_interface_id": network_interface_id, "response": response})
+            _record_action(action["name"], action["service_role"], "completed", {"network_interfaces": responses})
 
     return result
 
@@ -721,14 +758,22 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
         "cgnat_head_end": _primary_eni_id(result["head_end"]),
         "cgnat_isp_head_end": _primary_eni_id(result["isp_head_end"]),
     }
-    role_to_instance = {
-        "cgnat_head_end": _instance_id(result["head_end"]),
-        "cgnat_isp_head_end": _instance_id(result["isp_head_end"]),
+    role_to_transit_eni = {
+        "cgnat_head_end": _network_interface_id_by_device_index(result["head_end"], 0),
+        "cgnat_isp_head_end": _network_interface_id_by_device_index(result["isp_head_end"], 0),
+    }
+    role_to_enis = {
+        "cgnat_head_end": _network_interface_ids(result["head_end"]),
+        "cgnat_isp_head_end": _network_interface_ids(result["isp_head_end"]),
     }
 
     for action in plan["post_create_actions"]["actions"]:
         if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
-            role_eni = role_to_eni.get(action["service_role"])
+            role_eni = (
+                role_to_transit_eni.get(action["service_role"])
+                if action.get("association_target") == "transit_network_interface"
+                else role_to_eni.get(action["service_role"])
+            )
             if not role_eni:
                 continue
             _, association = _aws_cli_json(
@@ -746,7 +791,11 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
             _, address = _aws_cli_json(region, ["ec2", "describe-addresses", "--allocation-ids", action["allocation_id"]])
             _record_action(action["name"], action["service_role"], "completed", {"association": association, "address": address})
         elif action["name"] in {"allocate_and_associate_head_end_eip", "allocate_and_associate_isp_head_end_eip"}:
-            role_eni = role_to_eni.get(action["service_role"])
+            role_eni = (
+                role_to_transit_eni.get(action["service_role"])
+                if action.get("association_target") == "transit_network_interface"
+                else role_to_eni.get(action["service_role"])
+            )
             if not role_eni:
                 continue
             _, allocation = _aws_cli_json(region, ["ec2", "allocate-address", "--domain", "vpc"])
@@ -764,21 +813,24 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
             )
             _record_action(action["name"], action["service_role"], "completed", {"allocation": allocation, "association": association})
         elif action["name"] in {"disable_source_dest_check_head_end", "disable_source_dest_check_isp_head_end"}:
-            instance_id = role_to_instance.get(action["service_role"])
-            if not instance_id:
+            network_interface_ids = role_to_enis.get(action["service_role"]) or []
+            if not network_interface_ids:
                 continue
-            _, response = _aws_cli_json(
-                region,
-                [
-                    "ec2",
-                    "modify-instance-attribute",
-                    "--instance-id",
-                    instance_id,
-                    "--source-dest-check",
-                    "{\"Value\": false}",
-                ],
-            )
-            _record_action(action["name"], action["service_role"], "completed", response)
+            responses: list[dict[str, Any]] = []
+            for network_interface_id in network_interface_ids:
+                _, response = _aws_cli_json(
+                    region,
+                    [
+                        "ec2",
+                        "modify-network-interface-attribute",
+                        "--network-interface-id",
+                        network_interface_id,
+                        "--source-dest-check",
+                        "{\"Value\": false}",
+                    ],
+                )
+                responses.append({"network_interface_id": network_interface_id, "response": response})
+            _record_action(action["name"], action["service_role"], "completed", {"network_interfaces": responses})
 
     return result
 

@@ -281,6 +281,35 @@ def _validate_operations(
     backends = _get(operations, "backend_vpn_head_ends") or {}
     if not any(backends.get(name) for name in ALLOWED_BACKEND_CLASSES):
         messages.append(_msg("error", "backend_inventory", "At least one backend VPN head end must be defined."))
+    for backend_class, entries in backends.items():
+        for index, entry in enumerate(entries or [], start=1):
+            if not isinstance(entry, dict):
+                messages.append(
+                    _msg(
+                        "error",
+                        f"backend_inventory_entry_{backend_class}_{index}",
+                        f"Backend inventory entry {index} for class `{backend_class}` must be an object.",
+                    )
+                )
+                continue
+            gre_remote = str(entry.get("gre_remote") or "").strip()
+            if gre_remote and not _is_valid_ip(gre_remote):
+                messages.append(
+                    _msg(
+                        "error",
+                        f"backend_inventory_gre_remote_{backend_class}_{index}",
+                        f"Backend inventory gre_remote for class `{backend_class}` entry {index} must be a valid IPv4 address.",
+                    )
+                )
+            cgnat_handoff_remote = str(entry.get("cgnat_handoff_remote") or "").strip()
+            if cgnat_handoff_remote and not _is_valid_ip(cgnat_handoff_remote):
+                messages.append(
+                    _msg(
+                        "error",
+                        f"backend_inventory_cgnat_handoff_remote_{backend_class}_{index}",
+                        f"Backend inventory cgnat_handoff_remote for class `{backend_class}` entry {index} must be a valid IPv4 address.",
+                    )
+                )
 
     gre_inventory_ref = _get(operations, "gre_inventory", "inventory_ref")
     gre_assignment_mode = _get(operations, "gre_inventory", "assignment_mode")
