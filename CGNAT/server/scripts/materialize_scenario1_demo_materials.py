@@ -45,6 +45,22 @@ def _runtime_outer_identity(value: str) -> str:
     return "".join(char if char.isalnum() or char in ("-", ".") else "-" for char in sanitized)
 
 
+def _device_outer_identity(bundle: dict, device: dict) -> str:
+    explicit = str(device.get("outer_tunnel_identity_ref") or "").strip()
+    if explicit:
+        return explicit
+    return f"{device['router_role']}/{bundle['operations']['environment_name']}/{bundle['sot']['customer_id']}"
+
+
+def _router_outer_certificate_ref(bundle: dict, role: str) -> str:
+    certificates = dict(bundle["operations"].get("certificates") or {})
+    per_router = dict(certificates.get("customer_router_outer_client_cert_refs") or {})
+    explicit = str(per_router.get(role) or "").strip()
+    if explicit:
+        return explicit
+    return f"local-pki://{bundle['operations']['environment_name']}/{role}-outer-client"
+
+
 def main() -> int:
     sys.path.insert(0, str(_framework_src_root()))
 
@@ -63,7 +79,7 @@ def main() -> int:
     service_id = bundle["sot"]["service_id"]
     safe_service_id = _sanitize(service_id)
     head_end_identity = _runtime_outer_identity(f"cgnat-head-end/{service_id}")
-    isp_head_end_identity = _runtime_outer_identity(bundle["sot"]["identities"]["outer_tunnel_identity_ref"])
+    customer_router_outer_materials: list[dict[str, str]] = []
 
     pki_dir = output_dir / "pki"
     secrets_dir = output_dir / "secrets"
@@ -75,11 +91,7 @@ def main() -> int:
     head_key = pki_dir / f"{safe_service_id}-head-end.key"
     head_csr = pki_dir / f"{safe_service_id}-head-end.csr"
     head_crt = pki_dir / f"{safe_service_id}-head-end.crt"
-    isp_key = pki_dir / f"{safe_service_id}-isp-client.key"
-    isp_csr = pki_dir / f"{safe_service_id}-isp-client.csr"
-    isp_crt = pki_dir / f"{safe_service_id}-isp-client.crt"
     head_ext = pki_dir / f"{safe_service_id}-head-end.ext"
-    isp_ext = pki_dir / f"{safe_service_id}-isp-client.ext"
     inner_vpn_materials: list[dict[str, str]] = []
 
     _run(
@@ -143,55 +155,69 @@ def main() -> int:
         "-extfile",
         str(head_ext),
     )
-    _run(
-        openssl_bin,
-        "req",
-        "-new",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
-        str(isp_key),
-        "-out",
-        str(isp_csr),
-        "-subj",
-        f"/CN={safe_service_id}-isp-client",
-    )
-    _write_text(
-        isp_ext,
-        "\n".join(
-            [
-                "basicConstraints=CA:FALSE",
-                "keyUsage=digitalSignature,keyEncipherment",
-                "extendedKeyUsage=serverAuth,clientAuth",
-                f"subjectAltName=DNS:{isp_head_end_identity}",
-                "",
-            ]
-        ),
-    )
-    _run(
-        openssl_bin,
-        "x509",
-        "-req",
-        "-in",
-        str(isp_csr),
-        "-CA",
-        str(ca_crt),
-        "-CAkey",
-        str(ca_key),
-        "-CAcreateserial",
-        "-out",
-        str(isp_crt),
-        "-days",
-        "365",
-        "-sha256",
-        "-extfile",
-        str(isp_ext),
-    )
-
     for device in bundle["sot"]["customer_devices"]:
         router_role = str(device["router_role"])
         role_slug = _sanitize(router_role)
+        router_identity = _runtime_outer_identity(_device_outer_identity(bundle, device))
+        router_key = pki_dir / f"{safe_service_id}-{role_slug}-outer.key"
+        router_csr = pki_dir / f"{safe_service_id}-{role_slug}-outer.csr"
+        router_crt = pki_dir / f"{safe_service_id}-{role_slug}-outer.crt"
+        router_ext = pki_dir / f"{safe_service_id}-{role_slug}-outer.ext"
+        _run(
+            openssl_bin,
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(router_key),
+            "-out",
+            str(router_csr),
+            "-subj",
+            f"/CN={safe_service_id}-{role_slug}-outer",
+        )
+        _write_text(
+            router_ext,
+            "\n".join(
+                [
+                    "basicConstraints=CA:FALSE",
+                    "keyUsage=digitalSignature,keyEncipherment",
+                    "extendedKeyUsage=serverAuth,clientAuth",
+                    f"subjectAltName=DNS:{router_identity}",
+                    "",
+                ]
+            ),
+        )
+        _run(
+            openssl_bin,
+            "x509",
+            "-req",
+            "-in",
+            str(router_csr),
+            "-CA",
+            str(ca_crt),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(router_crt),
+            "-days",
+            "365",
+            "-sha256",
+            "-extfile",
+            str(router_ext),
+        )
+        customer_router_outer_materials.append(
+            {
+                "router_role": router_role,
+                "customer_device_name": str(device["name"]),
+                "outer_tunnel_identity_ref": _device_outer_identity(bundle, device),
+                "certificate_ref": _router_outer_certificate_ref(bundle, router_role),
+                "certificate_path": str(router_crt),
+                "private_key_path": str(router_key),
+            }
+        )
         inner_psk = secrets_dir / f"{safe_service_id}-{role_slug}-inner.psk"
         explicit_inner_psk = str(device.get("inner_vpn_psk") or "").strip()
         _write_text(inner_psk, (explicit_inner_psk or secrets.token_hex(24)) + "\n")
@@ -219,11 +245,7 @@ def main() -> int:
                 "certificate_path": str(head_crt),
                 "private_key_path": str(head_key),
             },
-            "isp_head_end_client": {
-                "certificate_ref": bundle["operations"]["certificates"]["cgnat_isp_head_end_client_cert_ref"],
-                "certificate_path": str(isp_crt),
-                "private_key_path": str(isp_key),
-            },
+            "customer_router_outer_clients": customer_router_outer_materials,
         },
         "inner_vpn_materials": inner_vpn_materials,
     }

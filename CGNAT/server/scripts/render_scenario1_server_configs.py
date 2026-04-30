@@ -71,13 +71,21 @@ def _service_public_selector(package: dict[str, Any]) -> str:
 
 def _head_end_runtime(package: dict[str, Any]) -> dict[str, Any]:
     service_id = _service_id(package)
-    head_outer = package["cgnat_head_end"]["outer_tunnel"]
+    head_outer = package["cgnat_head_end"]["outer_tunnel_listener"]
     head_gre = package["cgnat_head_end"]["gre_handoff"]
     backend = package["backend_expectations"]
-    connection_name = f"{service_id}-outer"
+    accepted_outer_peers = [
+        {
+            "role": entry["role"],
+            "device_name": entry["device_name"],
+            "connection_name": entry["connection_name"],
+            "remote_identity": _runtime_outer_identity(entry["remote_identity_ref"]),
+            "remote_selector": entry["remote_selector"],
+        }
+        for entry in package["cgnat_head_end"].get("accepted_outer_peers") or []
+    ]
     return {
         "service_id": service_id,
-        "connection_name": connection_name,
         "certificate_material": {
             "head_end_server": {
                 "certificate_ref": head_outer["server_certificate_ref"],
@@ -92,9 +100,8 @@ def _head_end_runtime(package: dict[str, Any]) -> dict[str, Any]:
         },
         "outer_tunnel": {
             "local_identity": _runtime_outer_identity(head_outer["local_identity"]),
-            "remote_identity": _runtime_outer_identity(head_outer["remote_identity_ref"]),
-            "local_selector": _service_public_selector(package),
-            "remote_selector": _demo_customer_selector(package),
+            "local_selector": head_outer["local_selector"],
+            "accepted_peers": accepted_outer_peers,
         },
         "gre_runtime": {
             "gre_name": "cgnat-s1-gre1",
@@ -107,31 +114,10 @@ def _head_end_runtime(package: dict[str, Any]) -> dict[str, Any]:
 
 def _isp_head_end_runtime(package: dict[str, Any]) -> dict[str, Any]:
     service_id = _service_id(package)
-    outer = package["cgnat_isp_head_end"]["outer_tunnel"]
     customer_path = package["cgnat_isp_head_end"]["customer_service_path"]
-    connection_name = f"{service_id}-outer"
     return {
         "service_id": service_id,
-        "connection_name": connection_name,
-        "certificate_material": {
-            "isp_head_end_client": {
-                "certificate_ref": outer["client_certificate_ref"],
-                "certificate_path": f"/etc/ipsec.d/certs/{service_id}-isp-client.crt",
-                "private_key_path": f"/etc/ipsec.d/private/{service_id}-isp-client.key",
-                "nickname": f"{service_id}-isp-client",
-            },
-            "outer_tunnel_ca": {
-                "certificate_path": f"/etc/ipsec.d/cacerts/{service_id}-outer-ca.crt",
-                "nickname": f"{service_id}-outer-ca",
-            },
-        },
-        "outer_tunnel": {
-            "local_identity": _runtime_outer_identity(outer["local_identity_ref"]),
-            "remote_selector": _service_public_selector(package),
-            "remote_identity": _runtime_outer_identity(outer["remote_identity"]),
-            "remote_public_ip": outer.get("remote_public_ip") or HEAD_END_PUBLIC_IP_PLACEHOLDER,
-            "local_selector": _demo_customer_selector(package),
-        },
+        "transport_role": package["cgnat_isp_head_end"]["transport_role"],
         "customer_service_path": {
             "customer_facing_interface": customer_path["customer_facing_interface"],
             "customer_facing_private_ip": customer_path["customer_facing_private_ip"],
@@ -141,15 +127,36 @@ def _isp_head_end_runtime(package: dict[str, Any]) -> dict[str, Any]:
 
 def _customer_router_runtime(package: dict[str, Any], router: dict[str, Any]) -> dict[str, Any]:
     service_id = _service_id(package)
+    outer = router["outer_tunnel"]
     inner = router["inner_vpn"]
     role = router["role"]
     return {
         "service_id": service_id,
         "role": role,
+        "outer_connection_name": f"{service_id}-{role}-outer",
         "connection_name": f"{service_id}-{role}-inner",
         "customer_interface": router["customer_facing_interface"],
         "customer_private_ip_address": router["private_ip_address"],
         "customer_default_gateway_ip": router["default_gateway_ip"],
+        "certificate_material": {
+            "outer_client": {
+                "certificate_ref": outer["client_certificate_ref"],
+                "certificate_path": f"/etc/ipsec.d/certs/{service_id}-{role}-outer.crt",
+                "private_key_path": f"/etc/ipsec.d/private/{service_id}-{role}-outer.key",
+                "nickname": f"{service_id}-{role}-outer",
+            },
+            "outer_tunnel_ca": {
+                "certificate_path": f"/etc/ipsec.d/cacerts/{service_id}-outer-ca.crt",
+                "nickname": f"{service_id}-outer-ca",
+            },
+        },
+        "outer_tunnel": {
+            "local_identity": _runtime_outer_identity(outer["local_identity_ref"]),
+            "remote_identity": _runtime_outer_identity(outer["remote_identity"]),
+            "local_selector": outer["local_selector"],
+            "remote_selector": outer["remote_selector"],
+            "remote_public_ip": outer.get("remote_public_ip") or HEAD_END_PUBLIC_IP_PLACEHOLDER,
+        },
         "customer_loopback_ip": inner["customer_loopback_ip"],
         "customer_facing_public_ip": inner["remote_public_ip"],
         "remote_selectors": list(inner.get("remote_selectors") or [f"{inner['remote_public_ip']}/32"]),
@@ -163,7 +170,8 @@ def _render_head_end_config(package: dict[str, Any]) -> dict[str, Any]:
     backend = package["backend_expectations"]
     return {
         "config_type": "scenario1_cgnat_head_end",
-        "outer_tunnel": package["cgnat_head_end"]["outer_tunnel"],
+        "outer_tunnel_listener": package["cgnat_head_end"]["outer_tunnel_listener"],
+        "accepted_outer_peers": package["cgnat_head_end"]["accepted_outer_peers"],
         "gre_handoff": package["cgnat_head_end"]["gre_handoff"],
         "backend_service_target": package["cgnat_head_end"]["backend_service_target"],
         "routing_expectations": {
@@ -177,7 +185,7 @@ def _render_head_end_config(package: dict[str, Any]) -> dict[str, Any]:
 def _render_isp_head_end_config(package: dict[str, Any]) -> dict[str, Any]:
     return {
         "config_type": "scenario1_cgnat_isp_head_end",
-        "outer_tunnel": package["cgnat_isp_head_end"]["outer_tunnel"],
+        "transport_role": package["cgnat_isp_head_end"]["transport_role"],
         "customer_service_path": package["cgnat_isp_head_end"]["customer_service_path"],
         "transit_contract": package["cgnat_isp_head_end"]["transit_contract"],
     }
@@ -191,6 +199,7 @@ def _render_customer_router_configs(package: dict[str, Any]) -> list[dict[str, A
                 "config_type": "scenario1_customer_vpn_router",
                 "role": router["role"],
                 "instance_name": router["instance_name"],
+                "outer_tunnel": router["outer_tunnel"],
                 "inner_vpn": router["inner_vpn"],
                 "gateway_contract": {
                     "default_gateway_ip": router["default_gateway_ip"],
@@ -214,50 +223,64 @@ def _render_head_end_ipsec_conf(package: dict[str, Any]) -> str:
     cert_material = runtime["certificate_material"]["head_end_server"]
     outer_ca = runtime["certificate_material"]["outer_tunnel_ca"]
     outer = runtime["outer_tunnel"]
+    lines = [
+        f"# Scenario 1 CGNAT HEAD END outer-tunnel config for {runtime['service_id']}",
+        "# Target syntax: Libreswan ipsec.conf fragment",
+        f"# Certificate reference: {cert_material['certificate_ref']}",
+        f"# Outer-tunnel CA path: {outer_ca['certificate_path']}",
+        "",
+    ]
+    for peer in outer["accepted_peers"]:
+        lines.extend(
+            [
+                f"conn {peer['connection_name']}",
+                "    type=tunnel",
+                "    ikev2=insist",
+                "    authby=rsasig",
+                "    left=%defaultroute",
+                f"    leftid={_libreswan_identity(outer['local_identity'])}",
+                f"    leftcert={cert_material['nickname']}",
+                "    leftrsasigkey=%cert",
+                "    leftsendcert=always",
+                f"    leftsubnet={outer['local_selector']}",
+                "    right=%any",
+                f"    rightid={_libreswan_identity(peer['remote_identity'])}",
+                f"    rightsubnet={peer['remote_selector']}",
+                "    dpddelay=30s",
+                "    dpdtimeout=120s",
+                "    dpdaction=restart",
+                "    fragmentation=yes",
+                "    mobike=no",
+                "    auto=add",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _render_isp_head_end_ipsec_conf(package: dict[str, Any]) -> str:
     return "\n".join(
         [
-            f"# Scenario 1 CGNAT HEAD END outer-tunnel config for {runtime['service_id']}",
-            "# Target syntax: Libreswan ipsec.conf fragment",
-            f"# Certificate reference: {cert_material['certificate_ref']}",
-            f"# Outer-tunnel CA path: {outer_ca['certificate_path']}",
-            "",
-            f"conn {runtime['connection_name']}",
-            "    type=tunnel",
-            "    ikev2=insist",
-            "    authby=rsasig",
-            "    left=%defaultroute",
-            f"    leftid={_libreswan_identity(outer['local_identity'])}",
-            f"    leftcert={cert_material['nickname']}",
-            "    leftrsasigkey=%cert",
-            "    leftsendcert=always",
-            f"    leftsubnet={outer['local_selector']}",
-            "    right=%any",
-            f"    rightid={_libreswan_identity(outer['remote_identity'])}",
-            f"    rightsubnet={outer['remote_selector']}",
-            "    dpddelay=30s",
-            "    dpdtimeout=120s",
-            "    dpdaction=restart",
-            "    fragmentation=yes",
-            "    mobike=no",
-            "    auto=add",
+            "# Scenario 1 CGNAT ISP HEAD END",
+            "# No IPsec tunnel terminates on this node in the corrected model.",
+            "# This node acts as NAT/transit only for customer-router outer tunnel traffic.",
             "",
         ]
     )
 
 
-def _render_isp_head_end_ipsec_conf(package: dict[str, Any]) -> str:
-    runtime = _isp_head_end_runtime(package)
-    cert_material = runtime["certificate_material"]["isp_head_end_client"]
+def _render_customer_router_outer_ipsec_conf(runtime: dict[str, Any]) -> str:
+    cert_material = runtime["certificate_material"]["outer_client"]
     outer_ca = runtime["certificate_material"]["outer_tunnel_ca"]
     outer = runtime["outer_tunnel"]
     return "\n".join(
         [
-            f"# Scenario 1 CGNAT ISP HEAD END outer-tunnel config for {runtime['service_id']}",
+            f"# Scenario 1 customer-router outer-tunnel config for {runtime['role']}",
             "# Target syntax: Libreswan ipsec.conf fragment",
             f"# Certificate reference: {cert_material['certificate_ref']}",
             f"# Outer-tunnel CA path: {outer_ca['certificate_path']}",
             "",
-            f"conn {runtime['connection_name']}",
+            f"conn {runtime['outer_connection_name']}",
             "    type=tunnel",
             "    ikev2=insist",
             "    authby=rsasig",
@@ -402,9 +425,8 @@ def _render_head_end_runtime_env(runtime: dict[str, Any]) -> str:
     return "\n".join(
         [
             f"CGNAT_SERVICE_ID=\"{runtime['service_id']}\"",
-            f"CGNAT_OUTER_CONNECTION_NAME=\"{runtime['connection_name']}\"",
             f"CGNAT_OUTER_LOCAL_IDENTITY=\"{outer_runtime['local_identity']}\"",
-            f"CGNAT_OUTER_REMOTE_IDENTITY=\"{outer_runtime['remote_identity']}\"",
+            f"CGNAT_OUTER_ACCEPTED_PEER_COUNT=\"{len(outer_runtime['accepted_peers'])}\"",
             f"CGNAT_GRE_NAME=\"{gre_runtime['gre_name']}\"",
             f"CGNAT_HEAD_END_GRE_SOURCE_INTERFACE=\"{gre_runtime['source_interface']}\"",
             f"CGNAT_BACKEND_GRE_REMOTE=\"{gre_runtime['remote_ip']}\"",
@@ -421,22 +443,11 @@ def _render_head_end_runtime_env(runtime: dict[str, Any]) -> str:
 
 
 def _render_isp_head_end_runtime_env(runtime: dict[str, Any]) -> str:
-    cert_material = runtime["certificate_material"]
     customer_path = runtime["customer_service_path"]
-    outer_runtime = runtime["outer_tunnel"]
     return "\n".join(
         [
             f"CGNAT_SERVICE_ID=\"{runtime['service_id']}\"",
-            f"CGNAT_OUTER_CONNECTION_NAME=\"{runtime['connection_name']}\"",
-            f"CGNAT_OUTER_LOCAL_IDENTITY=\"{outer_runtime['local_identity']}\"",
-            f"CGNAT_OUTER_REMOTE_IDENTITY=\"{outer_runtime['remote_identity']}\"",
-            f"CGNAT_OUTER_REMOTE_PUBLIC_IP=\"{outer_runtime['remote_public_ip']}\"",
-            f"CGNAT_ISP_HEAD_END_CLIENT_CERT_REF=\"{cert_material['isp_head_end_client']['certificate_ref']}\"",
-            f"CGNAT_ISP_HEAD_END_CLIENT_CERT_PATH=\"{cert_material['isp_head_end_client']['certificate_path']}\"",
-            f"CGNAT_ISP_HEAD_END_CLIENT_KEY_PATH=\"{cert_material['isp_head_end_client']['private_key_path']}\"",
-            f"CGNAT_ISP_HEAD_END_CERT_NICKNAME=\"{cert_material['isp_head_end_client']['nickname']}\"",
-            f"CGNAT_OUTER_CA_CERT_PATH=\"{cert_material['outer_tunnel_ca']['certificate_path']}\"",
-            f"CGNAT_OUTER_CA_NICKNAME=\"{cert_material['outer_tunnel_ca']['nickname']}\"",
+            f"CGNAT_TRANSPORT_ROLE=\"{runtime['transport_role']}\"",
             f"CGNAT_ISP_CUSTOMER_INTERFACE=\"{customer_path['customer_facing_interface']}\"",
             f"CGNAT_ISP_CUSTOMER_PRIVATE_IP=\"{customer_path['customer_facing_private_ip']}\"",
             "",
@@ -445,6 +456,8 @@ def _render_isp_head_end_runtime_env(runtime: dict[str, Any]) -> str:
 
 
 def _render_customer_router_runtime_env(runtime: dict[str, Any]) -> str:
+    cert_material = runtime["certificate_material"]
+    outer_runtime = runtime["outer_tunnel"]
     return "\n".join(
         [
             f"CGNAT_SERVICE_ID=\"{runtime['service_id']}\"",
@@ -452,6 +465,16 @@ def _render_customer_router_runtime_env(runtime: dict[str, Any]) -> str:
             f"CGNAT_CUSTOMER_INTERFACE=\"{runtime['customer_interface']}\"",
             f"CGNAT_CUSTOMER_PRIVATE_IP=\"{runtime['customer_private_ip_address']}\"",
             f"CGNAT_CUSTOMER_DEFAULT_GATEWAY_IP=\"{runtime['customer_default_gateway_ip']}\"",
+            f"CGNAT_OUTER_CONNECTION_NAME=\"{runtime['outer_connection_name']}\"",
+            f"CGNAT_OUTER_LOCAL_IDENTITY=\"{outer_runtime['local_identity']}\"",
+            f"CGNAT_OUTER_REMOTE_IDENTITY=\"{outer_runtime['remote_identity']}\"",
+            f"CGNAT_OUTER_REMOTE_PUBLIC_IP=\"{outer_runtime['remote_public_ip']}\"",
+            f"CGNAT_OUTER_CLIENT_CERT_REF=\"{cert_material['outer_client']['certificate_ref']}\"",
+            f"CGNAT_OUTER_CLIENT_CERT_PATH=\"{cert_material['outer_client']['certificate_path']}\"",
+            f"CGNAT_OUTER_CLIENT_KEY_PATH=\"{cert_material['outer_client']['private_key_path']}\"",
+            f"CGNAT_OUTER_CERT_NICKNAME=\"{cert_material['outer_client']['nickname']}\"",
+            f"CGNAT_OUTER_CA_CERT_PATH=\"{cert_material['outer_tunnel_ca']['certificate_path']}\"",
+            f"CGNAT_OUTER_CA_NICKNAME=\"{cert_material['outer_tunnel_ca']['nickname']}\"",
             f"CGNAT_INNER_CONNECTION_NAME=\"{runtime['connection_name']}\"",
             f"CGNAT_INNER_VPN_SECRET_REF=\"{runtime['secret_ref']}\"",
             f"CGNAT_INNER_VPN_SECRET_PATH=\"{runtime['secret_path']}\"",
@@ -472,8 +495,9 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
         "",
         "## Required Validation Areas",
         "",
-        "- outer tunnel established on the ISP CGNAT device",
+        "- both customer-router outer tunnels established",
         "- both customer-router inner tunnels established",
+        "- CGNAT ISP node forwarding/transit behavior confirmed",
         "- backend responder behavior confirmed",
         "- GRE handoff visible",
         "- request and reply path visible for the base customer-facing public IP",
@@ -489,7 +513,6 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
         "",
         "On the CGNAT ISP HEAD END:",
         "```bash",
-        "sudo ipsec trafficstatus",
         "sysctl net.ipv4.ip_forward",
         "```",
         "",
@@ -499,6 +522,7 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
             [
                 f"On `{router['role']}`:",
                 "```bash",
+                "# verify outer cert tunnel is established",
                 "sudo ipsec trafficstatus",
                 f"# customer loopback identity: {router['customer_loopback_ip']}",
                 f"# interesting traffic identity: {router['known_inside_identity']}",
@@ -590,6 +614,7 @@ def main() -> int:
     dump_text(output_dir / "cgnat-isp-head-end-runtime.env", _render_isp_head_end_runtime_env(isp_runtime))
     for router_runtime in customer_router_runtimes:
         role = router_runtime["role"]
+        dump_text(output_dir / f"{role}-outer-swanctl.conf", _render_customer_router_outer_ipsec_conf(router_runtime))
         dump_text(output_dir / f"{role}-inner-swanctl.conf", _render_customer_router_inner_ipsec_conf(router_runtime))
         dump_text(output_dir / f"{role}-loopback.sh", _render_customer_router_loopback_script(router_runtime))
         dump_text(output_dir / f"{role}-routes.sh", _render_customer_router_route_script(router_runtime))
@@ -602,8 +627,8 @@ def main() -> int:
                 "# Scenario 1 Server Config Artifacts",
                 "",
                 "- structured host-side artifacts generated from the server package",
-                "- Libreswan `ipsec.conf` fragments for the hosted head end and ISP outer tunnel",
-                "- per-customer-router inner-tunnel configs, loopback scripts, and route scripts",
+                "- Libreswan `ipsec.conf` fragments for the hosted head end and both customer-router outer+inner tunnels",
+                "- CGNAT ISP head-end transit-only config, loopback scripts, and route scripts",
                 "- runtime input manifests and per-role environment files for apply-time values",
                 "- validation guidance included",
                 "",

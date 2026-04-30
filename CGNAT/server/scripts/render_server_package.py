@@ -46,6 +46,22 @@ def _resolved_head_end_public_ip(operations: dict[str, Any]) -> str | None:
     return None
 
 
+def _device_outer_identity(bundle: dict[str, Any], device: dict[str, Any]) -> str:
+    explicit = str(device.get("outer_tunnel_identity_ref") or "").strip()
+    if explicit:
+        return explicit
+    return f"{device['router_role']}/{bundle['operations']['environment_name']}/{bundle['sot']['customer_id']}"
+
+
+def _router_outer_certificate_ref(bundle: dict[str, Any], role: str) -> str:
+    certificates = dict(bundle["operations"].get("certificates") or {})
+    per_router = dict(certificates.get("customer_router_outer_client_cert_refs") or {})
+    explicit = str(per_router.get(role) or "").strip()
+    if explicit:
+        return explicit
+    return f"local-pki://{bundle['operations']['environment_name']}/{role}-outer-client"
+
+
 def _service_reachable_subnets(bundle: dict[str, Any]) -> list[str]:
     backend_selection = dict(bundle["sot"].get("backend_selection") or {})
     configured = list(backend_selection.get("service_reachable_subnets") or [])
@@ -133,16 +149,30 @@ def _render_cgnat_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
     operations = bundle["operations"]
     sot = bundle["sot"]
     selected_backend = _selected_backend_entry(bundle)
+    accepted_outer_peers: list[dict[str, Any]] = []
+    for device in sot["customer_devices"]:
+        role = str(device["router_role"])
+        router = _router_index(operations)[role]
+        accepted_outer_peers.append(
+            {
+                "role": role,
+                "device_name": str(device["name"]),
+                "connection_name": f"{sot['service_id']}-{role}-outer",
+                "remote_identity_ref": _device_outer_identity(bundle, device),
+                "remote_selector": f"{router['private_ip_address']}/32",
+            }
+        )
     return {
         "role": "cgnat_head_end",
-        "outer_tunnel": {
+        "outer_tunnel_listener": {
             "auth_method": framework["topology"]["outer_tunnel"]["auth_method"],
             "peer_ip_mode": framework["topology"]["outer_tunnel"]["peer_ip_mode"],
             "termination_interface": operations["cgnat_head_end"]["outer_tunnel_interface"],
             "server_certificate_ref": operations["certificates"]["cgnat_head_end_server_cert_ref"],
             "local_identity": f"cgnat-head-end/{sot['service_id']}",
-            "remote_identity_ref": sot["identities"]["outer_tunnel_identity_ref"],
+            "local_selector": _customer_facing_public_selector(bundle),
         },
+        "accepted_outer_peers": accepted_outer_peers,
         "gre_handoff": {
             "transport": framework["topology"]["handoff"]["transport"],
             "inventory_ref": operations["gre_inventory"]["inventory_ref"],
@@ -160,20 +190,11 @@ def _render_cgnat_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
 
 
 def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
-    framework = bundle["framework"]
     operations = bundle["operations"]
     sot = bundle["sot"]
     return {
         "role": "cgnat_isp_head_end",
-        "outer_tunnel": {
-            "auth_method": framework["topology"]["outer_tunnel"]["auth_method"],
-            "peer_ip_mode": framework["topology"]["outer_tunnel"]["peer_ip_mode"],
-            "source_interface": operations["cgnat_isp_head_end"]["outer_tunnel_source_interface"],
-            "client_certificate_ref": operations["certificates"]["cgnat_isp_head_end_client_cert_ref"],
-            "local_identity_ref": sot["identities"]["outer_tunnel_identity_ref"],
-            "remote_identity": f"cgnat-head-end/{sot['service_id']}",
-            "remote_public_ip": _resolved_head_end_public_ip(operations),
-        },
+        "transport_role": "nat_and_forwarding_only",
         "customer_service_path": {
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],
             "customer_facing_private_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
@@ -204,6 +225,17 @@ def _render_customer_vpn_routers(bundle: dict[str, Any]) -> list[dict[str, Any]]
                 "customer_facing_interface": router["customer_facing_interface"],
                 "private_ip_address": router["private_ip_address"],
                 "default_gateway_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
+                "outer_tunnel": {
+                    "auth_method": framework["topology"]["outer_tunnel"]["auth_method"],
+                    "peer_ip_mode": framework["topology"]["outer_tunnel"]["peer_ip_mode"],
+                    "source_interface": router["customer_facing_interface"],
+                    "client_certificate_ref": _router_outer_certificate_ref(bundle, role),
+                    "local_identity_ref": _device_outer_identity(bundle, device),
+                    "local_selector": f"{router['private_ip_address']}/32",
+                    "remote_identity": f"cgnat-head-end/{sot['service_id']}",
+                    "remote_public_ip": _resolved_head_end_public_ip(operations),
+                    "remote_selector": _customer_facing_public_selector(bundle),
+                },
                 "inner_vpn": {
                     "auth_method": framework["topology"]["inner_vpn"]["auth_method"],
                     "required_initiator": "customer_vpn_router",
@@ -251,7 +283,7 @@ def _render_validation_targets(bundle: dict[str, Any]) -> dict[str, Any]:
         for device in bundle["sot"]["customer_devices"]
     ]
     required_checks = [
-        "outer_tunnel_established",
+        "customer_router_outer_tunnels_established",
         "customer_router_inner_tunnels_established",
         "backend_responder_behavior_confirmed",
         "request_path_visible_on_outer_tunnel",
@@ -297,7 +329,7 @@ def _render_readme(bundle: dict[str, Any]) -> str:
             "- `package-manifest.json`: server-side package summary",
             "- `cgnat-head-end.json`: outer tunnel and GRE handoff shape",
             "- `cgnat-isp-head-end.json`: ISP-side outer tunnel and transit role shape",
-            "- `customer-vpn-routers.json`: customer-router inner tunnel shapes",
+            "- `customer-vpn-routers.json`: customer-router outer and inner tunnel shapes",
             "- `backend-expectations.json`: backend target and translation expectations",
             "- `validation-targets.json`: required validation checks and observability points",
             "",
@@ -305,7 +337,8 @@ def _render_readme(bundle: dict[str, Any]) -> str:
             "",
             "- This package is server-side only.",
             "- It does not create AWS resources.",
-            "- The ISP node owns the outer tunnel; the customer routers own the inner tunnels.",
+            "- Customer routers own both the outer cert tunnel and the inner PSK tunnel.",
+            "- The ISP node acts as NAT/transit only in the corrected Scenario 1 model.",
             "",
         ]
     )
