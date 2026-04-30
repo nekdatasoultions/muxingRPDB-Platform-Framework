@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 
@@ -8,8 +9,9 @@ def _all_statuses_ok(apply_result: dict[str, Any]) -> bool:
         apply_result.get("head_end", {}).get("status"),
         apply_result.get("isp_head_end", {}).get("status"),
     ]
+    role_statuses.extend(router.get("status") for router in apply_result.get("customer_vpn_routers", []))
     action_statuses = [action.get("status") for action in apply_result.get("post_create_actions", [])]
-    allowed = {"dry_run_ok", "accepted", "completed"}
+    allowed = {"dry_run_ok", "accepted", "completed", "deferred_until_live_create"}
     return all(status in allowed for status in role_statuses + action_statuses if status is not None)
 
 
@@ -19,27 +21,42 @@ def build_predeploy_review(
     preflight_result: dict[str, Any],
     aws_apply_result: dict[str, Any],
     host_access_strategy_path: str | None = None,
+    materials_manifest_path: str | None = None,
 ) -> dict[str, Any]:
     service_id = bundle["sot"]["service_id"]
     environment_name = bundle["operations"]["environment_name"]
 
-    open_items = [
-        {
-            "code": "materialize_outer_pki",
-            "type": "operator_input",
-            "message": "Demo PKI references are defined, but certificate/key material must still be generated and staged on hosts before server apply.",
-        },
-        {
-            "code": "materialize_inner_vpn_secret",
-            "type": "operator_input",
-            "message": "Inner VPN auth references exist in SoT, but the real key material must still be provided for the demo customer side.",
-        },
+    open_items = []
+    if materials_manifest_path and Path(materials_manifest_path).exists():
+        open_items.append(
+            {
+                "code": "demo_materials_ready",
+                "type": "prepared_input",
+                "message": f"Demo PKI and inner VPN secret material are prepared at `{materials_manifest_path}` and can be staged through the host-apply package.",
+            }
+        )
+    else:
+        open_items.extend(
+            [
+                {
+                    "code": "materialize_outer_pki",
+                    "type": "operator_input",
+                    "message": "Demo PKI references are defined, but certificate/key material must still be generated and staged on hosts before server apply.",
+                },
+                {
+                    "code": "materialize_inner_vpn_secret",
+                    "type": "operator_input",
+                    "message": "Inner VPN auth references exist in SoT, but the real key material must still be provided for the demo customer side.",
+                },
+            ]
+        )
+    open_items.append(
         {
             "code": "derive_host_access_after_create",
             "type": "post_create_step",
             "message": "Final remote host-access targets depend on created instance/EIP results and should be derived after live AWS create completes.",
-        },
-    ]
+        }
+    )
     if host_access_strategy_path:
         open_items.append(
             {
@@ -72,6 +89,7 @@ def build_predeploy_review(
             "multi_peer_direction_preserved": True,
             "customer_facing_public_ip": bundle["sot"]["backend_selection"]["customer_facing_public_ip"],
             "preferred_backend_class": bundle["sot"]["backend_selection"]["preferred_class"],
+            "customer_router_count": len(bundle["sot"]["customer_devices"]),
         },
         "open_items_before_host_apply": open_items,
         "next_commands_after_approval": [

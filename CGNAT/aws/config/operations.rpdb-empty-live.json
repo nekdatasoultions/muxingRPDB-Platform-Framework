@@ -34,6 +34,7 @@
     "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
     "transit_subnet_id": "subnet-04a6b7f3a3855d438",
     "customer_subnet_id": "subnet-0dbd0842618d43ab3",
+    "customer_facing_private_ip": "172.31.48.10",
     "instance_type": "c8gn.2xlarge",
     "ami_id": "ami-0b11e0ed3f8697f97",
     "security_group_ids": [
@@ -52,6 +53,50 @@
     "outer_tunnel_source_interface": "eth0",
     "customer_facing_interface": "eth1"
   },
+  "customer_vpn_routers": [
+    {
+      "role": "customer_vpn_router_1",
+      "instance_name": "customer-vpn-router-1-rpdb-empty-a",
+      "subnet_id": "subnet-0dbd0842618d43ab3",
+      "private_ip_address": "172.31.48.20",
+      "instance_type": "c8gn.xlarge",
+      "ami_id": "ami-0b11e0ed3f8697f97",
+      "security_group_ids": [
+        "sg-0e8b00aabfc719b44"
+      ],
+      "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+      "key_pair_name": "muxer",
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 16,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "customer_facing_interface": "eth0",
+      "public_eip_strategy": "none"
+    },
+    {
+      "role": "customer_vpn_router_2",
+      "instance_name": "customer-vpn-router-2-rpdb-empty-a",
+      "subnet_id": "subnet-0dbd0842618d43ab3",
+      "private_ip_address": "172.31.48.21",
+      "instance_type": "c8gn.xlarge",
+      "ami_id": "ami-0b11e0ed3f8697f97",
+      "security_group_ids": [
+        "sg-0e8b00aabfc719b44"
+      ],
+      "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+      "key_pair_name": "muxer",
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 16,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "customer_facing_interface": "eth0",
+      "public_eip_strategy": "none"
+    }
+  ],
   "backend_vpn_head_ends": {
     "nat_t": [
       {

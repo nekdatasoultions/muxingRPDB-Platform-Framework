@@ -104,6 +104,9 @@ routing / services / return path
 - authenticated by certificates
 - must support unknown, changing, or CGNATed public source IP
 - must not depend on fixed peer public IPs
+- must treat certificate identity as the primary outer access-context selector
+- must allow the same ISP to use multiple certificates when different outer
+  access contexts need to stay separate
 
 ### Inner VPN
 
@@ -115,6 +118,7 @@ routing / services / return path
   - known inside customer source IP
 - must be steerable to backend VPN head ends through an existing backend-facing
   contract
+- is the interesting traffic carried inside the trusted outer access context
 
 ### Address Translation
 

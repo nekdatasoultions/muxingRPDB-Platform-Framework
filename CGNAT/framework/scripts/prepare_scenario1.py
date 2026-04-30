@@ -91,6 +91,10 @@ def main() -> int:
     parser.add_argument("bundle", help="Path to the deployment bundle JSON file.")
     parser.add_argument("output_dir", help="Directory to write the orchestrated preparation outputs.")
     parser.add_argument(
+        "--materials-manifest-json",
+        help="Optional path to a materialized Scenario 1 demo materials manifest for host-apply packaging.",
+    )
+    parser.add_argument(
         "--host-access-json",
         help="Optional host access JSON file. When supplied, also render a no-execution remote apply plan.",
     )
@@ -147,11 +151,14 @@ def main() -> int:
         str(server_package_dir),
         str(server_config_dir),
     )
-    _run_script(
+    host_apply_args = [
         str(_script_path("server", "scripts", "prepare_scenario1_host_apply.py")),
         str(server_config_dir),
         str(host_apply_dir),
-    )
+    ]
+    if args.materials_manifest_json:
+        host_apply_args.extend(["--materials-manifest-json", str(Path(args.materials_manifest_json).resolve())])
+    _run_script(*host_apply_args)
     if args.host_access_json:
         _run_script(
             str(_script_path("server", "scripts", "prepare_scenario1_remote_apply_plan.py")),

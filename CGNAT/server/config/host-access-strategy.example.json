@@ -10,5 +10,19 @@
     "private_key_path": "/keys/cgnat-isp-head-end.pem",
     "remote_stage_dir": "/var/tmp/cgnat-service-example-isp-head-end",
     "address_source": "associated_public_ip"
+  },
+  "customer_vpn_router_1": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/keys/customer-vpn-router.pem",
+    "remote_stage_dir": "/var/tmp/cgnat-service-example-customer-vpn-router-1",
+    "address_source": "private_ip",
+    "proxy_jump_role": "cgnat_isp_head_end"
+  },
+  "customer_vpn_router_2": {
+    "ssh_user": "ec2-user",
+    "private_key_path": "/keys/customer-vpn-router.pem",
+    "remote_stage_dir": "/var/tmp/cgnat-service-example-customer-vpn-router-2",
+    "address_source": "private_ip",
+    "proxy_jump_role": "cgnat_isp_head_end"
   }
 }

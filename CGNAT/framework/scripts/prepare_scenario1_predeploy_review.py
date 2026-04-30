@@ -71,6 +71,10 @@ def main() -> int:
         "--host-access-strategy-json",
         help="Optional path to the host access strategy JSON that will be used after live create.",
     )
+    parser.add_argument(
+        "--materials-manifest-json",
+        help="Optional path to the materialized Scenario 1 demo materials manifest.",
+    )
     args = parser.parse_args()
 
     bundle = load_bundle(Path(args.bundle_json).resolve())
@@ -90,6 +94,9 @@ def main() -> int:
         aws_apply_result,
         host_access_strategy_path=str(Path(args.host_access_strategy_json).resolve())
         if args.host_access_strategy_json
+        else None,
+        materials_manifest_path=str(Path(args.materials_manifest_json).resolve())
+        if args.materials_manifest_json
         else None,
     )
 

@@ -16,8 +16,8 @@ Usage:
 
 ```powershell
 python CGNAT\aws\scripts\render_aws_package.py `
-  CGNAT\build\sample-from-split\deployment-bundle.json `
-  CGNAT\build\sample-from-split\aws-package
+  CGNAT\framework\config\deployment-bundle.example.json `
+  CGNAT\build\sample\aws-package
 ```
 
 This renders AWS deployment package artifacts only:
@@ -32,8 +32,8 @@ Scenario 1 plan/apply scaffold:
 
 ```powershell
 python CGNAT\aws\scripts\deploy_scenario1_aws.py `
-  CGNAT\build\sample-from-split\aws-package `
-  CGNAT\build\sample-from-split\aws-deploy-plan `
+  CGNAT\build\sample\aws-package `
+  CGNAT\build\sample\aws-deploy-plan `
   --mode plan
 ```
 

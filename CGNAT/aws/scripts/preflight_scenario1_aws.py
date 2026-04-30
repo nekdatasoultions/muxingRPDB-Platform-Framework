@@ -23,6 +23,7 @@ def _load_package(package_dir: Path) -> dict[str, Any]:
         "manifest": _load_json(package_dir / "package-manifest.json"),
         "cgnat_head_end": _load_json(package_dir / "cgnat-head-end.json"),
         "cgnat_isp_head_end": _load_json(package_dir / "cgnat-isp-head-end.json"),
+        "customer_vpn_routers": _load_json(package_dir / "customer-vpn-routers.json"),
         "dependencies": _load_json(package_dir / "dependencies.json"),
         "deployment_order": _load_json(package_dir / "deployment-order.json"),
     }
@@ -45,19 +46,34 @@ def _collect_inventory(package: dict[str, Any]) -> dict[str, Any]:
     region = package["dependencies"]["aws"]["region"]
     head_end = package["cgnat_head_end"]
     isp_head_end = package["cgnat_isp_head_end"]
+    customer_vpn_routers = list(package.get("customer_vpn_routers") or [])
 
     subnet_ids = [
         head_end["subnet_id"],
         isp_head_end["subnets"]["transit_subnet_id"],
         isp_head_end["subnets"]["customer_subnet_id"],
     ]
-    security_group_ids = sorted(set(head_end["security_group_ids"] + isp_head_end["security_group_ids"]))
-    image_ids = sorted({head_end["ami_id"], isp_head_end["ami_id"]})
-    key_names = sorted({name for name in [head_end.get("key_pair_name"), isp_head_end.get("key_pair_name")] if name})
+    subnet_ids.extend(router["subnet_id"] for router in customer_vpn_routers if router.get("subnet_id"))
+    security_group_ids = sorted(
+        set(
+            list(head_end["security_group_ids"])
+            + list(isp_head_end["security_group_ids"])
+            + [sg_id for router in customer_vpn_routers for sg_id in router.get("security_group_ids", [])]
+        )
+    )
+    image_ids = sorted({head_end["ami_id"], isp_head_end["ami_id"], *[router["ami_id"] for router in customer_vpn_routers if router.get("ami_id")]})
+    key_names = sorted(
+        {
+            name
+            for name in [head_end.get("key_pair_name"), isp_head_end.get("key_pair_name"), *[router.get("key_pair_name") for router in customer_vpn_routers]]
+            if name
+        }
+    )
     instance_profiles = sorted(
         {
             head_end["iam_instance_profile"],
             isp_head_end["iam_instance_profile"],
+            *[router["iam_instance_profile"] for router in customer_vpn_routers if router.get("iam_instance_profile")],
         }
     )
 

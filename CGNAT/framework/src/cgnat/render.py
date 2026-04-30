@@ -51,12 +51,13 @@ def render_deployment_summary(bundle: dict[str, Any], validation: dict[str, Any]
             "termination_model": bundle["framework"]["topology"]["inner_vpn"]["termination_model"],
             "customer_device_count": len(devices),
             "customer_facing_public_ip": customer_facing_public_ip,
-            "customer_loopback_ip": bundle["sot"]["identities"]["customer_loopback_ip"],
+            "customer_loopback_ips": [device.get("customer_loopback_ip") or bundle["sot"]["identities"]["customer_loopback_ip"] for device in devices],
         },
         "placement": {
             "cgnat_head_end_subnet": bundle["operations"]["cgnat_head_end"]["subnet_id"],
             "cgnat_isp_head_end_transit_subnet": bundle["operations"]["cgnat_isp_head_end"]["transit_subnet_id"],
             "cgnat_isp_head_end_customer_subnet": bundle["operations"]["cgnat_isp_head_end"]["customer_subnet_id"],
+            "customer_vpn_router_roles": [router["role"] for router in bundle["operations"].get("customer_vpn_routers", [])],
         },
         "backend_selection": {
             "preferred_class": preferred_class,
@@ -83,6 +84,7 @@ def render_infra_deployables(bundle: dict[str, Any]) -> dict[str, Any]:
         "deployables": {
             "cgnat_head_end": operations["cgnat_head_end"],
             "cgnat_isp_head_end": operations["cgnat_isp_head_end"],
+            "customer_vpn_routers": operations.get("customer_vpn_routers", []),
         },
         "external_dependencies": {
             "backend_vpn_head_ends": operations["backend_vpn_head_ends"],
@@ -109,7 +111,7 @@ def render_server_side_shapes(bundle: dict[str, Any]) -> dict[str, Any]:
             "termination_model": framework["topology"]["inner_vpn"]["termination_model"],
             "customer_facing_public_ip": sot["backend_selection"]["customer_facing_public_ip"],
             "inner_customer_identity": sot["identities"]["inner_customer_identity"],
-            "customer_loopback_ip": sot["identities"]["customer_loopback_ip"],
+            "customer_loopback_ips": [device.get("customer_loopback_ip") or sot["identities"]["customer_loopback_ip"] for device in sot["customer_devices"]],
             "customer_devices": sot["customer_devices"],
         },
         "steering": {
@@ -151,7 +153,7 @@ def render_backend_contract(bundle: dict[str, Any]) -> dict[str, Any]:
             "inner_vpn": {
                 "auth_method": framework["topology"]["inner_vpn"]["auth_method"],
                 "inner_customer_identity": sot["identities"]["inner_customer_identity"],
-                "customer_loopback_ip": sot["identities"]["customer_loopback_ip"],
+                "customer_loopback_ips": [device.get("customer_loopback_ip") or sot["identities"]["customer_loopback_ip"] for device in sot["customer_devices"]],
             },
         },
         "gre_handoff": {

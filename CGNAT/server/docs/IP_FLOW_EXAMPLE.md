@@ -185,3 +185,10 @@ The easiest short version is:
 2. CGNAT forces the traffic through the CGNAT router path
 3. CGNAT HEAD END sends it over GRE to the correct backend head end
 4. backend preserves the current service termination identity
+
+In the broader model:
+
+5. many customer devices may sit behind one ISP CGNAT router
+6. the same ISP may use multiple certificate-separated outer tunnels
+7. the inner VPNs carried inside those outer tunnels are the interesting
+   traffic we steer across GRE

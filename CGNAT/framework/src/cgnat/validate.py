@@ -11,6 +11,7 @@ ALLOWED_BACKEND_CLASSES = {"nat_t", "non_nat"}
 ALLOWED_GRE_ASSIGNMENT_MODES = {"next_available"}
 ALLOWED_HEAD_EIP_STRATEGIES = {"existing_allocation", "allocate_new"}
 ALLOWED_ISP_EIP_STRATEGIES = {"none", "existing_allocation", "allocate_new"}
+ALLOWED_CUSTOMER_ROUTER_EIP_STRATEGIES = {"none"}
 
 
 @dataclass
@@ -31,6 +32,14 @@ def _get(data: dict[str, Any], *path: str) -> Any:
             return None
         current = current[item]
     return current
+
+
+def _is_valid_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
 
 
 def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -164,6 +173,110 @@ def _validate_operations(
                 "CGNAT ISP HEAD END public_eip_allocation_id is required when public_eip_strategy is `existing_allocation`.",
             )
         )
+    isp_customer_private_ip = _get(operations, "cgnat_isp_head_end", "customer_facing_private_ip")
+    if not isp_customer_private_ip or not _is_valid_ip(str(isp_customer_private_ip)):
+        messages.append(
+            _msg(
+                "error",
+                "isp_customer_facing_private_ip",
+                "CGNAT ISP HEAD END customer_facing_private_ip must be a valid IPv4 address.",
+            )
+        )
+
+    customer_vpn_routers = list(_get(operations, "customer_vpn_routers") or [])
+    if len(customer_vpn_routers) < 2:
+        messages.append(
+            _msg(
+                "error",
+                "customer_vpn_router_count",
+                "Scenario 1 demo requires at least two customer_vpn_routers behind the CGNAT ISP HEAD END.",
+            )
+        )
+    router_roles: set[str] = set()
+    router_private_ips: set[str] = set()
+    for index, router in enumerate(customer_vpn_routers, start=1):
+        role = str(router.get("role") or "").strip()
+        if not role:
+            messages.append(_msg("error", f"customer_vpn_router_role_{index}", f"Customer VPN router {index} is missing `role`."))
+        elif role in router_roles:
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_duplicate_role_{index}",
+                    f"Customer VPN router role `{role}` is duplicated.",
+                )
+            )
+        else:
+            router_roles.add(role)
+        subnet_id = router.get("subnet_id")
+        if subnet_id not in customer_subnets:
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_subnet_{index}",
+                    f"Customer VPN router {index} subnet is outside the approved customer-device subnet set.",
+                )
+            )
+        private_ip = str(router.get("private_ip_address") or "").strip()
+        if not private_ip or not _is_valid_ip(private_ip):
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_private_ip_{index}",
+                    f"Customer VPN router {index} private_ip_address must be a valid IPv4 address.",
+                )
+            )
+        elif private_ip == str(isp_customer_private_ip):
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_private_ip_overlap_isp_{index}",
+                    f"Customer VPN router {index} private_ip_address overlaps the ISP customer-facing private IP.",
+                )
+            )
+        elif private_ip in router_private_ips:
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_duplicate_private_ip_{index}",
+                    f"Customer VPN router private_ip_address `{private_ip}` is duplicated.",
+                )
+            )
+        else:
+            router_private_ips.add(private_ip)
+        router_checks = {
+            "ami_id": router.get("ami_id"),
+            "security_group_ids": router.get("security_group_ids"),
+            "iam_instance_profile": router.get("iam_instance_profile"),
+            "customer_facing_interface": router.get("customer_facing_interface"),
+        }
+        for field_name, field_value in router_checks.items():
+            if not field_value:
+                messages.append(
+                    _msg(
+                        "error",
+                        f"customer_vpn_router_{field_name}_{index}",
+                        f"Customer VPN router {index} is missing `{field_name}`.",
+                    )
+                )
+        router_root = router.get("root_volume") or {}
+        if not router_root.get("device_name") or not router_root.get("size_gb") or not router_root.get("volume_type"):
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_root_volume_{index}",
+                    f"Customer VPN router {index} root_volume must define device_name, size_gb, and volume_type.",
+                )
+            )
+        router_eip_strategy = router.get("public_eip_strategy") or "none"
+        if router_eip_strategy not in ALLOWED_CUSTOMER_ROUTER_EIP_STRATEGIES:
+            messages.append(
+                _msg(
+                    "error",
+                    f"customer_vpn_router_public_eip_strategy_{index}",
+                    "Customer VPN routers currently support only `public_eip_strategy = none`.",
+                )
+            )
 
     backends = _get(operations, "backend_vpn_head_ends") or {}
     if not any(backends.get(name) for name in ALLOWED_BACKEND_CLASSES):
@@ -253,6 +366,8 @@ def _validate_sot(
         messages.append(_msg("error", "customer_devices", "At least one Customer Device must be defined in SoT."))
     else:
         allowed_customer_subnet = _get(operations, "cgnat_isp_head_end", "customer_subnet_id")
+        router_roles = {str(router.get("role") or "").strip() for router in (_get(operations, "customer_vpn_routers") or [])}
+        seen_loopbacks: set[str] = set()
         for index, device in enumerate(customer_devices, start=1):
             if device.get("subnet_id") != allowed_customer_subnet:
                 messages.append(
@@ -268,6 +383,58 @@ def _validate_sot(
                         "error",
                         f"customer_device_identity_{index}",
                         f"Customer Device {index} is missing known_inside_identity.",
+                    )
+                )
+            loopback_ip = str(device.get("customer_loopback_ip") or "").strip()
+            if len(customer_devices) > 1 and not loopback_ip:
+                messages.append(
+                    _msg(
+                        "error",
+                        f"customer_device_loopback_{index}",
+                        f"Customer Device {index} must define customer_loopback_ip when multiple customer devices are present.",
+                    )
+                )
+            elif loopback_ip and not _is_valid_ip(loopback_ip):
+                messages.append(
+                    _msg(
+                        "error",
+                        f"customer_device_loopback_format_{index}",
+                        f"Customer Device {index} customer_loopback_ip must be a valid IPv4 address.",
+                    )
+                )
+            elif loopback_ip:
+                if not loopback_ip.startswith("10."):
+                    messages.append(
+                        _msg(
+                            "warning",
+                            f"customer_device_loopback_demo_range_{index}",
+                            f"Customer Device {index} loopback is expected to use non-overlapping 10.x space for the demo.",
+                        )
+                    )
+                if loopback_ip in seen_loopbacks:
+                    messages.append(
+                        _msg(
+                            "error",
+                            f"customer_device_duplicate_loopback_{index}",
+                            f"Customer Device loopback `{loopback_ip}` is duplicated.",
+                        )
+                    )
+                seen_loopbacks.add(loopback_ip)
+            router_role = str(device.get("router_role") or "").strip()
+            if not router_role:
+                messages.append(
+                    _msg(
+                        "error",
+                        f"customer_device_router_role_{index}",
+                        f"Customer Device {index} must define router_role.",
+                    )
+                )
+            elif router_role not in router_roles:
+                messages.append(
+                    _msg(
+                        "error",
+                        f"customer_device_router_role_missing_{index}",
+                        f"Customer Device {index} router_role `{router_role}` is not present in operations.customer_vpn_routers.",
                     )
                 )
 

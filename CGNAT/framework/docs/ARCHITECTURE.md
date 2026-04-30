@@ -18,6 +18,8 @@ The platform must support a two-layer access model:
    The CGNAT HEAD END is the hosted platform-side ingress role, and it must be
    able to accept multiple remote ISP-side peers over independent outer
    tunnels.
+   The same ISP may also establish multiple outer tunnels when different
+   certificate identities are used for different access contexts.
 2. Customer Devices behind the CGNAT ISP HEAD END send an inner S2S VPN
    through that outer tunnel toward the same customer-facing public IP used by
    the current muxer-backed service.
@@ -58,11 +60,15 @@ In this model:
 - one ISP-side interconnect gateway forms the outer tunnel
 - multiple customer devices sit behind that gateway
 - many inner S2S VPNs are carried inside one outer tunnel
+- those inner S2S VPNs are the interesting traffic carried by that outer
+  access context
 
 Important behavior:
 
 - the outer tunnel is provider/interconnect-owned
 - the outer tunnel capability matrix may be broader than Scenario 1
+- the same ISP may use multiple certificate identities and therefore multiple
+  outer tunnels when traffic domains need to stay separate
 - the inner tunnels still target the same customer-facing public IP used by the
   current backend service
 - the CGNAT HEAD END still steers the inner tunnels across GRE to the selected
@@ -121,6 +127,8 @@ It:
 - does not terminate the platform-side service intent of the inner VPN
 - is expected to be one of potentially many remote ISP-side peers connecting
   into the hosted CGNAT HEAD END role
+- may represent one of several certificate-separated access contexts for the
+  same ISP
 
 ### CGNAT HEAD END
 
@@ -138,6 +146,8 @@ It:
 - is the platform-side role we host and operate
 - must preserve the ability to accept multiple certificate-authenticated
   CGNAT ISP HEAD END peers
+- must preserve the ability to differentiate outer access contexts by
+  certificate identity before steering inner service traffic
 
 ### Backend VPN Head Ends
 
@@ -236,6 +246,7 @@ It is responsible for:
 
 - accepting unknown, changing, or CGNATed public source identity
 - authenticating with certificates
+- treating certificate identity as the primary access-context differentiator
 - creating the trusted transport channel into the platform
 - preserving the hosted-ingress model where multiple ISP-side CGNAT devices can
   connect to the same CGNAT HEAD END tier
@@ -246,7 +257,8 @@ The service plane is the inner S2S VPN initiated by Customer Devices.
 
 It is responsible for:
 
-- carrying customer-specific VPN traffic
+- carrying the customer-specific interesting traffic inside the trusted outer
+  access context
 - preserving the existing customer-facing public IP/public loopback behavior
 - preserving the current RPDB-style backend head-end termination model
 - selecting the correct backend VPN head end for service delivery

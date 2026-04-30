@@ -53,6 +53,11 @@ certificate identity, not because it arrives from a predictable address.
 This is also what allows the hosted CGNAT HEAD END role to scale beyond one
 demo peer and accept multiple ISP-side CGNAT devices over time.
 
+The same ISP may also present more than one valid certificate identity when
+different traffic domains need to be carried over separate outer tunnels.
+Those become separate trusted outer access contexts even if they belong to the
+same upstream ISP organization.
+
 ### Demo PKI Model for Scenario 1
 
 For Scenario 1, the current demo assumption is:
@@ -79,6 +84,8 @@ This identity is used to:
 - allow the access tunnel to form
 - associate the tunnel with the correct CGNAT service context
 - establish a transport path into the CGNAT HEAD END
+- separate one outer access context from another when the same ISP uses
+  multiple certificate identities
 
 ### Inner Identity
 
@@ -99,6 +106,9 @@ Once the outer tunnel is established, it must be able to carry:
 - inner IPsec traffic
 - any supporting traffic needed to deliver the inner VPN to backend VPN head
   ends
+
+That carried inner VPN traffic is the interesting traffic for the outer access
+context.
 
 The transport model should be documented and tested so we know exactly which
 traffic is allowed to traverse the outer tunnel and how it is classified at the
@@ -131,6 +141,8 @@ This means:
 - the outer tunnel may be NAT-T or non-NAT-T
 - the outer tunnel may be IKEv1 or IKEv2 depending on interconnect realities
 - initiator/responder behavior may vary by provider design
+- the same ISP may maintain multiple certificate-separated outer tunnels if it
+  needs independent access contexts for different interesting traffic sets
 
 This scenario is the more direct expression of the long-term model where
 multiple ISP-side CGNAT devices or gateways connect to the hosted CGNAT HEAD
@@ -188,7 +200,8 @@ These questions are intentionally left open for later design phases:
 
 - What exact software/runtime terminates the outer tunnel on the CGNAT HEAD
   END?
-- How is outer-tunnel certificate identity mapped to service context?
+- How is outer-tunnel certificate identity mapped to service context and
+  traffic-domain separation?
 - What minimal policy is allowed across the outer tunnel before inner-VPN
   steering logic takes over?
 - What monitoring signal should drive outer-tunnel health?

@@ -27,6 +27,7 @@ def _selected_backend_entry(bundle: dict[str, Any]) -> dict[str, Any]:
 
 def _render_package_manifest(bundle: dict[str, Any]) -> dict[str, Any]:
     selected_backend = _selected_backend_entry(bundle)
+    customer_router_count = len(bundle["operations"].get("customer_vpn_routers") or [])
     return {
         "package_type": "cgnat_aws_package",
         "version": 1,
@@ -42,7 +43,8 @@ def _render_package_manifest(bundle: dict[str, Any]) -> dict[str, Any]:
         "deployment_model": {
             "cgnat_head_end": "single_instance",
             "cgnat_isp_head_end": "single_instance",
-            "customer_model": "collapsed_1_to_1",
+            "customer_model": "many_to_one_via_isp_cgnat",
+            "customer_router_count": customer_router_count,
         },
     }
 
@@ -84,6 +86,7 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
             "transit_subnet_id": operations["cgnat_isp_head_end"]["transit_subnet_id"],
             "customer_subnet_id": operations["cgnat_isp_head_end"]["customer_subnet_id"],
         },
+        "customer_facing_private_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
         "public_eip_strategy": operations["cgnat_isp_head_end"].get("public_eip_strategy", "none"),
         "public_eip_allocation_id": operations["cgnat_isp_head_end"].get("public_eip_allocation_id"),
         "interfaces": {
@@ -92,6 +95,31 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         },
         "placement_rule": "must_span_transit_and_customer_subnets",
     }
+
+
+def _render_customer_vpn_routers(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    routers = []
+    for router in bundle["operations"].get("customer_vpn_routers") or []:
+        routers.append(
+            {
+                "role": router["role"],
+                "instance_name": router["instance_name"],
+                "instance_type": router["instance_type"],
+                "ami_id": router["ami_id"],
+                "security_group_ids": router["security_group_ids"],
+                "iam_instance_profile": router["iam_instance_profile"],
+                "key_pair_name": router.get("key_pair_name"),
+                "root_volume": router["root_volume"],
+                "subnet_id": router["subnet_id"],
+                "private_ip_address": router["private_ip_address"],
+                "public_eip_strategy": router.get("public_eip_strategy", "none"),
+                "interfaces": {
+                    "customer_facing_interface": router["customer_facing_interface"],
+                },
+                "placement_rule": "must_run_only_in_customer_subnet",
+            }
+        )
+    return routers
 
 
 def _render_dependencies(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -119,8 +147,13 @@ def _render_deployment_order() -> dict[str, Any]:
             },
             {
                 "id": 3,
+                "name": "deploy_customer_vpn_routers",
+                "description": "Create the customer VPN routers in the customer-facing subnet behind the CGNAT ISP HEAD END.",
+            },
+            {
+                "id": 4,
                 "name": "prepare_server_side_configuration",
-                "description": "Hand off to the server-side package to configure the outer tunnel, GRE handoff, and service path.",
+                "description": "Hand off to the server-side package to configure the outer tunnel, GRE handoff, ISP transit role, and customer-router inner VPNs.",
             },
         ]
     }
@@ -140,6 +173,7 @@ def _render_readme(bundle: dict[str, Any]) -> str:
             "- `package-manifest.json`: AWS deployment package summary",
             "- `cgnat-head-end.json`: CGNAT HEAD END infra shape",
             "- `cgnat-isp-head-end.json`: CGNAT ISP HEAD END infra shape",
+            "- `customer-vpn-routers.json`: customer-router infra shapes behind the ISP CGNAT device",
             "- `dependencies.json`: required external inventory and certificate refs",
             "- `deployment-order.json`: recommended deployment sequence",
             "",
@@ -175,6 +209,7 @@ def main() -> int:
     dump_json(output_dir / "package-manifest.json", _render_package_manifest(bundle))
     dump_json(output_dir / "cgnat-head-end.json", _render_cgnat_head_end(bundle))
     dump_json(output_dir / "cgnat-isp-head-end.json", _render_cgnat_isp_head_end(bundle))
+    dump_json(output_dir / "customer-vpn-routers.json", _render_customer_vpn_routers(bundle))
     dump_json(output_dir / "dependencies.json", _render_dependencies(bundle))
     dump_json(output_dir / "deployment-order.json", _render_deployment_order())
     dump_text(output_dir / "README.md", _render_readme(bundle))

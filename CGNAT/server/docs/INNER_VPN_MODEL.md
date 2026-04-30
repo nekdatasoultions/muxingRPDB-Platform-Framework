@@ -8,6 +8,8 @@ The inner VPN is the customer service VPN that rides through the already
 established outer certificate-authenticated tunnel. It is separate from the
 outer access tunnel in identity, trust, and termination behavior.
 
+It is also the interesting traffic carried inside that outer access context.
+
 ## Core Rules
 
 - the inner VPN is initiated by Customer Devices behind the CGNAT ISP HEAD END
@@ -105,8 +107,14 @@ The current framework should support this as the first implementation target.
 In Scenario 2:
 
 - one ISP/interconnect-owned outer tunnel carries many inner customer tunnels
+- many customer devices may be many-to-one behind the same ISP CGNAT router or
+  gateway
 - each inner tunnel still targets the existing customer-facing public IP
 - each inner tunnel still needs its own backend selection and service identity
+
+The design must also allow the same ISP to establish more than one outer
+tunnel when different certificate identities are used to keep interesting
+traffic domains separate.
 
 This means the CGNAT HEAD END must eventually support:
 
@@ -128,6 +136,11 @@ It is based on:
 
 The outer certificate identity must never be treated as a substitute for the
 inner service identity.
+
+In the broader model, differentiation happens at two layers:
+
+- outer certificate identity selects the trusted access context
+- inner VPN identity selects the customer/service context carried inside it
 
 ## Termination Model
 

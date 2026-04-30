@@ -25,6 +25,14 @@ def _selected_backend_entry(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _router_index(operations: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(router["role"]): router
+        for router in list(operations.get("customer_vpn_routers") or [])
+        if isinstance(router, dict) and router.get("role")
+    }
+
+
 def _render_package_manifest(bundle: dict[str, Any]) -> dict[str, Any]:
     selected_backend = _selected_backend_entry(bundle)
     return {
@@ -37,6 +45,7 @@ def _render_package_manifest(bundle: dict[str, Any]) -> dict[str, Any]:
         "termination_public_loopback": bundle["sot"]["backend_selection"]["termination_public_loopback"],
         "selected_backend_name": selected_backend["name"],
         "selected_backend_gre_remote": selected_backend["gre_remote"],
+        "customer_router_count": len(bundle["sot"]["customer_devices"]),
     }
 
 
@@ -87,16 +96,47 @@ def _render_cgnat_isp_head_end(bundle: dict[str, Any]) -> dict[str, Any]:
         },
         "customer_service_path": {
             "customer_facing_interface": operations["cgnat_isp_head_end"]["customer_facing_interface"],
+            "customer_facing_private_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
             "customer_devices": sot["customer_devices"],
-            "inner_customer_identity": sot["identities"]["inner_customer_identity"],
-            "customer_loopback_ip": sot["identities"]["customer_loopback_ip"],
+            "router_roles": [device["router_role"] for device in sot["customer_devices"]],
         },
-        "inner_vpn_contract": {
-            "auth_method": framework["topology"]["inner_vpn"]["auth_method"],
-            "required_initiator": "customer_device",
-            "required_responder": "backend_vpn_head_end",
+        "transit_contract": {
+            "required_forwarding": True,
+            "required_source_dest_check_disabled": True,
         },
     }
+
+
+def _render_customer_vpn_routers(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    framework = bundle["framework"]
+    operations = bundle["operations"]
+    sot = bundle["sot"]
+    router_by_role = _router_index(operations)
+    routers: list[dict[str, Any]] = []
+    for device in sot["customer_devices"]:
+        role = device["router_role"]
+        router = router_by_role[role]
+        routers.append(
+            {
+                "role": role,
+                "instance_name": router["instance_name"],
+                "customer_facing_interface": router["customer_facing_interface"],
+                "private_ip_address": router["private_ip_address"],
+                "default_gateway_ip": operations["cgnat_isp_head_end"]["customer_facing_private_ip"],
+                "inner_vpn": {
+                    "auth_method": framework["topology"]["inner_vpn"]["auth_method"],
+                    "required_initiator": "customer_vpn_router",
+                    "required_responder": "backend_vpn_head_end",
+                    "customer_device_name": device["name"],
+                    "customer_loopback_ip": device.get("customer_loopback_ip") or sot["identities"]["customer_loopback_ip"],
+                    "known_inside_identity": device["known_inside_identity"],
+                    "secret_ref": device["inner_vpn_auth_ref"],
+                    "remote_public_ip": sot["backend_selection"]["customer_facing_public_ip"],
+                    "termination_public_loopback": sot["backend_selection"]["termination_public_loopback"],
+                },
+            }
+        )
+    return routers
 
 
 def _render_backend_expectations(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -118,11 +158,20 @@ def _render_backend_expectations(bundle: dict[str, Any]) -> dict[str, Any]:
 
 
 def _render_validation_targets(bundle: dict[str, Any]) -> dict[str, Any]:
+    customer_routers = [
+        {
+            "role": device["router_role"],
+            "name": device["name"],
+            "customer_loopback_ip": device.get("customer_loopback_ip") or bundle["sot"]["identities"]["customer_loopback_ip"],
+            "known_inside_identity": device["known_inside_identity"],
+        }
+        for device in bundle["sot"]["customer_devices"]
+    ]
     return {
         "scenario": "scenario1",
         "required_checks": [
             "outer_tunnel_established",
-            "inner_tunnel_established_customer_initiated",
+            "customer_router_inner_tunnels_established",
             "backend_responder_behavior_confirmed",
             "request_path_visible_on_outer_tunnel",
             "request_path_visible_on_gre_handoff",
@@ -131,13 +180,14 @@ def _render_validation_targets(bundle: dict[str, Any]) -> dict[str, Any]:
             "customer_facing_public_ip_matches_termination_public_loopback",
         ],
         "observability_points": [
-            "customer_device",
+            "customer_vpn_router_1",
+            "customer_vpn_router_2",
             "cgnat_isp_head_end",
             "cgnat_head_end_outer_tunnel_path",
             "cgnat_head_end_gre_path",
             "selected_backend_head_end",
         ],
-        "customer_loopback_ip": bundle["sot"]["identities"]["customer_loopback_ip"],
+        "customer_routers": customer_routers,
         "customer_facing_public_ip": bundle["sot"]["backend_selection"]["customer_facing_public_ip"],
     }
 
@@ -155,7 +205,8 @@ def _render_readme(bundle: dict[str, Any]) -> str:
             "",
             "- `package-manifest.json`: server-side package summary",
             "- `cgnat-head-end.json`: outer tunnel and GRE handoff shape",
-            "- `cgnat-isp-head-end.json`: ISP-side path and inner VPN role shape",
+            "- `cgnat-isp-head-end.json`: ISP-side outer tunnel and transit role shape",
+            "- `customer-vpn-routers.json`: customer-router inner tunnel shapes",
             "- `backend-expectations.json`: backend target and translation expectations",
             "- `validation-targets.json`: required validation checks and observability points",
             "",
@@ -163,7 +214,7 @@ def _render_readme(bundle: dict[str, Any]) -> str:
             "",
             "- This package is server-side only.",
             "- It does not create AWS resources.",
-            "- It assumes the current Scenario 1 contract and existing backend public target.",
+            "- The ISP node owns the outer tunnel; the customer routers own the inner tunnels.",
             "",
         ]
     )
@@ -191,6 +242,7 @@ def main() -> int:
     dump_json(output_dir / "package-manifest.json", _render_package_manifest(bundle))
     dump_json(output_dir / "cgnat-head-end.json", _render_cgnat_head_end(bundle))
     dump_json(output_dir / "cgnat-isp-head-end.json", _render_cgnat_isp_head_end(bundle))
+    dump_json(output_dir / "customer-vpn-routers.json", _render_customer_vpn_routers(bundle))
     dump_json(output_dir / "backend-expectations.json", _render_backend_expectations(bundle))
     dump_json(output_dir / "validation-targets.json", _render_validation_targets(bundle))
     dump_text(output_dir / "README.md", _render_readme(bundle))

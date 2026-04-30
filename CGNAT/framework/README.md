@@ -29,6 +29,14 @@ Current orchestration entry point:
     dry-run artifacts
   - highlights open operator items before host apply
   - does not deploy infrastructure
+- `scripts/prepare_scenario1_backend_integration.py`
+  - generates a backend-native customer request from the CGNAT bundle
+  - runs the existing `deploy_customer` flow in dry-run mode
+  - produces a reusable backend integration summary without touching shared code
+- `scripts/prepare_scenario1_deployment_stage_review.py`
+  - combines the CGNAT predeploy review and backend integration dry-run into a
+    single deployment-stage review package
+  - does not deploy infrastructure
 
 Useful references in this lane:
 
@@ -39,3 +47,4 @@ Useful references in this lane:
 - [Framework Config Example](./config/framework.example.json)
 - [Deployment Bundle Example](./config/deployment-bundle.example.json)
 - `config/deployment-bundle.rpdb-empty-live.json`
+- `config/scenario1-backend-integration.rpdb-empty-live.json`

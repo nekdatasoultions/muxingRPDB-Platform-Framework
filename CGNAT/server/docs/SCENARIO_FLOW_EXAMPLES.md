@@ -22,6 +22,9 @@ In both scenarios:
   by the current backend service
 - the CGNAT path changes the transport route underneath that target
 - the backend remains the termination and optional translation boundary
+- outer certificate identity defines the trusted access context
+- inner tunnel identity defines the interesting customer/service traffic inside
+  that context
 
 That means the customer still points at the same public IP, but the packet path
 becomes:
@@ -178,6 +181,8 @@ In this case the CGNAT ISP-side function is a true shared gateway.
 - may be NAT-T or non-NAT-T
 - may be IKEv1 or IKEv2
 - may allow either side to initiate depending on provider design
+- the same ISP may use multiple certificate identities and therefore multiple
+  outer tunnels when different traffic domains must stay separate
 
 ### Example
 
@@ -251,9 +256,12 @@ proven.
 - shared outer tunnel carrying many inner tunnels
 - per-inner-tunnel backend selection
 - support for a broader outer-tunnel capability matrix
+- support for multiple certificate-separated outer tunnels from the same ISP
 
 ### Common rule for both
 
 - customer-facing destination stays the same
 - CGNAT changes the path underneath
 - backend remains the service termination boundary
+- outer cert differentiates access context, inner identity differentiates
+  service traffic

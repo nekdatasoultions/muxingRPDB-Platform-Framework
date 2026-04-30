@@ -32,6 +32,7 @@
     "instance_name": "cgnat-isp-head-end-1",
     "transit_subnet_id": "subnet-04a6b7f3a3855d438",
     "customer_subnet_id": "subnet-0e6ae1d598e08d002",
+    "customer_facing_private_ip": "172.31.48.10",
     "instance_type": "t3.large",
     "ami_id": "ami-yyyyyyyyyyyyyyyyy",
     "security_group_ids": [
@@ -48,6 +49,50 @@
     "outer_tunnel_source_interface": "eth0",
     "customer_facing_interface": "eth1"
   },
+  "customer_vpn_routers": [
+    {
+      "role": "customer_vpn_router_1",
+      "instance_name": "customer-vpn-router-1",
+      "subnet_id": "subnet-0e6ae1d598e08d002",
+      "private_ip_address": "172.31.48.20",
+      "instance_type": "t3.large",
+      "ami_id": "ami-yyyyyyyyyyyyyyyyy",
+      "security_group_ids": [
+        "sg-yyyyyyyyyyyyyyyyy"
+      ],
+      "iam_instance_profile": "customer-vpn-router-profile",
+      "key_pair_name": null,
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 30,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "customer_facing_interface": "eth0",
+      "public_eip_strategy": "none"
+    },
+    {
+      "role": "customer_vpn_router_2",
+      "instance_name": "customer-vpn-router-2",
+      "subnet_id": "subnet-0e6ae1d598e08d002",
+      "private_ip_address": "172.31.48.21",
+      "instance_type": "t3.large",
+      "ami_id": "ami-yyyyyyyyyyyyyyyyy",
+      "security_group_ids": [
+        "sg-yyyyyyyyyyyyyyyyy"
+      ],
+      "iam_instance_profile": "customer-vpn-router-profile",
+      "key_pair_name": null,
+      "root_volume": {
+        "device_name": "/dev/xvda",
+        "size_gb": 30,
+        "volume_type": "gp3",
+        "delete_on_termination": true
+      },
+      "customer_facing_interface": "eth0",
+      "public_eip_strategy": "none"
+    }
+  ],
   "backend_vpn_head_ends": {
     "nat_t": [
       {

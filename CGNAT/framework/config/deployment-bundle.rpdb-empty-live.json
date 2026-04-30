@@ -73,6 +73,7 @@
       "instance_name": "cgnat-isp-head-end-rpdb-empty-a",
       "transit_subnet_id": "subnet-04a6b7f3a3855d438",
       "customer_subnet_id": "subnet-0dbd0842618d43ab3",
+      "customer_facing_private_ip": "172.31.48.10",
       "instance_type": "c8gn.2xlarge",
       "ami_id": "ami-0b11e0ed3f8697f97",
       "security_group_ids": [
@@ -91,6 +92,50 @@
       "outer_tunnel_source_interface": "eth0",
       "customer_facing_interface": "eth1"
     },
+    "customer_vpn_routers": [
+      {
+        "role": "customer_vpn_router_1",
+        "instance_name": "customer-vpn-router-1-rpdb-empty-a",
+        "subnet_id": "subnet-0dbd0842618d43ab3",
+        "private_ip_address": "172.31.48.20",
+        "instance_type": "c8gn.xlarge",
+        "ami_id": "ami-0b11e0ed3f8697f97",
+        "security_group_ids": [
+          "sg-0e8b00aabfc719b44"
+        ],
+        "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+        "key_pair_name": "muxer",
+        "root_volume": {
+          "device_name": "/dev/xvda",
+          "size_gb": 16,
+          "volume_type": "gp3",
+          "delete_on_termination": true
+        },
+        "customer_facing_interface": "eth0",
+        "public_eip_strategy": "none"
+      },
+      {
+        "role": "customer_vpn_router_2",
+        "instance_name": "customer-vpn-router-2-rpdb-empty-a",
+        "subnet_id": "subnet-0dbd0842618d43ab3",
+        "private_ip_address": "172.31.48.21",
+        "instance_type": "c8gn.xlarge",
+        "ami_id": "ami-0b11e0ed3f8697f97",
+        "security_group_ids": [
+          "sg-0e8b00aabfc719b44"
+        ],
+        "iam_instance_profile": "vpn-headend-nat-graviton-dev-rpdb-empty-us-east-1-HeadendInstanceProfile-xA2pvrDtIQLf",
+        "key_pair_name": "muxer",
+        "root_volume": {
+          "device_name": "/dev/xvda",
+          "size_gb": 16,
+          "volume_type": "gp3",
+          "delete_on_termination": true
+        },
+        "customer_facing_interface": "eth0",
+        "public_eip_strategy": "none"
+      }
+    ],
     "backend_vpn_head_ends": {
       "nat_t": [
         {
@@ -141,9 +186,19 @@
     "customer_devices": [
       {
         "name": "scenario1-pilot-device-1",
+        "router_role": "customer_vpn_router_1",
         "subnet_id": "subnet-0dbd0842618d43ab3",
-        "known_inside_identity": "10.20.30.10",
+        "customer_loopback_ip": "10.250.1.10",
+        "known_inside_identity": "10.20.30.10/32",
         "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
+      },
+      {
+        "name": "scenario1-pilot-device-2",
+        "router_role": "customer_vpn_router_2",
+        "subnet_id": "subnet-0dbd0842618d43ab3",
+        "customer_loopback_ip": "10.250.1.11",
+        "known_inside_identity": "10.20.30.11/32",
+        "inner_vpn_auth_ref": "secret://scenario1-pilot-device-2/ipsec-key"
       }
     ]
   }

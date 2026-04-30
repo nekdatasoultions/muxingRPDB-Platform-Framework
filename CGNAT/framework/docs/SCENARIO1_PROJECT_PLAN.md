@@ -9,6 +9,9 @@ ground for the CGNAT framework.
 
 It is a first demo slice of a larger hosted-ingress model in which multiple
 remote ISP-side CGNAT peers connect to the CGNAT HEAD END that we host.
+That broader model also allows the same ISP to present multiple certificate
+identities and therefore multiple outer tunnels when different interesting
+traffic domains must stay separate.
 
 ## Scenario 1 Definition
 

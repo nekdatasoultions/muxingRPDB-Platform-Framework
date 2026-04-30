@@ -23,9 +23,19 @@
   "customer_devices": [
     {
       "name": "scenario1-pilot-device-1",
+      "router_role": "customer_vpn_router_1",
       "subnet_id": "subnet-0dbd0842618d43ab3",
-      "known_inside_identity": "10.20.30.10",
+      "customer_loopback_ip": "10.250.1.10",
+      "known_inside_identity": "10.20.30.10/32",
       "inner_vpn_auth_ref": "secret://scenario1-pilot-device-1/ipsec-key"
+    },
+    {
+      "name": "scenario1-pilot-device-2",
+      "router_role": "customer_vpn_router_2",
+      "subnet_id": "subnet-0dbd0842618d43ab3",
+      "customer_loopback_ip": "10.250.1.11",
+      "known_inside_identity": "10.20.30.11/32",
+      "inner_vpn_auth_ref": "secret://scenario1-pilot-device-2/ipsec-key"
     }
   ]
 }

@@ -1,0 +1,41 @@
+{
+  "environment": "rpdb-empty-live",
+  "customer_name": "cgnat-scenario1-rpdb-empty-live-backend",
+  "customer_name_template": "cgnat-scenario1-rpdb-empty-live-backend-{router_role}",
+  "backend_psk_secret_ref": "/muxingrpdb/customers/cgnat-scenario1-rpdb-empty-live-backend/psk",
+  "backend_psk_secret_ref_template": "/muxingrpdb/customers/{customer_name}/psk",
+  "service_local_subnets_mode": "customer_facing_public_ip_loopback",
+  "ipsec": {
+    "ike_version": "ikev2",
+    "ike_policies": [
+      "aes256-sha256-modp2048"
+    ],
+    "esp_policies": [
+      "aes256-sha256-modp2048"
+    ],
+    "dpddelay": "30s",
+    "dpdtimeout": "120s",
+    "dpdaction": "restart",
+    "mobike": false,
+    "fragmentation": true,
+    "clear_df_bit": true,
+    "replay_protection": true,
+    "pfs_required": false,
+    "pfs_groups": [
+      "modp2048"
+    ]
+  },
+  "ipsec_initiation": {
+    "mode": "customer_only",
+    "headend_can_initiate": false,
+    "customer_can_initiate": true,
+    "traffic_can_start_tunnel": true,
+    "bring_up_on_apply": false,
+    "swanctl_start_action": "trap"
+  },
+  "post_ipsec_nat": {
+    "mode": "netmap",
+    "mapping_strategy": "one_to_one",
+    "tcp_mss_clamp": 1360
+  }
+}

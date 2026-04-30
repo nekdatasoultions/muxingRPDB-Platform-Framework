@@ -174,3 +174,43 @@ way to the edge of real infrastructure execution:
 - host-apply package
 - remote-apply command plan
 - remote execution wrapper with gated live mode
+
+## Issue 5: ISP-Side Bundle Described the Inner Tunnel but Did Not Render or Stage It
+
+### Status
+
+- resolved for the current Scenario 1 contract
+
+### Summary
+
+The earlier ISP-side package carried the inner tunnel contract as structured
+data, but it did not yet render a concrete inner-tunnel config or stage the
+required secret material into the host-apply bundle.
+
+### Why This Matters
+
+That gap meant we could describe the customer-initiated inner VPN path, but we
+could not honestly say the server-side apply package was ready to support it.
+
+### Current Handling
+
+The current Scenario 1 server tooling now:
+
+- renders a concrete ISP-side inner-tunnel `swanctl` fragment
+- renders a loopback setup script for the customer loopback identity
+- materializes demo PKI and inner-VPN secret inputs into a local manifest
+- stages those certs and secret files into the per-host apply bundles
+- substitutes the real demo PSK into the staged ISP-side inner-tunnel config
+
+### Resolution
+
+For the current Scenario 1 contract, the host-apply package now carries:
+
+- outer-tunnel config
+- inner-tunnel config
+- loopback setup
+- staged demo certs
+- staged inner VPN PSK material
+
+The remaining work before host-side apply is operational review and live host
+reachability, not missing inner-tunnel artifacts.

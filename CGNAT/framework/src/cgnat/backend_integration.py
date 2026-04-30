@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+def _sanitize(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value)
+
+
+def _as_host_cidr(ip_or_cidr: str) -> str:
+    value = str(ip_or_cidr).strip()
+    if not value:
+        raise ValueError("expected non-empty IP or CIDR value")
+    return value if "/" in value else f"{value}/32"
+
+
+def _resolve_selected_backend_public_loopback(bundle: dict[str, Any]) -> str:
+    backend_selection = dict(bundle["sot"]["backend_selection"])
+    preferred_class = str(backend_selection.get("preferred_class") or "").strip()
+    if not preferred_class:
+        raise ValueError("bundle.sot.backend_selection.preferred_class is required")
+
+    explicit_public_ip = str(backend_selection.get("customer_facing_public_ip") or "").strip()
+    explicit_loopback = str(backend_selection.get("termination_public_loopback") or "").strip()
+    operations_candidates = list((bundle["operations"]["backend_vpn_head_ends"] or {}).get(preferred_class) or [])
+    derived_loopback = ""
+    if operations_candidates:
+        derived_loopback = str(operations_candidates[0].get("public_loopback") or "").strip()
+
+    chosen = explicit_public_ip or explicit_loopback or derived_loopback
+    if not chosen:
+        raise ValueError("unable to resolve backend public loopback from bundle")
+
+    for label, candidate in {
+        "customer_facing_public_ip": explicit_public_ip,
+        "termination_public_loopback": explicit_loopback,
+        "operations.backend_vpn_head_ends public_loopback": derived_loopback,
+    }.items():
+        if candidate and candidate != chosen:
+            raise ValueError(f"backend public loopback mismatch: selected {chosen!r} but {label} is {candidate!r}")
+    return chosen
+
+
+def _resolve_service_local_subnets(bundle: dict[str, Any], integration: dict[str, Any]) -> list[str]:
+    explicit = list(integration.get("service_local_subnets") or [])
+    if explicit:
+        return explicit
+
+    mode = str(integration.get("service_local_subnets_mode") or "customer_facing_public_ip_loopback").strip()
+    if mode == "customer_facing_public_ip_loopback":
+        return [_as_host_cidr(_resolve_selected_backend_public_loopback(bundle))]
+    raise ValueError(f"unsupported integration.service_local_subnets_mode: {mode}")
+
+
+def _device_loopback_ip(bundle: dict[str, Any], device: dict[str, Any]) -> str:
+    return str(device.get("customer_loopback_ip") or bundle["sot"]["identities"]["customer_loopback_ip"])
+
+
+def _customer_name_for_device(bundle: dict[str, Any], integration: dict[str, Any], device: dict[str, Any], index: int) -> str:
+    base_name = str(integration.get("customer_name") or f"{bundle['sot']['service_id']}-backend")
+    template = str(integration.get("customer_name_template") or "").strip()
+    context = {
+        "service_id": bundle["sot"]["service_id"],
+        "customer_id": bundle["sot"]["customer_id"],
+        "device_name": device["name"],
+        "router_role": device["router_role"],
+        "index": index,
+    }
+    if template:
+        return template.format(**context)
+    devices = list(bundle["sot"]["customer_devices"] or [])
+    if len(devices) == 1:
+        return base_name
+    return f"{base_name}-{_sanitize(str(device['router_role']))}"
+
+
+def _backend_psk_secret_ref_for_device(bundle: dict[str, Any], integration: dict[str, Any], device: dict[str, Any], index: int, customer_name: str) -> str:
+    template = str(integration.get("backend_psk_secret_ref_template") or "").strip()
+    context = {
+        "service_id": bundle["sot"]["service_id"],
+        "customer_id": bundle["sot"]["customer_id"],
+        "device_name": device["name"],
+        "router_role": device["router_role"],
+        "index": index,
+        "customer_name": customer_name,
+    }
+    if template:
+        return template.format(**context)
+    base_ref = str(integration.get("backend_psk_secret_ref") or "").strip()
+    if not base_ref:
+        raise ValueError("integration.backend_psk_secret_ref or backend_psk_secret_ref_template is required")
+    devices = list(bundle["sot"]["customer_devices"] or [])
+    if len(devices) == 1:
+        return base_ref
+    return f"{base_ref}-{_sanitize(str(device['router_role']))}"
+
+
+def build_backend_customer_request(
+    bundle: dict[str, Any],
+    integration: dict[str, Any],
+    *,
+    device: dict[str, Any] | None = None,
+    index: int = 1,
+) -> dict[str, Any]:
+    selected_device = device or list(bundle["sot"]["customer_devices"] or [])[0]
+    customer_name = _customer_name_for_device(bundle, integration, selected_device, index)
+    service_local_subnets = _resolve_service_local_subnets(bundle, integration)
+    psk_secret_ref = _backend_psk_secret_ref_for_device(bundle, integration, selected_device, index, customer_name)
+    customer_loopback_ip = _device_loopback_ip(bundle, selected_device)
+    customer_original_inside_space = list(bundle["sot"]["addressing"]["customer_original_inside_space"] or [])
+    platform_assigned_inside_space = list(bundle["sot"]["addressing"]["platform_assigned_inside_space"] or [])
+    translation_mode = str(bundle["sot"]["addressing"]["translation_mode"] or "disabled")
+
+    request: dict[str, Any] = {
+        "schema_version": 1,
+        "customer": {
+            "name": customer_name,
+            "peer": {
+                "public_ip": customer_loopback_ip,
+                "remote_id": customer_loopback_ip,
+                "psk_secret_ref": psk_secret_ref,
+            },
+            "selectors": {
+                "local_subnets": service_local_subnets,
+                "remote_subnets": customer_original_inside_space,
+            },
+            "ipsec": dict(integration.get("ipsec") or {}),
+        },
+    }
+
+    ipsec_initiation = integration.get("ipsec_initiation")
+    if isinstance(ipsec_initiation, dict) and ipsec_initiation:
+        request["customer"]["ipsec"]["initiation"] = ipsec_initiation
+
+    if translation_mode != "disabled":
+        request["customer"]["post_ipsec_nat"] = {
+            "enabled": True,
+            "mode": str((integration.get("post_ipsec_nat") or {}).get("mode") or "netmap"),
+            "mapping_strategy": str((integration.get("post_ipsec_nat") or {}).get("mapping_strategy") or "one_to_one"),
+            "real_subnets": customer_original_inside_space,
+            "translated_subnets": platform_assigned_inside_space,
+            "core_subnets": service_local_subnets,
+            "tcp_mss_clamp": int((integration.get("post_ipsec_nat") or {}).get("tcp_mss_clamp") or 1360),
+        }
+    else:
+        request["customer"]["post_ipsec_nat"] = {"enabled": False, "mode": "disabled"}
+
+    return request
+
+
+def build_backend_customer_requests(bundle: dict[str, Any], integration: dict[str, Any]) -> list[dict[str, Any]]:
+    requests = []
+    for index, device in enumerate(bundle["sot"]["customer_devices"], start=1):
+        customer_name = _customer_name_for_device(bundle, integration, device, index)
+        requests.append(
+            {
+                "device_name": device["name"],
+                "router_role": device["router_role"],
+                "customer_name": customer_name,
+                "request": build_backend_customer_request(bundle, integration, device=device, index=index),
+            }
+        )
+    return requests
+
+
+def build_backend_integration_summary(
+    *,
+    bundle: dict[str, Any],
+    integration: dict[str, Any],
+    request_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    service_local_subnets = _resolve_service_local_subnets(bundle, integration)
+    validation_ok = all(record.get("validation_ok") for record in request_records)
+    deploy_dry_run_ok = all(record.get("deploy_dry_run_ok") for record in request_records)
+    live_gate_allow = all(((record.get("deploy_plan") or {}).get("live_gate") or {}).get("allow_live_apply_now") for record in request_records)
+    backend_headend_family = next(
+        (
+            ((record.get("deploy_plan") or {}).get("selected_targets") or {}).get("headend_family")
+            or ((((record.get("deploy_plan") or {}).get("package") or {}).get("customer")) or {}).get("backend_cluster")
+            for record in request_records
+            if record.get("deploy_plan")
+        ),
+        None,
+    )
+    generated_request_paths = [record["request_path"] for record in request_records]
+    backend_customer_names = [record["customer_name"] for record in request_records]
+    customer_loopbacks = [record["customer_loopback_ip"] for record in request_records]
+    device_summaries = [
+        {
+            "device_name": record["device_name"],
+            "router_role": record["router_role"],
+            "customer_name": record["customer_name"],
+            "customer_loopback_ip": record["customer_loopback_ip"],
+            "request_path": record["request_path"],
+            "validation_ok": record["validation_ok"],
+            "deploy_dry_run_ok": record["deploy_dry_run_ok"],
+        }
+        for record in request_records
+    ]
+    return {
+        "integration_type": "scenario1_backend_reuse",
+        "service_id": bundle["sot"]["service_id"],
+        "customer_id": bundle["sot"]["customer_id"],
+        "environment": integration.get("environment"),
+        "generated_request_path": generated_request_paths[0] if generated_request_paths else None,
+        "generated_request_paths": generated_request_paths,
+        "validation_ok": validation_ok,
+        "deploy_dry_run_ok": deploy_dry_run_ok,
+        "deploy_status": "dry_run_ready" if deploy_dry_run_ok else "failed",
+        "backend_headend_family": backend_headend_family,
+        "backend_customer_name": backend_customer_names[0] if backend_customer_names else None,
+        "backend_customer_names": backend_customer_names,
+        "service_local_subnets": service_local_subnets,
+        "customer_loopback_backend_identity": customer_loopbacks[0] if customer_loopbacks else None,
+        "customer_loopback_backend_identities": customer_loopbacks,
+        "customer_facing_public_ip": _resolve_selected_backend_public_loopback(bundle),
+        "customer_router_count": len(request_records),
+        "device_summaries": device_summaries,
+        "notes": [
+            "Backend customer requests are generated per customer router and handed to the existing deploy_customer dry-run flow.",
+            "peer.public_ip and remote_id are intentionally mapped to each customer loopback identity for the CGNAT-carried inner tunnel.",
+            "No muxer/backend code changes are required for this reuse seam.",
+            "Backend local_subnets are derived from the selected customer-facing public loopback unless explicitly overridden.",
+        ],
+        "live_gate": {"allow_live_apply_now": live_gate_allow},
+    }
