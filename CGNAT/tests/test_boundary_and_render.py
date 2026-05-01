@@ -134,6 +134,8 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(runtime_inputs["customer_vpn_routers"][1]["outer_tunnel"]["xfrm_if_id"], 102)
         self.assertIn("auth = psk", router1_conf)
         self.assertIn("auth = psk", router2_conf)
+        self.assertIn("local_addrs = 10.250.1.10", router1_conf)
+        self.assertIn("local_addrs = 10.250.1.11", router2_conf)
         self.assertIn("auth = pubkey", router1_outer_conf)
         self.assertIn("auth = pubkey", router2_outer_conf)
         self.assertIn("authorities {", head_conf)

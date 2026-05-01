@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any
 
 
@@ -78,17 +79,14 @@ def _device_loopback_ip(bundle: dict[str, Any], device: dict[str, Any]) -> str:
 
 
 def _device_peer_public_ip(bundle: dict[str, Any], device: dict[str, Any], loopback_ip: str) -> str:
-    candidate = str(device.get("customer_private_ip_address") or "").strip()
+    explicit = str(device.get("backend_peer_ip") or "").strip()
+    if explicit:
+        return explicit
+
+    candidate = str(device.get("customer_loopback_ip") or "").strip()
     if candidate:
         return candidate
-    router_role = str(device.get("router_role") or "").strip()
-    for router in list(bundle["operations"].get("customer_vpn_routers") or []):
-        if str(router.get("role") or "").strip() != router_role:
-            continue
-        candidate = str(router.get("private_ip_address") or "").strip()
-        if candidate:
-            return candidate
-    return candidate or loopback_ip
+    return loopback_ip
 
 
 def _device_real_subnets(bundle: dict[str, Any], device: dict[str, Any]) -> list[str]:
@@ -323,9 +321,30 @@ def build_backend_integration_summary(
         "device_summaries": device_summaries,
         "notes": [
             "Backend customer requests are generated per customer router and handed to the existing deploy_customer dry-run flow.",
-            "peer.public_ip follows the customer router WAN address while peer.remote_id stays pinned to the customer loopback identity.",
+            "peer.public_ip and peer.remote_id both follow the customer loopback identity for the inner overlay tunnel.",
             "No muxer/backend code changes are required for this reuse seam.",
             "Backend local_subnets are derived from the selected customer-facing public loopback unless explicitly overridden.",
         ],
         "live_gate": {"allow_live_apply_now": live_gate_allow},
     }
+
+
+def rewrite_swanctl_connection_endpoints(
+    config_text: str,
+    *,
+    local_addrs: str,
+    remote_addrs: str,
+) -> str:
+    rewritten = re.sub(
+        r"^(\s*local_addrs\s*=\s*).*$",
+        rf"\g<1>{local_addrs}",
+        config_text,
+        flags=re.MULTILINE,
+    )
+    rewritten = re.sub(
+        r"^(\s*remote_addrs\s*=\s*).*$",
+        rf"\g<1>{remote_addrs}",
+        rewritten,
+        flags=re.MULTILINE,
+    )
+    return rewritten

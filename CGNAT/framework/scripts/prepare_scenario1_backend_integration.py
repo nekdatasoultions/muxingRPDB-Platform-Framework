@@ -69,6 +69,32 @@ def _render_readme(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _rewrite_generated_headend_ipsec_files(
+    deploy_dir: Path,
+    *,
+    local_addrs: str,
+    remote_addrs: str,
+) -> list[str]:
+    current_dir = Path(__file__).resolve().parent
+    src_root = current_dir.parent / "src"
+    if str(src_root) not in sys.path:
+        sys.path.insert(0, str(src_root))
+    from cgnat.backend_integration import rewrite_swanctl_connection_endpoints
+
+    rewritten_paths: list[str] = []
+    for path in deploy_dir.rglob("swanctl-connection.conf"):
+        original = path.read_text(encoding="utf-8")
+        updated = rewrite_swanctl_connection_endpoints(
+            original,
+            local_addrs=local_addrs,
+            remote_addrs=remote_addrs,
+        )
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            rewritten_paths.append(str(path))
+    return rewritten_paths
+
+
 def main() -> int:
     current_dir = Path(__file__).resolve().parent
     src_root = current_dir.parent / "src"
@@ -133,6 +159,14 @@ def main() -> int:
             if deploy_plan is not None:
                 dump_json(output_dir / "backend-deploy-plans" / f"{router_role}.json", deploy_plan)
 
+        rewritten_paths: list[str] = []
+        if validation_ok and deploy_dir.exists():
+            rewritten_paths = _rewrite_generated_headend_ipsec_files(
+                deploy_dir,
+                local_addrs=request["customer"]["ipsec"]["local_id"],
+                remote_addrs=request["customer"]["peer"]["public_ip"],
+            )
+
         request_records.append(
             {
                 "device_name": request_record["device_name"],
@@ -155,6 +189,7 @@ def main() -> int:
                     "stderr": deploy_stderr,
                     "status": "dry_run_executed" if validation_ok else "skipped_validation_failed",
                     "backend_deploy_dir": str(deploy_dir),
+                    "rewritten_headend_ipsec_paths": rewritten_paths,
                 },
             }
         )

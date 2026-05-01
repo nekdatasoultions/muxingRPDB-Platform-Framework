@@ -191,7 +191,7 @@ def _customer_router_runtime(package: dict[str, Any], router: dict[str, Any]) ->
         },
         "inner_vpn": {
             "implementation": "strongswan_swanctl_psk",
-            "local_addrs": [router["private_ip_address"]],
+            "local_addrs": [str(inner["customer_loopback_ip"])],
             "local_identity": str(inner["customer_loopback_ip"]),
             "local_ts": [str(inner["known_inside_identity"])],
             "remote_addrs": [str(inner["remote_public_ip"])],
