@@ -63,6 +63,14 @@ def _xfrm_interface_name(role: str) -> str:
     return f"cgxfrm-r{_role_index(role)}"
 
 
+def _service_interface_name(role: str) -> str:
+    return f"cglan-r{_role_index(role)}"
+
+
+def _selector_ip(selector: str) -> str:
+    return str(ipaddress.ip_interface(str(selector)).ip)
+
+
 def _service_public_selector(package: dict[str, Any]) -> str:
     termination_public_loopback = str(package["backend_expectations"]["termination_public_loopback"])
     return str(ipaddress.ip_network(f"{termination_public_loopback}/32", strict=False))
@@ -164,6 +172,8 @@ def _customer_router_runtime(package: dict[str, Any], router: dict[str, Any]) ->
         "customer_interface": router["customer_facing_interface"],
         "customer_private_ip_address": router["private_ip_address"],
         "customer_default_gateway_ip": router["default_gateway_ip"],
+        "service_ip_interface_name": _service_interface_name(role),
+        "service_ip_address": _selector_ip(str(inner["known_inside_identity"])),
         "certificate_material": {
             "outer_client": {
                 "certificate_ref": outer["client_certificate_ref"],
@@ -575,6 +585,8 @@ def _render_customer_router_xfrm_script(runtime: dict[str, Any]) -> str:
             "ip link del \"$CGNAT_OUTER_XFRM_INTERFACE\" 2>/dev/null || true",
             "ip link add \"$CGNAT_OUTER_XFRM_INTERFACE\" type xfrm dev \"$CGNAT_CUSTOMER_INTERFACE\" if_id \"$CGNAT_OUTER_XFRM_IF_ID\"",
             "ip link set \"$CGNAT_OUTER_XFRM_INTERFACE\" up",
+            "sysctl -w net.ipv4.ip_forward=1",
+            "sysctl -w \"net.ipv4.conf.${CGNAT_OUTER_XFRM_INTERFACE}.disable_policy=1\"",
             "ip route replace \"${CGNAT_CUSTOMER_FACING_PUBLIC_IP}/32\" dev \"$CGNAT_OUTER_XFRM_INTERFACE\"",
             "",
         ]
@@ -586,11 +598,17 @@ def _render_customer_router_loopback_script(runtime: dict[str, Any]) -> str:
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
-        f"ip addr replace \"{runtime['inner_vpn']['local_identity']}/32\" dev lo",
+        "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
+        f"source \"$SCRIPT_DIR/{runtime['role']}-runtime.env\"",
+        "",
+        "ip link show \"$CGNAT_CUSTOMER_SERVICE_INTERFACE\" >/dev/null 2>&1 || ip link add \"$CGNAT_CUSTOMER_SERVICE_INTERFACE\" type dummy",
+        "ip link set \"$CGNAT_CUSTOMER_SERVICE_INTERFACE\" up",
+        "ip addr replace \"${CGNAT_CUSTOMER_LOOPBACK_IP}/32\" dev lo",
     ]
     known_inside_identity = str(runtime["inner_vpn"]["local_ts"][0]).strip()
     if known_inside_identity and known_inside_identity != f"{runtime['inner_vpn']['local_identity']}/32":
-        lines.append(f"ip addr replace \"{known_inside_identity}\" dev lo")
+        lines.append("ip addr del \"$CGNAT_KNOWN_INSIDE_IDENTITY\" dev lo 2>/dev/null || true")
+        lines.append("ip addr replace \"$CGNAT_KNOWN_INSIDE_IDENTITY\" dev \"$CGNAT_CUSTOMER_SERVICE_INTERFACE\"")
     lines.append("")
     return "\n".join(lines)
 
@@ -658,6 +676,8 @@ def _render_customer_router_runtime_env(runtime: dict[str, Any]) -> str:
             f"CGNAT_CUSTOMER_INTERFACE=\"{runtime['customer_interface']}\"",
             f"CGNAT_CUSTOMER_PRIVATE_IP=\"{runtime['customer_private_ip_address']}\"",
             f"CGNAT_CUSTOMER_DEFAULT_GATEWAY_IP=\"{runtime['customer_default_gateway_ip']}\"",
+            f"CGNAT_CUSTOMER_SERVICE_INTERFACE=\"{runtime['service_ip_interface_name']}\"",
+            f"CGNAT_CUSTOMER_SERVICE_IP=\"{runtime['service_ip_address']}\"",
             f"CGNAT_OUTER_CONNECTION_NAME=\"{runtime['outer_connection_name']}\"",
             f"CGNAT_OUTER_CHILD_NAME=\"{runtime['outer_child_name']}\"",
             f"CGNAT_OUTER_LOCAL_IDENTITY=\"{outer_runtime['local_identity']}\"",
@@ -725,6 +745,7 @@ def _render_validation_commands(package: dict[str, Any]) -> str:
                 "```bash",
                 "sudo swanctl --list-sas",
                 "ip -d link show type xfrm",
+                "ip -d link show type dummy",
                 f"# customer loopback identity: {router['customer_loopback_ip']}",
                 f"# interesting traffic identity: {router['known_inside_identity']}",
                 f"# destination public IP: {package['validation_targets']['customer_facing_public_ip']}",
@@ -847,7 +868,8 @@ def main() -> int:
                 "- structured host-side artifacts generated from the server package",
                 "- strongSwan `swanctl.conf` fragments for the hosted head end and both customer routers",
                 "- xfrm-interface scripts for route-based outer transport",
-                "- CGNAT ISP head-end transit-only config, loopback scripts, and route scripts",
+                "- customer-router scripts that keep loopback tunnel identity separate from the service IP owner interface",
+                "- CGNAT ISP head-end transit-only config and route scripts",
                 "- runtime input manifests and per-role environment files for apply-time values",
                 "- validation guidance included",
                 "",

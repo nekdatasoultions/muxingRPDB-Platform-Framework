@@ -463,9 +463,11 @@ def _render_customer_router_rollback(role: str) -> str:
             "2. Remove the staged PSK secret fragment from `/etc/swanctl/conf.d/`.",
             "3. Remove the client cert, key, and CA from `/etc/swanctl/` if needed.",
             "4. Remove the xfrm interface and route to the customer-facing public IP.",
-            "5. Remove the demo loopback identity if it was demo-only.",
-            "6. Restore the pre-demo default route if needed.",
-            "7. Restart the strongSwan service to unload the Scenario 1 tunnels.",
+            "5. Remove the demo service-IP dummy interface if it was demo-only.",
+            "6. Restore the loopback/service IP ownership split to its pre-demo state if needed.",
+            "7. Restore the pre-demo default route if needed.",
+            "8. Restore xfrm interface sysctl overrides if they were demo-only.",
+            "9. Restart the strongSwan service to unload the Scenario 1 tunnels.",
             "",
         ]
     )
