@@ -54,6 +54,46 @@ environment YAML, not from DynamoDB host discovery.
 The first integration should add one hosted CGNAT head-end target and one
 customer transport family before attempting broader HA or topology expansion.
 
+### 5. Keep CGNAT in the Same Repo
+
+CGNAT should remain in the RPDB repo and should not be split into its own repo
+at this stage.
+
+Reasoning:
+
+- the current provisioning spine already lives in this repo
+- target selection already depends on shared environment YAML in this repo
+- backend, muxer, and head-end apply surfaces already live in this repo
+- splitting now would create schema drift, fixture drift, and versioning pain
+
+The intended lifecycle is:
+
+1. incubate design and transport-specific logic inside `CGNAT/`
+2. promote stable shared pieces into the shared provisioning/deploy path
+3. keep CGNAT-specific docs, scenario assets, and helper logic grouped under
+   `CGNAT/` where appropriate
+
+## Repo Placement Decision
+
+### Decision
+
+CGNAT becomes a first-class subsystem of the existing repo.
+
+It does not become:
+
+- a separate repo
+- a sidecar deployment product with a different lifecycle
+
+### Practical Meaning
+
+In practice this means:
+
+- shared request/model changes land in shared repo paths
+- shared deploy/apply changes land in shared repo paths
+- CGNAT-specific docs, scenario renderers, and experimental helpers may remain
+  under `CGNAT/` until stabilized
+- regression coverage must always include both shared and CGNAT-specific paths
+
 ## Scope
 
 ### In Scope
@@ -182,6 +222,10 @@ Exit criteria:
 - no regression in existing customer deployment flows
 - CGNAT path has dry-run and staged validation coverage
 
+This workstream is governed by:
+
+- `CGNAT/framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md`
+
 ## Implementation Phases
 
 ### Phase 0: Freeze the Baseline
@@ -283,6 +327,7 @@ Exit criteria:
 
 - regression suite green
 - no known high-severity gaps in the integrated flow
+- regression/release gates approved for the next deployment stage
 
 ## Recommended File-by-File Start Order
 
@@ -336,6 +381,12 @@ Every meaningful integration slice must rerun:
 - CGNAT integration tests
 - package validation checks
 
+Before any real deployment attempt, the release gates in:
+
+- `CGNAT/framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md`
+
+must be explicitly reviewed and passed.
+
 ## Risks
 
 ### Risk 1: Breaking Legacy Direct Customers
@@ -387,6 +438,14 @@ Mitigation:
 
 - full direct + CGNAT regression is green
 
+### Gate E: Real Deployment Gate
+
+- all regression/release gates are green
+- environment target YAML is approved
+- repo-only readiness package is approved
+- staged/simulated apply is approved
+- no unresolved high-severity blockers remain
+
 ## Definition of Done
 
 This project is done when:
@@ -409,3 +468,15 @@ The safest first code slice is:
 
 That gets us the new integration seam with the lowest risk to existing live
 customer deployment behavior.
+
+## Regression Discipline
+
+The regression discipline used during the first CGNAT rendition should remain
+the standard for this integration:
+
+1. stop on any meaningful failure
+2. fix the issue before moving to the next phase
+3. rerun the affected regression layer
+4. rerun the broader shared regression before advancing gates
+
+Progression to real deployment is gated, not assumed.
