@@ -509,6 +509,11 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
     }
     if request_transport_doc.get("tunnel_mtu") is not None:
         transport_doc["tunnel_mtu"] = int(request_transport_doc["tunnel_mtu"])
+    if request_transport_doc.get("mode") not in (None, ""):
+        transport_doc["mode"] = str(request_transport_doc["mode"])
+    cgnat_transport_doc = request_transport_doc.get("cgnat")
+    if isinstance(cgnat_transport_doc, dict) and cgnat_transport_doc:
+        transport_doc["cgnat"] = copy.deepcopy(cgnat_transport_doc)
 
     rendered_customer = {
         "id": int(allocation_plan["customer_id"]),

@@ -115,6 +115,33 @@
         }
       }
     },
+    "cgnat_transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service_profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outer_identity_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outer_auth_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "customer_loopback_ip": {
+          "$ref": "#/$defs/ipv4"
+        },
+        "known_inside_identity": {
+          "$ref": "#/$defs/host_cidr"
+        },
+        "service_reachable_subnets": {
+          "$ref": "#/$defs/ipv4_cidr_array"
+        }
+      }
+    },
     "peer": {
       "type": "object",
       "additionalProperties": false,
@@ -147,6 +174,17 @@
         "overlay"
       ],
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "direct_non_nat",
+            "direct_nat_t",
+            "cgnat"
+          ]
+        },
+        "cgnat": {
+          "$ref": "#/$defs/cgnat_transport"
+        },
         "mark": {
           "anyOf": [
             {
@@ -196,7 +234,43 @@
         "overlay": {
           "$ref": "#/$defs/overlay"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "cgnat"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "const": "cgnat"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "cgnat"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "cgnat"
+            ]
+          }
+        }
+      ]
     },
     "selectors": {
       "type": "object",

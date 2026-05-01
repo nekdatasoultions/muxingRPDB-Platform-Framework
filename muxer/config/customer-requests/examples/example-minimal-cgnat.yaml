@@ -1,0 +1,34 @@
+schema_version: 1
+
+customer:
+  name: example-minimal-cgnat
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.51
+    psk_secret_ref: /muxingrpdb/customers/example-minimal-cgnat/psk
+  selectors:
+    local_subnets:
+      - 23.20.31.151/32
+      - 194.138.36.86/32
+    remote_subnets:
+      - 10.20.30.10/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true
+  transport:
+    mode: cgnat
+    tunnel_mtu: 1436
+    cgnat:
+      service_profile: scenario1
+      outer_identity_ref: customer-router-1/example-minimal-cgnat
+      outer_auth_ref: pki/cgnat/customer-router-1
+      customer_loopback_ip: 10.250.1.10
+      known_inside_identity: 10.20.30.10/32
+      service_reachable_subnets:
+        - 23.20.31.151/32
+        - 194.138.36.86/32

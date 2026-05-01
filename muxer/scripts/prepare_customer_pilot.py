@@ -366,6 +366,7 @@ def _build_readiness_report(
         "customer": {
             "name": customer_name,
             "customer_class": customer_doc.get("customer_class"),
+            "transport_mode": transport_doc.get("mode") or "",
             "backend_cluster": backend_doc.get("cluster"),
             "backend_assignment": backend_doc.get("assignment"),
             "backend_role": backend_doc.get("role") or module.get("backend_role"),
@@ -374,6 +375,7 @@ def _build_readiness_report(
             "remote_subnets": selectors_doc.get("remote_subnets") or [],
             "remote_host_cidrs": selectors_doc.get("remote_host_cidrs") or [],
             "outside_nat_enabled": bool((customer_doc.get("outside_nat") or {}).get("enabled")),
+            "cgnat": transport_doc.get("cgnat") or {},
             "ipsec_initiation": ipsec_doc.get("initiation") or {},
         },
         "allocated_resources": {

@@ -72,6 +72,19 @@ targets:
           private_ip: 172.31.141.223
         access:
           method: ssh
+  cgnat:
+    headend:
+      active:
+        name: cgnat-head-end-rpdb-empty-a
+        role: cgnat-headend
+        rpdb_managed: true
+        selector:
+          type: instance_id
+          value: i-07bf5d2d5e74d8238
+          private_ip: 172.31.38.227
+          public_ip: 44.198.245.90
+        access:
+          method: ssh
 
 datastores:
   mode: dynamodb
@@ -88,6 +101,7 @@ backups:
   muxer: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/muxer
   nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend
   non_nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend
+  cgnat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-headend
 
 nat_t_watcher:
   log_source:

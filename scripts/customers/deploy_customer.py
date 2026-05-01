@@ -306,11 +306,15 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     dynamic_nat_t = readiness.get("dynamic_nat_t") or {}
     backend_cluster = str(customer.get("backend_cluster") or "").strip()
     customer_class = str(customer.get("customer_class") or "").strip()
+    transport_mode = str(customer.get("transport_mode") or "").strip().lower()
     use_nat = backend_cluster == "nat" or customer_class == "nat" or bool(dynamic_nat_t.get("used"))
     headend_key = "nat" if use_nat else "non_nat"
     targets = environment_doc.get("targets") or {}
     headends = targets.get("headends") or {}
+    cgnat_targets = targets.get("cgnat") or {}
     selected_pair = headends.get(headend_key) or {}
+    cgnat_required = transport_mode == "cgnat"
+    cgnat_headend_active = ((cgnat_targets.get("headend") or {}).get("active")) if cgnat_required else None
     return {
         "mode": "dry_run",
         "environment_access_method": ((environment_doc.get("environment") or {}).get("access") or {}).get("method"),
@@ -318,6 +322,9 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
         "headend_family": headend_key,
         "headend_active": selected_pair.get("active"),
         "headend_standby": selected_pair.get("standby"),
+        "transport_mode": transport_mode,
+        "cgnat_required": cgnat_required,
+        "cgnat_headend_active": cgnat_headend_active,
         "datastores": environment_doc.get("datastores"),
         "artifacts": environment_doc.get("artifacts"),
         "backups": environment_doc.get("backups"),
@@ -369,6 +376,8 @@ def _evaluate_dry_run_gate(
         "selected_headend": backups.get(selected_headend_backup_key),
         "selected_headend_key": selected_headend_backup_key,
     }
+    if bool((target_selection or {}).get("cgnat_required")):
+        backup_refs["cgnat_headend"] = backups.get("cgnat_headend")
     backup_status = {
         key: _reference_is_concrete(value)
         for key, value in backup_refs.items()
@@ -386,6 +395,11 @@ def _evaluate_dry_run_gate(
     for key, present in owner_status.items():
         if not present:
             errors.append(f"owner reference missing for {key}")
+
+    if bool((target_selection or {}).get("cgnat_required")):
+        cgnat_headend = (target_selection or {}).get("cgnat_headend_active") or {}
+        if not cgnat_headend:
+            errors.append("CGNAT transport requires targets.cgnat.headend.active in the deployment environment")
 
     environment_live_apply = (((environment_doc or {}).get("environment") or {}).get("live_apply") or {})
     environment_access_method = str(
@@ -477,6 +491,7 @@ def _build_execution_plan(
             "headend_family": (target_selection or {}).get("headend_family"),
             "headend_active": ((target_selection or {}).get("headend_active") or {}).get("name"),
             "headend_standby": ((target_selection or {}).get("headend_standby") or {}).get("name"),
+            "cgnat_headend_active": ((target_selection or {}).get("cgnat_headend_active") or {}).get("name"),
             "customer_sot_table": (((target_selection or {}).get("datastores") or {}).get("customer_sot_table")),
             "allocation_table": (((target_selection or {}).get("datastores") or {}).get("allocation_table")),
             "artifact_bucket": (((target_selection or {}).get("artifacts") or {}).get("bucket")),

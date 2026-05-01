@@ -135,6 +135,24 @@
               "$ref": "#/$defs/headend_pair"
             }
           }
+        },
+        "cgnat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "headend": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "active"
+              ],
+              "properties": {
+                "active": {
+                  "$ref": "#/$defs/target"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -208,6 +226,9 @@
           "$ref": "#/$defs/non_empty_string"
         },
         "non_nat_headend": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "cgnat_headend": {
           "$ref": "#/$defs/non_empty_string"
         }
       }
@@ -374,7 +395,8 @@
           "enum": [
             "muxer",
             "nat-headend",
-            "non-nat-headend"
+            "non-nat-headend",
+            "cgnat-headend"
           ]
         },
         "rpdb_managed": {

@@ -20,6 +20,16 @@ class Overlay:
 
 
 @dataclass(frozen=True)
+class CgnatTransport:
+    service_profile: str = ""
+    outer_identity_ref: str = ""
+    outer_auth_ref: str = ""
+    customer_loopback_ip: str = ""
+    known_inside_identity: str = ""
+    service_reachable_subnets: Optional[List[str]] = None
+
+
+@dataclass(frozen=True)
 class Peer:
     public_ip: str
     psk_secret_ref: str
@@ -33,6 +43,8 @@ class Transport:
     tunnel_key: int
     interface: str
     overlay: Overlay
+    mode: str = ""
+    cgnat: Optional[CgnatTransport] = None
     tunnel_type: str = "gre"
     tunnel_ttl: int = 64
     tunnel_mtu: Optional[int] = None
@@ -240,6 +252,28 @@ def _as_optional_ipv4_list(value: Any, path: str) -> Optional[List[str]]:
     return normalized or None
 
 
+def _validated_ipv4(value: Any, path: str) -> str:
+    raw = str(_require(value, path)).strip()
+    try:
+        return str(ipaddress.ip_address(raw))
+    except ValueError as exc:
+        raise ValueError(f"{path} must be a valid IPv4 address") from exc
+
+
+def _validated_optional_cidr_list(value: Any, path: str) -> Optional[List[str]]:
+    items = _as_optional_list(value)
+    if not items:
+        return None
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(items):
+        candidate = _validated_cidr(item, f"{path}[{idx}]")
+        if candidate not in seen:
+            normalized.append(candidate)
+            seen.add(candidate)
+    return normalized or None
+
+
 # YAML will happily parse an unquoted hex mark like `0x41001` as an integer.
 # We normalize it back into a hex string so the rest of the control plane sees
 # a consistent representation.
@@ -293,6 +327,42 @@ def _normalized_swanctl_start_action(value: Any) -> str:
     if normalized not in allowed:
         raise ValueError(f"unsupported swanctl_start_action {value!r}")
     return normalized
+
+
+def _normalized_transport_mode(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    normalized = str(value).strip().lower().replace("-", "_")
+    allowed = {"direct_non_nat", "direct_nat_t", "cgnat"}
+    if normalized not in allowed:
+        raise ValueError(f"unsupported customer.transport.mode {value!r}")
+    return normalized
+
+
+def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
+    return CgnatTransport(
+        service_profile=str(doc.get("service_profile") or ""),
+        outer_identity_ref=str(doc.get("outer_identity_ref") or ""),
+        outer_auth_ref=str(doc.get("outer_auth_ref") or ""),
+        customer_loopback_ip=(
+            _validated_ipv4(doc.get("customer_loopback_ip"), "customer.transport.cgnat.customer_loopback_ip")
+            if doc.get("customer_loopback_ip") not in (None, "")
+            else ""
+        ),
+        known_inside_identity=(
+            _validated_cidr(
+                doc.get("known_inside_identity"),
+                "customer.transport.cgnat.known_inside_identity",
+                prefixlen=32,
+            )
+            if doc.get("known_inside_identity") not in (None, "")
+            else ""
+        ),
+        service_reachable_subnets=_validated_optional_cidr_list(
+            doc.get("service_reachable_subnets"),
+            "customer.transport.cgnat.service_reachable_subnets",
+        ),
+    )
 
 
 def _normalize_ipsec_initiation(value: Any) -> Optional[IpsecInitiation]:
@@ -630,6 +700,12 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     customer = raw.get("customer") or {}
     peer = customer.get("peer") or {}
     transport = customer.get("transport") or {}
+    transport_mode = _normalized_transport_mode(transport.get("mode"))
+    transport_cgnat_doc = transport.get("cgnat") or {}
+    if isinstance(transport_cgnat_doc, dict) and transport_cgnat_doc and not transport_mode:
+        transport_mode = "cgnat"
+    if transport_mode and transport_mode != "cgnat" and transport_cgnat_doc:
+        raise ValueError("customer.transport.cgnat requires customer.transport.mode=cgnat")
     overlay = transport.get("overlay") or {}
     selectors = customer.get("selectors") or {}
     backend = customer.get("backend") or {}
@@ -667,6 +743,12 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                 table=int(_require(transport.get("table"), "customer.transport.table")),
                 tunnel_key=int(_require(transport.get("tunnel_key"), "customer.transport.tunnel_key")),
                 interface=str(_require(transport.get("interface"), "customer.transport.interface")),
+                mode=transport_mode,
+                cgnat=(
+                    _normalize_cgnat_transport(transport_cgnat_doc)
+                    if isinstance(transport_cgnat_doc, dict) and transport_cgnat_doc
+                    else None
+                ),
                 tunnel_type=str(transport.get("tunnel_type") or "gre"),
                 tunnel_ttl=int(transport.get("tunnel_ttl") or 64),
                 tunnel_mtu=_validated_optional_mtu(

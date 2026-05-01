@@ -68,6 +68,7 @@ def _walk_strings(value: Any) -> Iterable[str]:
 def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
     targets = document.get("targets") or {}
     headends = targets.get("headends") or {}
+    cgnat = targets.get("cgnat") or {}
     docs = []
     muxer = targets.get("muxer")
     if isinstance(muxer, dict):
@@ -78,6 +79,9 @@ def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
             node = pair.get(node_name)
             if isinstance(node, dict):
                 docs.append(node)
+    cgnat_headend = (cgnat.get("headend") or {}).get("active")
+    if isinstance(cgnat_headend, dict):
+        docs.append(cgnat_headend)
     return docs
 
 
@@ -172,12 +176,14 @@ def _validate_guardrails(report: dict[str, Any], document: dict[str, Any], *, al
 def _target_summary(document: dict[str, Any]) -> dict[str, Any]:
     targets = document.get("targets") or {}
     headends = targets.get("headends") or {}
+    cgnat = targets.get("cgnat") or {}
     return {
         "muxer": (targets.get("muxer") or {}).get("name"),
         "nat_active": (((headends.get("nat") or {}).get("active") or {}).get("name")),
         "nat_standby": (((headends.get("nat") or {}).get("standby") or {}).get("name")),
         "non_nat_active": (((headends.get("non_nat") or {}).get("active") or {}).get("name")),
         "non_nat_standby": (((headends.get("non_nat") or {}).get("standby") or {}).get("name")),
+        "cgnat_headend_active": ((((cgnat.get("headend") or {}).get("active") or {}).get("name"))),
     }
 
 
