@@ -31,6 +31,7 @@ def main() -> int:
     live_bundle = CGNAT_ROOT / "framework" / "config" / "deployment-bundle.rpdb-empty-live.json"
     backend_integration = CGNAT_ROOT / "framework" / "config" / "scenario1-backend-integration.rpdb-empty-live.json"
     host_access_strategy = CGNAT_ROOT / "server" / "config" / "host-access-strategy.rpdb-empty-live.json"
+    request_examples = REPO_ROOT / "muxer" / "config" / "customer-requests" / "examples"
 
     sample_prep = regression_root / "sample-prep"
     live_materials = regression_root / "live-demo-materials"
@@ -38,9 +39,37 @@ def main() -> int:
     live_predeploy = regression_root / "live-predeploy-review"
     live_backend = regression_root / "live-backend-integration"
     deployment_stage = regression_root / "deployment-stage-review"
+    shared_nonnat = regression_root / "shared-nonnat-package"
+    shared_nat = regression_root / "shared-nat-package"
+    cgnat_review = regression_root / "cgnat-customer-review"
 
     _run(str(CGNAT_ROOT / "tests" / "run_tests.py"))
     _run("-m", "compileall", str(CGNAT_ROOT))
+    _run("-m", "compileall", str(REPO_ROOT / "muxer" / "src"), str(REPO_ROOT / "muxer" / "scripts"), str(REPO_ROOT / "scripts" / "customers"))
+
+    _run(
+        str(REPO_ROOT / "muxer" / "scripts" / "provision_customer_end_to_end.py"),
+        str(request_examples / "example-minimal-nonnat.yaml"),
+        "--out-dir",
+        str(shared_nonnat),
+        "--json",
+    )
+    _run(
+        str(REPO_ROOT / "muxer" / "scripts" / "provision_customer_end_to_end.py"),
+        str(request_examples / "example-minimal-nat.yaml"),
+        "--out-dir",
+        str(shared_nat),
+        "--json",
+    )
+    _run(
+        str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
+        str(request_examples / "example-minimal-cgnat.yaml"),
+        "--environment",
+        "rpdb-empty-live",
+        "--out-dir",
+        str(cgnat_review),
+        "--json",
+    )
 
     _run(
         str(CGNAT_ROOT / "framework" / "scripts" / "prepare_scenario1.py"),
@@ -100,9 +129,15 @@ def main() -> int:
     predeploy_summary = _load_json(live_predeploy / "predeploy-review-summary.json")
     backend_summary = _load_json(live_backend / "backend-integration-summary.json")
     deployment_summary = _load_json(deployment_stage / "deployment-stage-review-summary.json")
+    shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
+    shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
+    cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
+        "shared_nonnat_ready_for_review": bool(shared_nonnat_summary.get("ready_for_review")),
+        "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
+        "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
         "sample_validation_ok": bool(sample_summary.get("validation_ok")),
         "live_validation_ok": bool(live_summary.get("validation_ok")),
         "aws_live_create_allowed": bool(live_summary.get("aws_live_create_allowed")),
@@ -112,6 +147,9 @@ def main() -> int:
         "backend_deploy_dry_run_ok": bool(backend_summary.get("deploy_dry_run_ok")),
         "deployment_stage_ready": bool(deployment_summary.get("ready_for_deployment_stage_review")),
         "artifacts": {
+            "shared_nonnat_package": str(shared_nonnat),
+            "shared_nat_package": str(shared_nat),
+            "cgnat_customer_review": str(cgnat_review),
             "sample_prep": str(sample_prep),
             "live_prep": str(live_prep),
             "live_predeploy_review": str(live_predeploy),
