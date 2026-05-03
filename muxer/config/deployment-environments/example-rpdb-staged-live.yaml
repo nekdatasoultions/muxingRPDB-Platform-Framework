@@ -66,6 +66,18 @@ targets:
           private_ip: 172.31.141.223
         access:
           method: staged
+  cgnat:
+    headend:
+      active:
+        name: rpdb-staged-cgnat-headend-active-a
+        role: cgnat-headend
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/cgnat-headend-root
+          private_ip: 172.31.38.227
+        access:
+          method: staged
 
 datastores:
   mode: staged
@@ -84,6 +96,7 @@ backups:
   muxer: build/staged-live/backups/baseline/muxer
   nat_headend: build/staged-live/backups/baseline/nat-headend
   non_nat_headend: build/staged-live/backups/baseline/non-nat-headend
+  cgnat_headend: build/staged-live/backups/baseline/cgnat-headend
 
 nat_t_watcher:
   log_source:

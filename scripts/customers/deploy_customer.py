@@ -683,15 +683,16 @@ def main() -> int:
     if apply_result is not None:
         apply_status = str(apply_result.get("status") or "blocked")
         apply_succeeded = apply_status == "applied"
-        execution_plan["phase"] = "phase6_approved_live_apply_adapter"
+        execution_plan["phase"] = "phase4_approved_live_apply_adapter"
         execution_plan["status"] = "applied" if apply_succeeded else apply_status
         execution_plan["dry_run"] = False
         execution_plan["approved"] = True
         execution_plan["live_apply"] = apply_succeeded
         execution_plan["errors"] = errors
-        execution_plan["execution_order"] = [
+        execution_order = [
             *execution_plan["execution_order"],
             "publish_customer_artifacts",
+            "verify_backup_gate",
             "apply_backend_customer",
             "validate_backend_customer",
             "apply_muxer_customer",
@@ -700,9 +701,16 @@ def main() -> int:
             "validate_headend_customer_active",
             "apply_headend_customer_standby",
             "validate_headend_customer_standby",
-            "write_apply_journal",
-            "write_rollback_plan",
         ]
+        if bool((target_selection or {}).get("cgnat_required")):
+            execution_order.extend(
+                [
+                    "apply_cgnat_headend_customer",
+                    "validate_cgnat_headend_customer",
+                ]
+            )
+        execution_order.extend(["write_apply_journal", "write_rollback_plan"])
+        execution_plan["execution_order"] = execution_order
         execution_plan["live_gate"] = {
             "status": "applied" if apply_succeeded else apply_status,
             "approve_supported": True,

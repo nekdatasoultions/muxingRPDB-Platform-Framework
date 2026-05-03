@@ -332,6 +332,8 @@ def execute_staged_live_apply(
     muxer_root = staged_target_root(target_selection.get("muxer") or {})
     headend_active_root = staged_target_root(target_selection.get("headend_active") or {})
     headend_standby_root = staged_target_root(target_selection.get("headend_standby") or {})
+    cgnat_target = target_selection.get("cgnat_headend_active") or {}
+    cgnat_root = staged_target_root(cgnat_target) if cgnat_target else None
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_run_root = staged_artifact_root / customer_name / run_id
@@ -344,6 +346,11 @@ def execute_staged_live_apply(
     rollback_steps: list[dict[str, Any]] = []
 
     try:
+        backup_gate = _verify_backup_gate(
+            journal,
+            target_selection=target_selection,
+            require_exists_for_local=True,
+        )
         artifact_run_root.mkdir(parents=True, exist_ok=True)
         _copy_tree(package_dir, artifact_package_root)
         shutil.copy2(execution_plan_path, artifact_execution_plan)
@@ -359,6 +366,16 @@ def execute_staged_live_apply(
             customer_name=customer_name,
             bundle_dir=bundle_dir,
             apply_dir=apply_dir,
+        )
+        cgnat_prepared = (
+            _prepare_cgnat_headend_root(
+                journal,
+                customer_name=customer_name,
+                package_dir=package_dir,
+                apply_dir=apply_dir,
+            )
+            if cgnat_root is not None
+            else None
         )
 
         muxer_prepared_root = Path(muxer_prepared["root"]).resolve()
@@ -434,6 +451,33 @@ def execute_staged_live_apply(
             apply_script=Path(headend_prepared["apply"]["master_apply_script"]).resolve(),
             remove_script=Path(headend_prepared["apply"]["master_remove_script"]).resolve(),
         )
+        cgnat_activation = None
+        if cgnat_prepared is not None and cgnat_root is not None:
+            cgnat_prepared_root = Path(cgnat_prepared["root"]).resolve()
+            cgnat_customer_root = Path(cgnat_prepared["apply"]["state_json"]).resolve().parent
+            cgnat_config_json = Path(cgnat_prepared["apply"]["config_json"]).resolve()
+            cgnat_activation = _build_activation_bundle(
+                journal,
+                customer_name=customer_name,
+                component_name="cgnat-headend",
+                target_name=str(cgnat_target.get("name") or "cgnat-headend"),
+                apply_dir=apply_dir,
+                prepared_root=cgnat_prepared_root,
+                target_root=cgnat_root,
+                relative_paths=[
+                    cgnat_customer_root.relative_to(cgnat_prepared_root),
+                    cgnat_config_json.relative_to(cgnat_prepared_root),
+                ],
+                validate_paths=[
+                    Path(cgnat_prepared["apply"]["state_json"]).resolve().relative_to(cgnat_prepared_root),
+                    cgnat_config_json.relative_to(cgnat_prepared_root),
+                    Path(cgnat_prepared["apply"]["master_apply_script"]).resolve().relative_to(cgnat_prepared_root),
+                ],
+                cleanup_paths=[cgnat_customer_root.relative_to(cgnat_prepared_root)],
+                cleanup_files=[cgnat_config_json.relative_to(cgnat_prepared_root)],
+                apply_script=Path(cgnat_prepared["apply"]["master_apply_script"]).resolve(),
+                remove_script=Path(cgnat_prepared["apply"]["master_remove_script"]).resolve(),
+            )
 
         backend_apply = _execute_json(
             journal,
@@ -602,11 +646,54 @@ def execute_staged_live_apply(
                 "--json",
             ],
         )
+        cgnat_apply = None
+        cgnat_validation = None
+        if cgnat_activation is not None and cgnat_root is not None:
+            cgnat_apply = _execute_json(
+                journal,
+                action="apply_cgnat_headend_activation_bundle",
+                target=str(cgnat_target.get("name") or "cgnat-headend"),
+                command=[
+                    sys.executable,
+                    "scripts/customers/node_activation_runner.py",
+                    "--request",
+                    str(cgnat_activation["request_path_obj"]),
+                    "--json",
+                ],
+            )
+            rollback_steps.append(
+                {
+                    "action": "rollback_cgnat_headend_activation_bundle",
+                    "target": str(cgnat_target.get("name") or "cgnat-headend"),
+                    "command": [
+                        sys.executable,
+                        "scripts/customers/node_activation_runner.py",
+                        "--rollback-request",
+                        str(cgnat_activation["rollback_request_path_obj"]),
+                        "--json",
+                    ],
+                }
+            )
+            cgnat_validation = _execute_json(
+                journal,
+                action="validate_cgnat_headend_customer",
+                target=str(cgnat_target.get("name") or "cgnat-headend"),
+                command=[
+                    sys.executable,
+                    "scripts/deployment/validate_cgnat_headend_customer.py",
+                    "--package-dir",
+                    str(package_dir),
+                    "--cgnat-root",
+                    str(cgnat_root),
+                    "--json",
+                ],
+            )
 
         rollback_plan = {
             "schema_version": 1,
             "customer_name": customer_name,
             "generated_at": utc_now(),
+            "backup_gate": backup_gate,
             "steps": rollback_steps,
         }
         journal_payload = {
@@ -632,6 +719,7 @@ def execute_staged_live_apply(
                 "muxer": repo_relative(muxer_root),
                 "headend_active": repo_relative(headend_active_root),
                 "headend_standby": repo_relative(headend_standby_root),
+                "cgnat_headend": repo_relative(cgnat_root) if cgnat_root is not None else None,
             },
             "activation_bundles": {
                 "muxer": {
@@ -664,23 +752,37 @@ def execute_staged_live_apply(
                     "rollback_journal": repo_relative(standby_activation["bundle_root_path"] / "rollback-journal.json"),
                     "rollback_result": repo_relative(standby_activation["bundle_root_path"] / "rollback-result.json"),
                 },
+                "cgnat_headend": {
+                    "bundle_root": cgnat_activation["bundle_root"],
+                    "request_path": cgnat_activation["request_path"],
+                    "rollback_request_path": cgnat_activation["rollback_request_path"],
+                    "payload_root": cgnat_activation["payload_root"],
+                    "activation_journal": repo_relative(cgnat_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(cgnat_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(cgnat_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(cgnat_activation["bundle_root_path"] / "rollback-result.json"),
+                } if cgnat_activation is not None else None,
             },
             "published_artifacts": {
                 "run_root": repo_relative(artifact_run_root),
                 "package_root": repo_relative(artifact_package_root),
                 "execution_plan": repo_relative(artifact_execution_plan),
             },
+            "backup_gate": backup_gate,
             "validation": {
                 "backend": backend_validation,
                 "muxer": muxer_validation,
                 "headend_active": active_validation,
                 "headend_standby": standby_validation,
+                "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
+                "cgnat_headend": cgnat_validation,
             },
             "applies": {
                 "backend": backend_apply,
                 "muxer": muxer_apply,
                 "headend_active": active_apply,
                 "headend_standby": standby_apply,
+                "cgnat_headend": cgnat_apply,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
             "apply_journal": repo_relative(apply_dir / "apply-journal.json"),
@@ -940,6 +1042,49 @@ def _prepare_headend_root(
     return {"root": headend_root, "apply": apply_report, "validate": validate_report}
 
 
+def _prepare_cgnat_headend_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    package_dir: Path,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    cgnat_root = apply_dir / "pc"
+    if cgnat_root.exists():
+        shutil.rmtree(cgnat_root)
+    cgnat_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_cgnat_headend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_cgnat_headend_customer.py",
+            "--package-dir",
+            str(package_dir),
+            "--cgnat-root",
+            str(cgnat_root),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_cgnat_headend_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_cgnat_headend_customer.py",
+            "--package-dir",
+            str(package_dir),
+            "--cgnat-root",
+            str(cgnat_root),
+            "--json",
+        ],
+    )
+    return {"root": cgnat_root, "apply": apply_report, "validate": validate_report}
+
+
 def _copy_relative_paths(source_root: Path, destination_root: Path, relative_paths: list[Path]) -> None:
     for relative_path in relative_paths:
         source_path = (source_root / relative_path).resolve()
@@ -1042,6 +1187,71 @@ def _build_activation_bundle(
         "bundle_root_path": bundle_root,
         "request_path_obj": request_path,
         "rollback_request_path_obj": rollback_request_path,
+    }
+
+
+def _verify_backup_reference(
+    journal: list[dict[str, Any]],
+    *,
+    label: str,
+    value: str,
+    require_exists_for_local: bool,
+) -> dict[str, Any]:
+    is_s3 = value.startswith("s3://")
+    local_exists = None
+    if not is_s3 and require_exists_for_local:
+        local_exists = Path(value).resolve().exists()
+        if not local_exists:
+            raise RuntimeError(f"required backup path for {label} does not exist: {value}")
+    payload = {
+        "label": label,
+        "reference": value,
+        "is_s3": is_s3,
+        "local_exists": local_exists,
+        "verified": True,
+    }
+    _record_structured(
+        journal,
+        action="verify_backup_reference",
+        target=label,
+        payload=payload,
+    )
+    return payload
+
+
+def _verify_backup_gate(
+    journal: list[dict[str, Any]],
+    *,
+    target_selection: dict[str, Any],
+    require_exists_for_local: bool,
+) -> dict[str, Any]:
+    backups = dict(target_selection.get("backups") or {})
+    selected_family = str(target_selection.get("headend_family") or "").strip()
+    selected_headend_backup_key = "nat_headend" if selected_family == "nat" else "non_nat_headend"
+    refs = {
+        "muxer": str(backups.get("muxer") or "").strip(),
+        "backend_headend": str(backups.get(selected_headend_backup_key) or "").strip(),
+    }
+    if bool(target_selection.get("cgnat_required")):
+        refs["cgnat_headend"] = str(backups.get("cgnat_headend") or "").strip()
+
+    if any(not ref for ref in refs.values()):
+        missing = [label for label, ref in refs.items() if not ref]
+        raise RuntimeError("missing backup references for: " + ", ".join(missing))
+
+    verification = {
+        label: _verify_backup_reference(
+            journal,
+            label=label,
+            value=ref,
+            require_exists_for_local=require_exists_for_local,
+        )
+        for label, ref in refs.items()
+    }
+    return {
+        "selected_headend_backup_key": selected_headend_backup_key,
+        "references": refs,
+        "verification": verification,
     }
 
 
@@ -1338,6 +1548,11 @@ def execute_ssh_live_apply(
         region = str(((environment_doc.get("environment") or {}).get("aws") or {}).get("region") or "").strip()
         if not region:
             raise RuntimeError("environment.aws.region is required for live apply")
+        backup_gate = _verify_backup_gate(
+            journal,
+            target_selection=target_selection,
+            require_exists_for_local=False,
+        )
 
         backend_prepared = _prepare_backend_root(
             journal,
@@ -1360,6 +1575,16 @@ def execute_ssh_live_apply(
             customer_name=customer_name,
             bundle_dir=bundle_dir,
             apply_dir=apply_dir,
+        )
+        cgnat_prepared = (
+            _prepare_cgnat_headend_root(
+                journal,
+                customer_name=customer_name,
+                package_dir=package_dir,
+                apply_dir=apply_dir,
+            )
+            if target_selection.get("cgnat_headend_active")
+            else None
         )
         headend_secret = _inject_live_headend_secret(
             journal,
@@ -1445,20 +1670,30 @@ def execute_ssh_live_apply(
 
         headend_active = target_selection.get("headend_active") or {}
         headend_standby = target_selection.get("headend_standby") or {}
+        cgnat_headend = target_selection.get("cgnat_headend_active") or {}
         active_instance_id = str(((headend_active.get("selector") or {}).get("value")) or "").strip()
         standby_instance_id = str(((headend_standby.get("selector") or {}).get("value")) or "").strip()
         if not active_instance_id or not standby_instance_id:
             raise RuntimeError("selected head-end targets are missing instance_id selectors")
+        cgnat_instance_id = str(((cgnat_headend.get("selector") or {}).get("value")) or "").strip()
+        if cgnat_prepared is not None and not cgnat_instance_id:
+            raise RuntimeError("selected CGNAT head-end target is missing an instance_id selector")
 
         context = build_ssh_access_context(
             region=region,
             ssh_user=ssh_user,
             bastion_instance_id=muxer_instance_id,
-            target_instance_ids=[muxer_instance_id, active_instance_id, standby_instance_id],
+            target_instance_ids=[
+                muxer_instance_id,
+                active_instance_id,
+                standby_instance_id,
+                *([cgnat_instance_id] if cgnat_instance_id else []),
+            ],
         )
 
         muxer_root = Path(muxer_prepared["root"]).resolve()
         headend_root = Path(headend_prepared["root"]).resolve()
+        cgnat_root = Path(cgnat_prepared["root"]).resolve() if cgnat_prepared is not None else None
 
         muxer_runtime_remote = _sync_muxer_runtime(
             journal,
@@ -1553,10 +1788,41 @@ def execute_ssh_live_apply(
         if not rollback_preexisting_remote_customer:
             rollback_steps.append(standby_remote["rollback"])
 
+        cgnat_remote = None
+        if cgnat_prepared is not None and cgnat_root is not None and cgnat_instance_id:
+            cgnat_customer_root = Path(cgnat_prepared["apply"]["state_json"]).resolve().parent
+            cgnat_config_json = Path(cgnat_prepared["apply"]["config_json"]).resolve()
+            cgnat_remote = _apply_remote_component(
+                journal,
+                context=context,
+                component_name="cgnat-headend",
+                target_name=str(cgnat_headend.get("name") or "cgnat-headend"),
+                target_instance_id=cgnat_instance_id,
+                via_bastion=False,
+                prepared_root=cgnat_root,
+                relative_paths=[
+                    cgnat_customer_root.relative_to(cgnat_root),
+                    cgnat_config_json.relative_to(cgnat_root),
+                ],
+                remote_apply_script=_remote_path(cgnat_root, cgnat_prepared["apply"]["master_apply_script"]),
+                remote_remove_script=_remote_path(cgnat_root, cgnat_prepared["apply"]["master_remove_script"]),
+                remote_checks=[
+                    _remote_path(cgnat_root, cgnat_prepared["apply"]["state_json"]),
+                    _remote_path(cgnat_root, cgnat_prepared["apply"]["config_json"]),
+                    _remote_path(cgnat_root, cgnat_prepared["apply"]["master_apply_script"]),
+                ],
+                remote_cleanup_paths=[_remote_path(cgnat_root, cgnat_customer_root)],
+                remote_cleanup_files=[_remote_path(cgnat_root, cgnat_config_json)],
+                remote_name=f"{customer_name}-cgnat-headend",
+            )
+            if not rollback_preexisting_remote_customer:
+                rollback_steps.append(cgnat_remote["rollback"])
+
         rollback_plan = {
             "schema_version": 1,
             "customer_name": customer_name,
             "generated_at": utc_now(),
+            "backup_gate": backup_gate,
             "steps": rollback_steps,
         }
         journal_payload = {
@@ -1575,18 +1841,22 @@ def execute_ssh_live_apply(
                 "prepared_backend": repo_relative(Path(backend_prepared["root"])),
                 "prepared_muxer": repo_relative(Path(muxer_prepared["root"])),
                 "prepared_headend": repo_relative(Path(headend_prepared["root"])),
+                "prepared_cgnat_headend": repo_relative(Path(cgnat_prepared["root"])) if cgnat_prepared is not None else None,
             },
             "published_artifacts": published_artifacts,
+            "backup_gate": backup_gate,
             "validation": {
                 "backend": backend_validation,
                 "prepared_backend": backend_prepared["validate"],
                 "prepared_muxer": muxer_prepared["validate"],
                 "muxer_runtime": muxer_runtime_remote["validate"],
                 "prepared_headend": headend_prepared["validate"],
+                "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
                 "headend_secret": headend_secret,
                 "muxer": muxer_remote["validate"],
                 "headend_active": active_remote["validate"],
                 "headend_standby": standby_remote["validate"],
+                "cgnat_headend": cgnat_remote["validate"] if cgnat_remote is not None else None,
             },
             "applies": {
                 "backend": backend_apply,
@@ -1594,6 +1864,7 @@ def execute_ssh_live_apply(
                 "muxer": muxer_remote["apply"],
                 "headend_active": active_remote["apply"],
                 "headend_standby": standby_remote["apply"],
+                "cgnat_headend": cgnat_remote["apply"] if cgnat_remote is not None else None,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
             "apply_journal": repo_relative(apply_dir / "apply-journal.json"),

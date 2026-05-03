@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 
 CGNAT_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = CGNAT_ROOT.parent
@@ -14,6 +16,15 @@ PYTHON = sys.executable
 
 def _run(*command: str) -> None:
     subprocess.run([PYTHON, *command], cwd=str(REPO_ROOT), check=True)
+
+
+def _compile(*paths: Path) -> None:
+    script = (
+        "import compileall, sys; "
+        "ok = all(compileall.compile_dir(path, quiet=1) for path in sys.argv[1:]); "
+        "raise SystemExit(0 if ok else 1)"
+    )
+    subprocess.run([PYTHON, "-c", script, *[str(path) for path in paths]], cwd=str(REPO_ROOT), check=True)
 
 
 def _load_json(path: Path) -> dict:
@@ -42,10 +53,13 @@ def main() -> int:
     shared_nonnat = regression_root / "shared-nonnat-package"
     shared_nat = regression_root / "shared-nat-package"
     cgnat_review = regression_root / "cgnat-customer-review"
+    cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
+    cgnat_staged_request = regression_root / "example-minimal-cgnat-staged-apply.yaml"
+    staged_env_path = regression_root / "example-rpdb-staged-live.yaml"
 
     _run(str(CGNAT_ROOT / "tests" / "run_tests.py"))
-    _run("-m", "compileall", str(CGNAT_ROOT))
-    _run("-m", "compileall", str(REPO_ROOT / "muxer" / "src"), str(REPO_ROOT / "muxer" / "scripts"), str(REPO_ROOT / "scripts" / "customers"))
+    _compile(CGNAT_ROOT)
+    _compile(REPO_ROOT / "muxer" / "src", REPO_ROOT / "muxer" / "scripts", REPO_ROOT / "scripts" / "customers")
 
     _run(
         str(REPO_ROOT / "muxer" / "scripts" / "provision_customer_end_to_end.py"),
@@ -68,6 +82,75 @@ def main() -> int:
         "rpdb-empty-live",
         "--out-dir",
         str(cgnat_review),
+        "--json",
+    )
+
+    base_staged_env = REPO_ROOT / "muxer" / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"
+    staged_env_doc = yaml.safe_load(base_staged_env.read_text(encoding="utf-8")) or {}
+    staged_root = regression_root / "staged-live"
+
+    def _rewrite_staged_paths(value: object) -> object:
+        if isinstance(value, str) and value.startswith("build/staged-live"):
+            suffix = value[len("build/staged-live") :].lstrip("/\\")
+            return str((staged_root / suffix).resolve())
+        if isinstance(value, dict):
+            return {key: _rewrite_staged_paths(nested) for key, nested in value.items()}
+        if isinstance(value, list):
+            return [_rewrite_staged_paths(nested) for nested in value]
+        return value
+
+    staged_env_path.write_text(
+        yaml.safe_dump(_rewrite_staged_paths(staged_env_doc), sort_keys=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    staged_request_doc = yaml.safe_load(
+        (request_examples / "example-minimal-cgnat.yaml").read_text(encoding="utf-8")
+    ) or {}
+    staged_customer = staged_request_doc.setdefault("customer", {})
+    staged_customer["name"] = "example-minimal-cgnat-staged-apply"
+    staged_transport = staged_customer.setdefault("transport", {})
+    staged_cgnat_transport = staged_transport.setdefault("cgnat", {})
+    outer_identity_ref = str(staged_cgnat_transport.get("outer_identity_ref") or "").strip()
+    if outer_identity_ref:
+        staged_cgnat_transport["outer_identity_ref"] = outer_identity_ref.replace(
+            "example-minimal-cgnat",
+            "example-minimal-cgnat-staged-apply",
+        )
+    cgnat_staged_request.write_text(
+        yaml.safe_dump(staged_request_doc, sort_keys=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    for relative_path in (
+        "muxer-root",
+        "nat-active-root",
+        "nat-standby-root",
+        "nonnat-active-root",
+        "nonnat-standby-root",
+        "cgnat-headend-root",
+        "datastores",
+        "artifacts",
+        "logs",
+        "nat-t-watcher/state",
+        "nat-t-watcher/out",
+        "nat-t-watcher/packages",
+        "nat-t-watcher/synced",
+        "backups/baseline/muxer",
+        "backups/baseline/nat-headend",
+        "backups/baseline/non-nat-headend",
+        "backups/baseline/cgnat-headend",
+    ):
+        (staged_root / relative_path).mkdir(parents=True, exist_ok=True)
+    _run(
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        "--customer-file",
+        str(cgnat_staged_request),
+        "--environment",
+        str(staged_env_path),
+        "--out-dir",
+        str(cgnat_staged_apply),
+        "--approve",
         "--json",
     )
 
@@ -132,12 +215,14 @@ def main() -> int:
     shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
     shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
     cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
+    cgnat_staged_apply_summary = _load_json(cgnat_staged_apply / "execution-plan.json")
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
         "shared_nonnat_ready_for_review": bool(shared_nonnat_summary.get("ready_for_review")),
         "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
         "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
+        "cgnat_staged_apply_ok": str(cgnat_staged_apply_summary.get("status") or "").strip().lower() == "applied",
         "sample_validation_ok": bool(sample_summary.get("validation_ok")),
         "live_validation_ok": bool(live_summary.get("validation_ok")),
         "aws_live_create_allowed": bool(live_summary.get("aws_live_create_allowed")),
@@ -150,6 +235,7 @@ def main() -> int:
             "shared_nonnat_package": str(shared_nonnat),
             "shared_nat_package": str(shared_nat),
             "cgnat_customer_review": str(cgnat_review),
+            "cgnat_customer_staged_apply": str(cgnat_staged_apply),
             "sample_prep": str(sample_prep),
             "live_prep": str(live_prep),
             "live_predeploy_review": str(live_predeploy),

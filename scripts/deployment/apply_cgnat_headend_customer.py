@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+"""Install one customer-scoped CGNAT head-end package into a target CGNAT root."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from cgnat_customer_lib import install_cgnat_package, validate_cgnat_package
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Install one customer-scoped CGNAT head-end package.")
+    parser.add_argument("--package-dir", required=True, help="Path to the customer package directory")
+    parser.add_argument(
+        "--cgnat-root",
+        required=True,
+        help="Target CGNAT filesystem root. Use a staged root for repo-only verification or / on a target host.",
+    )
+    parser.add_argument("--json", action="store_true", help="Print the install report as JSON")
+    args = parser.parse_args()
+
+    package_dir = Path(args.package_dir).resolve()
+    cgnat_root = Path(args.cgnat_root).resolve()
+
+    validation = validate_cgnat_package(package_dir)
+    if not validation["valid"]:
+        if args.json:
+            print(json.dumps(validation, indent=2, sort_keys=True))
+        else:
+            print("CGNAT package installability: INVALID")
+            for error in validation["errors"]:
+                print(f"  error: {error}")
+        return 1
+
+    report = install_cgnat_package(package_dir, cgnat_root)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"CGNAT customer installed: {report['customer_name']}")
+        print(f"- cgnat root: {report['cgnat_root']}")
+        print(f"- config: {report['config_json']}")
+        print(f"- apply script: {report['master_apply_script']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
