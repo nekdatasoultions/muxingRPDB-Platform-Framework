@@ -173,6 +173,161 @@ Recommended transport mode values:
 
 The absence of a transport block should preserve the current legacy behavior.
 
+## Current Certificate Scope
+
+The shared CGNAT provisioning flow currently carries certificate and identity
+**references only**.
+
+Today it does **not**:
+
+- generate a CGNAT head-end certificate
+- generate a customer-device certificate
+- call a CA or external PKI API
+- package private key material into the shared provisioning path
+
+The current shared model carries:
+
+- `outer_identity_ref`
+- `outer_auth_ref`
+
+That is enough for package generation and validation, but it is not yet a
+complete PKI lifecycle.
+
+This is separate from the Scenario 1 demo tooling under `CGNAT/server/`, which
+can generate local OpenSSL demo materials for testing.
+
+## PKI Design Direction
+
+The shared integration should remain **reference-first**.
+
+That means the shared provisioning path should treat PKI material as an
+external dependency described by references, not as inline certificate blobs or
+private keys embedded in customer requests.
+
+This keeps the model portable across:
+
+- pre-existing manually managed certificates
+- local/demo certificate generation
+- third-party PKI providers accessed by API
+
+## Proposed Certificate Model Extension
+
+The current `outer_auth_ref` field is useful, but it is too coarse to express
+all of the long-term PKI needs cleanly.
+
+The model should evolve toward explicitly separate references for:
+
+- CGNAT head-end certificate identity and auth material
+- customer-device certificate identity and auth material
+- trust/CA material
+- issuance mode/provider metadata
+
+Recommended future shape:
+
+```yaml
+customer:
+  transport:
+    mode: cgnat
+    cgnat:
+      outer:
+        headend:
+          identity_ref: cgnat-headend/service-a
+          auth_ref: pki/cgnat/headend/service-a
+        customer:
+          identity_ref: customer-router-1/customer-a
+          auth_ref: pki/cgnat/customer-router-1/customer-a
+        trust:
+          ca_ref: pki/cgnat/ca/main
+        issuance:
+          mode: reference
+          provider: ""
+      inner:
+        customer_loopback_ip: 10.250.1.10
+        known_inside_identity: 10.20.30.10/32
+      service_profile: scenario1
+      service_reachable_subnets:
+        - 23.20.31.151/32
+        - 194.138.36.86/32
+```
+
+Recommended issuance mode values:
+
+- `reference`
+- `local_generate`
+- `provider_api`
+
+## PKI Behavior by Mode
+
+### `reference`
+
+Meaning:
+
+- the shared provisioning flow is given references to existing cert/key or
+  certificate inventory records
+- package generation and validation confirm those references are present and
+  consistent
+- no issuance occurs inside the shared deploy flow
+
+This should be the default for production integration.
+
+### `local_generate`
+
+Meaning:
+
+- the shared provisioning flow may call a local materializer for non-production
+  or tightly controlled workflows
+- suitable for lab/demo environments
+
+This should remain optional and clearly marked as non-production unless the
+team explicitly chooses otherwise.
+
+### `provider_api`
+
+Meaning:
+
+- the shared provisioning flow calls a supported PKI integration point
+- examples:
+  - HashiCorp Vault PKI
+  - AWS ACM Private CA
+  - Smallstep / `step-ca`
+  - internal enterprise CA API
+
+The provisioning flow should still consume references and provider metadata,
+not raw certificate content in the request.
+
+## Uniqueness Expectations
+
+The model must support unique identities for both sides of the outer tunnel:
+
+- the CGNAT head-end certificate may be unique per service, per environment,
+  or per hosted head-end
+- the customer-device certificate may be unique per customer device
+
+The shared model must not assume that one generic customer cert or one generic
+head-end cert is reused everywhere.
+
+## Current Scope vs Future Scope
+
+### Current Scope
+
+The shared provisioning integration currently supports:
+
+- transport metadata
+- certificate/auth references
+- backend + muxer + CGNAT head-end package/apply surfaces
+
+### Future Scope
+
+The next certificate-related extension should add:
+
+- separate head-end/customer/trust refs
+- issuance-mode metadata
+- provider abstraction points
+- validation rules for reference completeness
+
+Actual third-party CA/API issuance should be added only after the reference
+model is stable.
+
 ### Customer Module
 
 The customer module should preserve enough transport metadata for downstream

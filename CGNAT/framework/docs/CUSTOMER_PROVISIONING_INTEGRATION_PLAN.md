@@ -54,6 +54,24 @@ environment YAML, not from DynamoDB host discovery.
 The first integration should add one hosted CGNAT head-end target and one
 customer transport family before attempting broader HA or topology expansion.
 
+### 4a. Keep PKI Reference-First
+
+The shared provisioning flow should treat CGNAT outer-tunnel certificate
+material as **references first**, not as inline cert/key payloads.
+
+That means:
+
+- shared requests may describe certificate identity/auth references
+- package/apply logic may validate those references
+- actual certificate issuance remains a separate concern until the PKI model is
+  explicitly extended
+
+This keeps the integration portable across:
+
+- existing manually managed certificates
+- local/demo certificate generation
+- future third-party PKI provider APIs
+
 ### 5. Keep CGNAT in the Same Repo
 
 CGNAT should remain in the RPDB repo and should not be split into its own repo
@@ -154,6 +172,37 @@ Exit criteria:
 
 - CGNAT customers resolve a `cgnat_headend_active` target
 - legacy customers continue to resolve only muxer + backend head ends
+
+### Workstream 2a: PKI Reference Model Extension
+
+Extend the shared CGNAT transport model so the outer-tunnel certificate shape
+is explicit enough for production integration.
+
+Primary changes:
+
+- separate head-end certificate references from customer-device certificate
+  references
+- add trust/CA reference support
+- add issuance-mode/provider metadata
+
+Likely files:
+
+- `muxer/config/schema/customer-request.schema.json`
+- `muxer/config/schema/customer-source.schema.json`
+- `muxer/src/muxerlib/customer_model.py`
+- `CGNAT/framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_DESIGN.md`
+
+Exit criteria:
+
+- the shared model can distinguish:
+  - CGNAT head-end identity/auth refs
+  - customer-device identity/auth refs
+  - trust/CA refs
+- the model supports issuance modes:
+  - `reference`
+  - `local_generate`
+  - `provider_api`
+- no actual CA integration is required yet for this workstream to pass
 
 ### Workstream 3: Repo-Only Package Integration
 
@@ -278,6 +327,29 @@ Exit criteria:
 
 - dry-run plan for a CGNAT customer reports selected CGNAT targets
 
+### Phase 2a: Extend the PKI Reference Shape
+
+Goal:
+
+- make certificate ownership and trust explicit in the shared CGNAT model
+
+Tasks:
+
+- split coarse outer cert/auth metadata into explicit head-end/customer/trust
+  references
+- add issuance-mode metadata
+- preserve backward compatibility for the current simpler `outer_identity_ref`
+  and `outer_auth_ref` shape during migration
+
+Exit criteria:
+
+- the shared model can represent unique head-end and customer cert references
+- the shared model can describe whether PKI material is:
+  - referenced
+  - locally generated
+  - provider-issued
+- legacy CGNAT examples still validate or have a clearly documented migration
+
 ### Phase 3: Build CGNAT Repo-Only Packaging
 
 Goal:
@@ -328,6 +400,27 @@ Exit criteria:
 - regression suite green
 - no known high-severity gaps in the integrated flow
 - regression/release gates approved for the next deployment stage
+
+### Phase 6: PKI Provider Integration
+
+Goal:
+
+- add optional issuance/provider integration on top of the stabilized
+  reference model
+
+Tasks:
+
+- define provider adapter contract
+- implement one provider path only after the reference model is stable
+- keep production-safe separation between cert references and private key
+  material handling
+
+Exit criteria:
+
+- one supported provider mode can resolve or issue outer-tunnel certificate
+  material through a controlled adapter
+- `reference` mode still works unchanged
+- regression gates remain green for both legacy and CGNAT flows
 
 ## Recommended File-by-File Start Order
 
@@ -416,6 +509,15 @@ Mitigation:
 
 - stage CGNAT apply after backend and muxer are already validated
 - keep per-surface rollback steps explicit
+
+### Risk 5: PKI Coupling Too Early
+
+Mitigation:
+
+- stabilize the reference model before adding provider-specific issuance
+- keep cert/key payloads out of shared customer requests
+- prefer adapter boundaries over provider-specific logic spread across the
+  deploy spine
 
 ## Delivery Gates
 
