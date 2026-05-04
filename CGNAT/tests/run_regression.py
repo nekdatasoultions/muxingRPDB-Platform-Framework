@@ -45,6 +45,31 @@ def _run_json_command(command: list[str]) -> dict:
     return json.loads(completed.stdout)
 
 
+def _replace_text(value: object, old: str, new: str) -> object:
+    if isinstance(value, str):
+        return value.replace(old, new)
+    if isinstance(value, dict):
+        return {key: _replace_text(nested, old, new) for key, nested in value.items()}
+    if isinstance(value, list):
+        return [_replace_text(nested, old, new) for nested in value]
+    return value
+
+
+def _prepare_staged_customer_request(source_path: Path, output_path: Path, staged_name: str) -> dict:
+    request_doc = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
+    customer = request_doc.setdefault("customer", {})
+    original_name = str(customer.get("name") or "").strip()
+    rewritten = _replace_text(request_doc, original_name, staged_name)
+    rewritten_customer = rewritten.setdefault("customer", {})
+    rewritten_customer["name"] = staged_name
+    output_path.write_text(
+        yaml.safe_dump(rewritten, sort_keys=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return rewritten
+
+
 def main() -> int:
     regression_root = CGNAT_ROOT / "build" / "regression"
     if regression_root.exists():
@@ -66,9 +91,14 @@ def main() -> int:
     shared_nonnat = regression_root / "shared-nonnat-package"
     shared_nat = regression_root / "shared-nat-package"
     cgnat_review = regression_root / "cgnat-customer-review"
+    cgnat_customer1_live_review = regression_root / "cgnat-customer1-live-review"
     cgnat_local_pki_review = regression_root / "cgnat-customer-local-pki-review"
     cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
+    cgnat_dual_customer1_staged_apply = regression_root / "cgnat-customer1-staged-apply"
+    cgnat_dual_customer2_staged_apply = regression_root / "cgnat-customer2-staged-apply"
     cgnat_staged_request = regression_root / "example-minimal-cgnat-staged-apply.yaml"
+    cgnat_dual_customer1_request = regression_root / "example-cgnat-customer-1-staged-apply.yaml"
+    cgnat_dual_customer2_request = regression_root / "example-cgnat-customer-2-staged-apply.yaml"
     staged_env_path = regression_root / "example-rpdb-staged-live.yaml"
 
     _run(str(CGNAT_ROOT / "tests" / "run_tests.py"))
@@ -100,6 +130,17 @@ def main() -> int:
     )
     _run(
         str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
+        str(request_examples / "example-cgnat-customer-1-local-pki.yaml"),
+        "--environment",
+        "rpdb-empty-live",
+        "--out-dir",
+        str(cgnat_customer1_live_review),
+        "--test-bed-customer",
+        "CGNAT customer 1",
+        "--json",
+    )
+    _run(
+        str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
         str(request_examples / "example-minimal-cgnat-local-pki.yaml"),
         "--environment",
         "rpdb-empty-live",
@@ -127,23 +168,20 @@ def main() -> int:
         encoding="utf-8",
         newline="\n",
     )
-    staged_request_doc = yaml.safe_load(
-        (request_examples / "example-minimal-cgnat.yaml").read_text(encoding="utf-8")
-    ) or {}
-    staged_customer = staged_request_doc.setdefault("customer", {})
-    staged_customer["name"] = "example-minimal-cgnat-staged-apply"
-    staged_transport = staged_customer.setdefault("transport", {})
-    staged_cgnat_transport = staged_transport.setdefault("cgnat", {})
-    outer_identity_ref = str(staged_cgnat_transport.get("outer_identity_ref") or "").strip()
-    if outer_identity_ref:
-        staged_cgnat_transport["outer_identity_ref"] = outer_identity_ref.replace(
-            "example-minimal-cgnat",
-            "example-minimal-cgnat-staged-apply",
-        )
-    cgnat_staged_request.write_text(
-        yaml.safe_dump(staged_request_doc, sort_keys=False),
-        encoding="utf-8",
-        newline="\n",
+    _prepare_staged_customer_request(
+        request_examples / "example-minimal-cgnat.yaml",
+        cgnat_staged_request,
+        "example-minimal-cgnat-staged-apply",
+    )
+    _prepare_staged_customer_request(
+        request_examples / "example-cgnat-customer-1-local-pki.yaml",
+        cgnat_dual_customer1_request,
+        "example-cgnat-customer-1-staged-apply",
+    )
+    _prepare_staged_customer_request(
+        request_examples / "example-minimal-cgnat-local-pki.yaml",
+        cgnat_dual_customer2_request,
+        "example-cgnat-customer-2-staged-apply",
     )
     for relative_path in (
         "muxer-root",
@@ -208,6 +246,77 @@ def main() -> int:
     )
 
     _run(
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        "--customer-file",
+        str(cgnat_dual_customer1_request),
+        "--environment",
+        str(staged_env_path),
+        "--out-dir",
+        str(cgnat_dual_customer1_staged_apply),
+        "--approve",
+        "--json",
+    )
+    _run(
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        "--customer-file",
+        str(cgnat_dual_customer2_request),
+        "--environment",
+        str(staged_env_path),
+        "--out-dir",
+        str(cgnat_dual_customer2_staged_apply),
+        "--approve",
+        "--json",
+    )
+    dual_customer1_summary = _load_json(cgnat_dual_customer1_staged_apply / "execution-plan.json")
+    dual_customer2_summary = _load_json(cgnat_dual_customer2_staged_apply / "execution-plan.json")
+    dual_customer_names = [
+        "example-cgnat-customer-1-staged-apply",
+        "example-cgnat-customer-2-staged-apply",
+    ]
+    dual_customer_installed_ok = all(
+        (staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / customer_name).exists()
+        and (staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / customer_name).exists()
+        and (staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / customer_name).exists()
+        for customer_name in dual_customer_names
+    )
+    dual_rollback_results: list[dict] = []
+    for summary in (dual_customer2_summary, dual_customer1_summary):
+        dual_rollback_plan = _load_json(REPO_ROOT / summary["apply"]["rollback_plan"])
+        dual_rollback_results.extend(
+            _run_json_command(step["command"])
+            for step in reversed(dual_rollback_plan["steps"])
+        )
+    dual_rollback_cleanup_ok = not any(
+        path.exists()
+        for customer_name in dual_customer_names
+        for path in (
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / customer_name,
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / customer_name,
+            staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / customer_name,
+            staged_root / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / customer_name,
+            staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
+            staged_root / "nonnat-active-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{customer_name}.conf",
+            staged_root / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / customer_name,
+            staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{customer_name}.conf",
+            staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / customer_name,
+            staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / f"{customer_name}.json",
+        )
+    )
+    (regression_root / "dual-customer-rollback-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "customer_names": dual_customer_names,
+                "rollback_results": dual_rollback_results,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _run(
         str(CGNAT_ROOT / "framework" / "scripts" / "prepare_scenario1.py"),
         str(sample_bundle),
         str(sample_prep),
@@ -268,6 +377,8 @@ def main() -> int:
     shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
     shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
     cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
+    cgnat_customer1_live_review_summary = _load_json(cgnat_customer1_live_review / "combined-review-summary.json")
+    cgnat_customer1_live_execution_plan = _load_json(cgnat_customer1_live_review / "live-execution-plan.json")
     cgnat_local_pki_review_summary = _load_json(cgnat_local_pki_review / "combined-review-summary.json")
     cgnat_local_pki_surface = _load_json(cgnat_local_pki_review / "pki" / "pki-review.json")
 
@@ -276,6 +387,13 @@ def main() -> int:
         "shared_nonnat_ready_for_review": bool(shared_nonnat_summary.get("ready_for_review")),
         "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
         "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
+        "cgnat_customer1_live_review_ready_for_review": bool(
+            cgnat_customer1_live_review_summary.get("ready_for_review")
+        ),
+        "cgnat_customer1_live_execution_plan_ready": bool(
+            cgnat_customer1_live_execution_plan.get("customer_device_backup_required")
+            and (cgnat_customer1_live_execution_plan.get("customer_handoff") or {}).get("package_name")
+        ),
         "cgnat_customer_local_pki_review_ready_for_review": bool(
             cgnat_local_pki_review_summary.get("ready_for_review")
         ),
@@ -290,6 +408,17 @@ def main() -> int:
             )
             for result in rollback_results
         ),
+        "cgnat_dual_customer_staged_apply_ok": dual_customer_installed_ok
+        and str(dual_customer1_summary.get("status") or "").strip().lower() == "applied"
+        and str(dual_customer2_summary.get("status") or "").strip().lower() == "applied",
+        "cgnat_dual_customer_staged_rollback_ok": dual_rollback_cleanup_ok
+        and all(
+            (
+                str(result.get("status") or "").strip().lower() == "rolled_back"
+                or bool(result.get("removed"))
+            )
+            for result in dual_rollback_results
+        ),
         "sample_validation_ok": bool(sample_summary.get("validation_ok")),
         "live_validation_ok": bool(live_summary.get("validation_ok")),
         "aws_live_create_allowed": bool(live_summary.get("aws_live_create_allowed")),
@@ -302,9 +431,13 @@ def main() -> int:
             "shared_nonnat_package": str(shared_nonnat),
             "shared_nat_package": str(shared_nat),
             "cgnat_customer_review": str(cgnat_review),
+            "cgnat_customer1_live_review": str(cgnat_customer1_live_review),
             "cgnat_customer_local_pki_review": str(cgnat_local_pki_review),
             "cgnat_customer_staged_apply": str(cgnat_staged_apply),
             "cgnat_customer_staged_rollback": str(cgnat_staged_apply / "rollback-execution-summary.json"),
+            "cgnat_dual_customer1_staged_apply": str(cgnat_dual_customer1_staged_apply),
+            "cgnat_dual_customer2_staged_apply": str(cgnat_dual_customer2_staged_apply),
+            "cgnat_dual_customer_rollback": str(regression_root / "dual-customer-rollback-summary.json"),
             "sample_prep": str(sample_prep),
             "live_prep": str(live_prep),
             "live_predeploy_review": str(live_predeploy),

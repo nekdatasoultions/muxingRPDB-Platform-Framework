@@ -35,10 +35,12 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_backend_surface_review,
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
+    build_cgnat_live_execution_plan,
     build_cgnat_live_test_bed_plan,
     build_cgnat_pki_surface_review,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
+    render_cgnat_live_execution_checklist,
     render_cgnat_combined_readme,
     validate_cgnat_request,
 )
@@ -189,6 +191,13 @@ def main() -> int:
         rollback_plan=rollback_plan,
         test_bed_customer=args.test_bed_customer,
     )
+    live_execution_plan = build_cgnat_live_execution_plan(
+        request_doc=request_doc,
+        execution_plan=execution_plan,
+        pki_review=pki_review,
+        rollback_plan=rollback_plan,
+        live_test_bed_plan=live_test_bed_plan,
+    )
     combined_review = build_cgnat_combined_review(
         request_doc=request_doc,
         readiness=readiness,
@@ -199,6 +208,7 @@ def main() -> int:
         pki_review=pki_review,
         rollback_plan=rollback_plan,
         live_test_bed_plan=live_test_bed_plan,
+        live_execution_plan=live_execution_plan,
         shared_deploy_dir=shared_deploy_dir,
     )
 
@@ -208,7 +218,14 @@ def main() -> int:
     _write_surface(output_dir, "pki/pki-review.json", pki_review)
     _write_surface(output_dir, "rollback-plan.json", rollback_plan)
     _write_surface(output_dir, "live-test-bed-plan.json", live_test_bed_plan)
+    _write_surface(output_dir, "live-execution-plan.json", live_execution_plan)
     _write_surface(output_dir, "combined-review-summary.json", combined_review)
+    dump_text(
+        output_dir / "LIVE_EXECUTION_CHECKLIST.md",
+        render_cgnat_live_execution_checklist(
+            live_execution_plan=live_execution_plan,
+        ),
+    )
     dump_text(
         output_dir / "README.md",
         render_cgnat_combined_readme(

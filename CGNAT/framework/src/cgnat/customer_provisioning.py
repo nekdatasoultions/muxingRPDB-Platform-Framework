@@ -295,6 +295,78 @@ def build_cgnat_live_test_bed_plan(
     }
 
 
+def build_cgnat_live_execution_plan(
+    *,
+    request_doc: dict[str, Any],
+    execution_plan: dict[str, Any],
+    pki_review: dict[str, Any],
+    rollback_plan: dict[str, Any],
+    live_test_bed_plan: dict[str, Any],
+) -> dict[str, Any]:
+    customer_name = str((_customer_doc(request_doc).get("name") or ""))
+    customer_handoff = dict(pki_review.get("customer_handoff") or {})
+    artifacts = dict(pki_review.get("artifacts") or {})
+    return {
+        "schema_version": 1,
+        "status": "review_required",
+        "generated_at": _now_utc(),
+        "customer_name": customer_name,
+        "test_bed_customer": live_test_bed_plan.get("test_bed_customer"),
+        "platform_backup_refs": dict((live_test_bed_plan.get("backup_gate") or {}).get("references") or {}),
+        "customer_device_backup_required": True,
+        "customer_device_backup_items": [
+            "existing outer tunnel connection config",
+            "existing customer certificate and private key",
+            "existing CA/trust bundle",
+            "existing service status and loaded SAs",
+            "existing routes and interface addresses",
+        ],
+        "customer_handoff": {
+            "package_name": customer_handoff.get("package_name"),
+            "identity_ref": customer_handoff.get("identity_ref"),
+            "auth_ref": customer_handoff.get("auth_ref"),
+            "manifest": artifacts.get("customer_handoff_manifest"),
+            "readme": artifacts.get("customer_handoff_readme"),
+            "generated_material": bool(pki_review.get("generated_material")),
+            "certificate_path": artifacts.get("customer_certificate_path"),
+            "private_key_path": artifacts.get("customer_private_key_path"),
+            "ca_certificate_path": artifacts.get("ca_certificate_path"),
+        },
+        "platform_apply_order": list(live_test_bed_plan.get("staged_apply_order") or []),
+        "customer_device_apply_order": [
+            "capture_customer_device_backups",
+            "stage_new_outer_tunnel_cert_bundle",
+            "stage_new_outer_tunnel_config_without_removing_previous_state",
+            "load_or_reload_customer_outer_tunnel_config",
+            "bring_up_new_outer_tunnel",
+            "validate_customer_outer_tunnel_certificate_identity",
+            "validate_inner_tunnel_and_service_path",
+            "retire_previous_customer_outer_tunnel_state_only_after_validation",
+        ],
+        "validation_order": [
+            "validate_platform_state_after_backend_muxer_cgnat_apply",
+            "validate_customer_outer_tunnel_on_customer_and_cgnat_headend",
+            "validate_inner_tunnel_on_backend_headend",
+            "validate_service_path_and_bidirectional counters",
+        ],
+        "rollback_order": [
+            "restore_previous_customer_device_cert_and_config",
+            *list(rollback_plan.get("rollback_order") or []),
+        ],
+        "guard_rails": [
+            "Do not remove previous customer-device cert or config until the new outer tunnel is established and validated.",
+            "Stop after each platform surface if validation fails; do not continue to the next surface on partial success.",
+            "Rollback immediately if the customer outer tunnel does not establish with the expected identity and trust chain.",
+            "Rollback immediately if customer-1 traffic validation fails after a platform or customer-device change.",
+        ],
+        "execution_plan_ref": execution_plan.get("artifacts", {}).get("execution_plan"),
+        "notes": [
+            "The shared provisioning flow still owns platform-side state only; customer-device installation uses the generated handoff package.",
+            "This checklist is intended for the first controlled customer-1 live run and should be reused for customer 2 only after customer 1 is green.",
+        ],
+    }
+
+
 def build_cgnat_combined_review(
     *,
     request_doc: dict[str, Any],
@@ -306,6 +378,7 @@ def build_cgnat_combined_review(
     pki_review: dict[str, Any],
     rollback_plan: dict[str, Any],
     live_test_bed_plan: dict[str, Any],
+    live_execution_plan: dict[str, Any],
     shared_deploy_dir: Path,
 ) -> dict[str, Any]:
     validate_cgnat_request(request_doc)
@@ -344,6 +417,8 @@ def build_cgnat_combined_review(
             "pki": "pki/pki-review.json",
             "rollback_plan": "rollback-plan.json",
             "live_test_bed_plan": "live-test-bed-plan.json",
+            "live_execution_plan": "live-execution-plan.json",
+            "live_execution_checklist": "LIVE_EXECUTION_CHECKLIST.md",
         },
         "notes": [
             "This review package layers CGNAT-specific deployment surfaces on top of the shared RPDB repo-only package and dry-run deploy plan.",
@@ -351,8 +426,86 @@ def build_cgnat_combined_review(
             "Future live testing must honor the backup-before-remove rule captured in the rollback plan.",
             f"PKI material mode: {pki_review.get('mode')}",
             f"Preferred first live test bed: {live_test_bed_plan.get('test_bed_customer')}",
+            f"Customer handoff package: {(live_execution_plan.get('customer_handoff') or {}).get('package_name')}",
         ],
     }
+
+
+def render_cgnat_live_execution_checklist(*, live_execution_plan: dict[str, Any]) -> str:
+    handoff = dict(live_execution_plan.get("customer_handoff") or {})
+    lines = [
+        f"# CGNAT Live Execution Checklist: {live_execution_plan.get('customer_name')}",
+        "",
+        "## Guard Rails",
+        "",
+    ]
+    for item in live_execution_plan.get("guard_rails") or []:
+        lines.append(f"- {item}")
+    lines.extend(
+        [
+            "",
+            "## Platform Backups",
+            "",
+        ]
+    )
+    for key, value in dict(live_execution_plan.get("platform_backup_refs") or {}).items():
+        lines.append(f"- `{key}`: `{value}`")
+    lines.extend(
+        [
+            "",
+            "## Customer Device Backups",
+            "",
+        ]
+    )
+    for item in live_execution_plan.get("customer_device_backup_items") or []:
+        lines.append(f"- {item}")
+    lines.extend(
+        [
+            "",
+            "## Customer Handoff Package",
+            "",
+            f"- Package name: `{handoff.get('package_name')}`",
+            f"- Manifest: `{handoff.get('manifest')}`",
+            f"- README: `{handoff.get('readme')}`",
+            f"- Generated material: `{handoff.get('generated_material')}`",
+            f"- Certificate path: `{handoff.get('certificate_path')}`",
+            f"- Private key path: `{handoff.get('private_key_path')}`",
+            f"- CA path: `{handoff.get('ca_certificate_path')}`",
+            "",
+            "## Platform Apply Order",
+            "",
+        ]
+    )
+    for step in live_execution_plan.get("platform_apply_order") or []:
+        lines.append(f"1. `{step}`")
+    lines.extend(
+        [
+            "",
+            "## Customer Device Apply Order",
+            "",
+        ]
+    )
+    for step in live_execution_plan.get("customer_device_apply_order") or []:
+        lines.append(f"1. `{step}`")
+    lines.extend(
+        [
+            "",
+            "## Validation Order",
+            "",
+        ]
+    )
+    for step in live_execution_plan.get("validation_order") or []:
+        lines.append(f"1. `{step}`")
+    lines.extend(
+        [
+            "",
+            "## Rollback Order",
+            "",
+        ]
+    )
+    for step in live_execution_plan.get("rollback_order") or []:
+        lines.append(f"1. `{step}`")
+    return "\n".join(lines) + "\n"
 
 
 def render_cgnat_combined_readme(

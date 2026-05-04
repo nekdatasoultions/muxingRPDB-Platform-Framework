@@ -15,10 +15,12 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_backend_surface_review,
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
+    build_cgnat_live_execution_plan,
     build_cgnat_live_test_bed_plan,
     build_cgnat_pki_surface_review,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
+    render_cgnat_live_execution_checklist,
     validate_cgnat_request,
 )
 from muxerlib.customer_merge import load_yaml_file  # noqa: E402
@@ -143,6 +145,13 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             rollback_plan=rollback,
             test_bed_customer="CGNAT customer 1",
         )
+        live_execution = build_cgnat_live_execution_plan(
+            request_doc=self.request_doc,
+            execution_plan=self.execution_plan,
+            pki_review=pki_review,
+            rollback_plan=rollback,
+            live_test_bed_plan=live_test_bed,
+        )
         combined = build_cgnat_combined_review(
             request_doc=self.request_doc,
             readiness=self.readiness,
@@ -153,7 +162,11 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             pki_review=pki_review,
             rollback_plan=rollback,
             live_test_bed_plan=live_test_bed,
+            live_execution_plan=live_execution,
             shared_deploy_dir=self.shared_deploy_dir,
+        )
+        checklist = render_cgnat_live_execution_checklist(
+            live_execution_plan=live_execution,
         )
 
         self.assertTrue(combined["ready_for_review"])
@@ -168,6 +181,15 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         )
         self.assertEqual(combined["surface_status"]["pki"], "ready_for_review")
         self.assertIn("pki", combined["surfaces"])
+        self.assertIn("live_execution_plan", combined["surfaces"])
+        self.assertIn("LIVE_EXECUTION_CHECKLIST.md", combined["surfaces"]["live_execution_checklist"])
+        self.assertTrue(live_execution["customer_device_backup_required"])
+        self.assertEqual(
+            live_execution["customer_handoff"]["package_name"],
+            "example-minimal-cgnat-customer-router-1",
+        )
+        self.assertIn("capture_customer_device_backups", " ".join(live_execution["customer_device_apply_order"]))
+        self.assertIn("Package name", checklist)
         self.assertIn("live_test_bed_plan", combined["surfaces"])
         self.assertIn("CGNAT customer 1", " ".join(combined["notes"]))
 
