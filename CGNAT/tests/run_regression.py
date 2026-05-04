@@ -55,13 +55,22 @@ def _replace_text(value: object, old: str, new: str) -> object:
     return value
 
 
-def _prepare_staged_customer_request(source_path: Path, output_path: Path, staged_name: str) -> dict:
+def _prepare_staged_customer_request(
+    source_path: Path,
+    output_path: Path,
+    staged_name: str,
+    *,
+    peer_public_ip: str | None = None,
+) -> dict:
     request_doc = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
     customer = request_doc.setdefault("customer", {})
     original_name = str(customer.get("name") or "").strip()
     rewritten = _replace_text(request_doc, original_name, staged_name)
     rewritten_customer = rewritten.setdefault("customer", {})
     rewritten_customer["name"] = staged_name
+    if peer_public_ip:
+        rewritten_peer = rewritten_customer.setdefault("peer", {})
+        rewritten_peer["public_ip"] = peer_public_ip
     output_path.write_text(
         yaml.safe_dump(rewritten, sort_keys=False),
         encoding="utf-8",
@@ -177,11 +186,13 @@ def main() -> int:
         request_examples / "example-cgnat-customer-1-local-pki.yaml",
         cgnat_dual_customer1_request,
         "example-cgnat-customer-1-staged-apply",
+        peer_public_ip="203.0.113.61",
     )
     _prepare_staged_customer_request(
         request_examples / "example-minimal-cgnat-local-pki.yaml",
         cgnat_dual_customer2_request,
         "example-cgnat-customer-2-staged-apply",
+        peer_public_ip="203.0.113.61",
     )
     for relative_path in (
         "muxer-root",

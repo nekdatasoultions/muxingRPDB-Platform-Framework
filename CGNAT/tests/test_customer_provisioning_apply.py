@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,16 +31,22 @@ def _rewrite_staged_paths(value: object, staged_root: Path) -> object:
 
 class CustomerProvisioningApplyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.test_root = CGNAT_ROOT / "build" / "customer-provisioning-apply-test"
-        if self.test_root.exists():
-            shutil.rmtree(self.test_root)
-        self.test_root.mkdir(parents=True, exist_ok=True)
+        build_root = CGNAT_ROOT / "build"
+        build_root.mkdir(parents=True, exist_ok=True)
+        self.test_root = Path(
+            tempfile.mkdtemp(prefix="customer-provisioning-apply-test-", dir=str(build_root))
+        )
 
         self.staged_root = self.test_root / "staged-live"
         self.deploy_dir = self.test_root / "deploy"
         self.environment_path = self.test_root / "example-rpdb-staged-live.yaml"
-        self.customer_name = "example-minimal-cgnat-apply-test"
+        case_slug = self.id().split(".")[-1].lower()
+        case_hash = hashlib.sha1(self.id().encode("utf-8")).hexdigest()[:10]
+        self.customer_name = f"cgnat-apply-{case_slug[:20]}-{case_hash}"
         self.request_path = self.test_root / "example-minimal-cgnat-apply-test.yaml"
+        self.operation_lock_path = REPO_ROOT / "build" / "customer-operation-locks" / f"{self.customer_name}.json"
+        if self.operation_lock_path.exists():
+            self.operation_lock_path.unlink()
 
         base_environment_path = MUXER_ROOT / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"
         environment_doc = yaml.safe_load(base_environment_path.read_text(encoding="utf-8")) or {}
@@ -93,7 +101,9 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         if self.test_root.exists():
-            shutil.rmtree(self.test_root)
+            shutil.rmtree(self.test_root, ignore_errors=True)
+        if self.operation_lock_path.exists():
+            self.operation_lock_path.unlink()
 
     def _run_approved_apply(self) -> dict:
         completed = subprocess.run(

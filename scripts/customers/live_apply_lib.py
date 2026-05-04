@@ -301,6 +301,16 @@ def _s3_uri(bucket: str, *parts: str) -> str:
     return "s3://" + "/".join([bucket, *cleaned])
 
 
+def _artifact_customer_dirname(customer_name: str, *, max_length: int = 48) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", customer_name).strip("-._") or "customer"
+    if len(sanitized) <= max_length:
+        return sanitized
+    digest = hashlib.sha1(customer_name.encode("utf-8")).hexdigest()[:12]
+    prefix_length = max(1, max_length - len(digest) - 1)
+    prefix = sanitized[:prefix_length].rstrip("-._") or "customer"
+    return f"{prefix}-{digest}"
+
+
 def _remote_path(prepared_root: Path, local_path: str | Path) -> str:
     resolved_root = prepared_root.resolve()
     resolved_path = Path(local_path).resolve()
@@ -336,7 +346,7 @@ def execute_staged_live_apply(
     cgnat_root = staged_target_root(cgnat_target) if cgnat_target else None
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    artifact_run_root = staged_artifact_root / customer_name / run_id
+    artifact_run_root = staged_artifact_root / _artifact_customer_dirname(customer_name) / run_id
     artifact_package_root = artifact_run_root / "package"
     artifact_execution_plan = artifact_run_root / "execution-plan.json"
     apply_dir = deploy_dir / "a"

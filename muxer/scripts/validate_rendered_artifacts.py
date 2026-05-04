@@ -31,6 +31,8 @@ def _validate_snat_coverage(report: dict, firewall_intent_path: Path) -> None:
     intent = _load_json(firewall_intent_path)
     protocols = intent.get("protocols") or {}
     coverage = intent.get("snat_coverage") or {}
+    if coverage.get("required") is False:
+        return
     sources = [str(value).strip() for value in coverage.get("egress_sources") or [] if str(value).strip()]
     rules = coverage.get("rules") or []
     if not sources:

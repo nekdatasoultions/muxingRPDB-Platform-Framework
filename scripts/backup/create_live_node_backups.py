@@ -74,6 +74,7 @@ def _target_inventory(environment_doc: dict[str, Any]) -> list[dict[str, Any]]:
     targets = environment_doc.get("targets") or {}
     muxer = targets.get("muxer") or {}
     headends = targets.get("headends") or {}
+    cgnat = (((targets.get("cgnat") or {}).get("headend") or {}).get("active") or {})
     inventory: list[dict[str, Any]] = [
         {
             "name": str(muxer.get("name") or "muxer"),
@@ -96,6 +97,16 @@ def _target_inventory(environment_doc: dict[str, Any]) -> list[dict[str, Any]]:
                     "via_bastion": True,
                 }
             )
+    if cgnat:
+        inventory.append(
+            {
+                "name": str(cgnat.get("name") or "cgnat-headend"),
+                "component": "cgnat-active",
+                "s3_key": "cgnat_headend",
+                "instance_id": str(((cgnat.get("selector") or {}).get("value")) or ""),
+                "via_bastion": False,
+            }
+        )
     missing = [item["name"] for item in inventory if not item["instance_id"]]
     if missing:
         raise ValueError("environment targets missing instance IDs: " + ", ".join(missing))

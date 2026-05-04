@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,9 +33,9 @@ class CgnatPkiMaterializerTests(unittest.TestCase):
         request_doc = load_yaml_file(
             MUXER_ROOT / "config" / "customer-requests" / "examples" / "example-minimal-cgnat-local-pki.yaml"
         )
-        output_dir = CGNAT_ROOT / "build" / "pki-materializer-test" / "local-generate"
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
+        build_root = CGNAT_ROOT / "build"
+        build_root.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(tempfile.mkdtemp(prefix="pki-materializer-test-", dir=str(build_root)))
 
         try:
             review = materialize_cgnat_pki(request_doc, output_dir)
@@ -58,6 +59,7 @@ class CgnatPkiMaterializerTests(unittest.TestCase):
         self.assertTrue(customer_key.exists())
         self.assertTrue(ca_cert.exists())
         self.assertTrue(headend_cert.exists())
+        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

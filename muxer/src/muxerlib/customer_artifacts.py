@@ -349,12 +349,66 @@ def _cidr_to_host(cidr_text: str) -> str:
     return str(network.network_address)
 
 
+def _transport_mode(transport: Dict[str, Any]) -> str:
+    return str(transport.get("mode") or "").strip().lower().replace("-", "_")
+
+
+def _cgnat_transport_doc(transport: Dict[str, Any]) -> Dict[str, Any]:
+    if _transport_mode(transport) != "cgnat":
+        return {}
+    cgnat = transport.get("cgnat") or {}
+    return cgnat if isinstance(cgnat, dict) else {}
+
+
+def _cgnat_unique_customer_peer(peer: Dict[str, Any], transport: Dict[str, Any]) -> str:
+    cgnat = _cgnat_transport_doc(transport)
+    loopback_ip = str(cgnat.get("customer_loopback_ip") or "").strip()
+    if loopback_ip:
+        return loopback_ip
+    remote_id = str(peer.get("remote_id") or "").strip()
+    public_ip = str(peer.get("public_ip") or "").strip()
+    if remote_id and remote_id != public_ip:
+        return remote_id
+    return public_ip
+
+
+def _headend_peer_endpoint(peer: Dict[str, Any], transport: Dict[str, Any]) -> str:
+    if _transport_mode(transport) == "cgnat":
+        return _cgnat_unique_customer_peer(peer, transport)
+    return str(peer.get("public_ip") or "").strip()
+
+
+def _headend_peer_route_cidr(peer: Dict[str, Any], transport: Dict[str, Any]) -> str:
+    endpoint = _headend_peer_endpoint(peer, transport)
+    return f"{endpoint}/32" if endpoint and "/" not in endpoint else endpoint
+
+
+def _headend_remote_id(peer: Dict[str, Any], ipsec: Dict[str, Any], transport: Dict[str, Any]) -> str:
+    configured_remote_id = str(ipsec.get("remote_id") or "").strip()
+    if configured_remote_id:
+        return configured_remote_id
+    if _transport_mode(transport) == "cgnat":
+        return _cgnat_unique_customer_peer(peer, transport)
+    return str(peer.get("remote_id") or peer.get("public_ip") or "").strip()
+
+
+def _disabled_snat_coverage(*, reason: str) -> Dict[str, Any]:
+    return {
+        "required": False,
+        "disabled_reason": reason,
+        "egress_sources": [],
+        "protocols": [],
+        "rules": [],
+    }
+
+
 def _render_ipsec_intent(
     customer: Dict[str, Any],
     peer: Dict[str, Any],
     selectors: Dict[str, Any],
     protocols: Dict[str, Any],
     ipsec: Dict[str, Any],
+    transport: Dict[str, Any] | None = None,
     outside_nat: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     ike_proposals = _render_ike_proposals(ipsec)
@@ -363,11 +417,14 @@ def _render_ipsec_intent(
     initiation = _render_ipsec_initiation(ipsec)
     effective_local_ts = _effective_local_ts(selectors, outside_nat)
     effective_remote_ts = _effective_remote_ts(selectors)
+    resolved_transport = transport or {}
+    headend_peer_endpoint = _headend_peer_endpoint(peer, resolved_transport)
     return {
         "customer_name": customer.get("name"),
-        "peer_public_ip": peer.get("public_ip"),
+        "peer_public_ip": headend_peer_endpoint,
+        "outer_peer_public_ip": peer.get("public_ip"),
         "local_addrs": local_addrs,
-        "remote_id": ipsec.get("remote_id") or peer.get("remote_id"),
+        "remote_id": _headend_remote_id(peer, ipsec, resolved_transport),
         "local_id": ipsec.get("local_id") or _placeholder("HEADEND_ID"),
         "ike_version": str(ipsec.get("ike_version") or "ikev2"),
         "swanctl_version": _render_swanctl_version(ipsec),
@@ -432,13 +489,16 @@ def _render_swanctl_connection(
     peer: Dict[str, Any],
     selectors: Dict[str, Any],
     ipsec: Dict[str, Any],
+    transport: Dict[str, Any] | None = None,
     outside_nat: Dict[str, Any] | None = None,
 ) -> str:
     customer_name = str(customer.get("name") or "")
     secret_name = f"ike-{customer_name}-psk"
-    remote_id = str(ipsec.get("remote_id") or peer.get("remote_id") or peer.get("public_ip") or "")
+    resolved_transport = transport or {}
+    remote_id = _headend_remote_id(peer, ipsec, resolved_transport)
     local_id = str(ipsec.get("local_id") or "")
     local_addrs = str(ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP"))
+    remote_addrs = _headend_peer_endpoint(peer, resolved_transport)
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
     initiation = _render_ipsec_initiation(ipsec)
@@ -449,7 +509,7 @@ def _render_swanctl_connection(
         f"  {customer_name} {{",
         f"    version = {_render_swanctl_version(ipsec)}",
         f"    local_addrs = {local_addrs}",
-        f"    remote_addrs = {peer.get('public_ip')}",
+        f"    remote_addrs = {remote_addrs}",
     ]
     _append_if(lines, "proposals", ike_proposals or None)
     _append_if(lines, "encap", _yes_no(ipsec.get("forceencaps")))
@@ -1247,12 +1307,18 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
     ipsec = module.get("ipsec") or {}
     post_ipsec_nat = module.get("post_ipsec_nat") or {}
     outside_nat = module.get("outside_nat") or {}
-    snat_coverage = _build_snat_coverage(
-        peer_ip=str(peer.get("public_ip") or ""),
-        backend=backend,
-        protocols=protocols,
-        ipsec=ipsec,
-    )
+    transport_mode = _transport_mode(transport)
+    if transport_mode == "cgnat":
+        snat_coverage = _disabled_snat_coverage(
+            reason="cgnat_shared_outer_peer_uses_customer_specific_headend_transport_path",
+        )
+    else:
+        snat_coverage = _build_snat_coverage(
+            peer_ip=str(peer.get("public_ip") or ""),
+            backend=backend,
+            protocols=protocols,
+            ipsec=ipsec,
+        )
     muxer_firewall_nftables = _render_muxer_firewall_nftables(str(customer.get("name") or ""), snat_coverage)
 
     return {
@@ -1334,6 +1400,7 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
         )
         + "\n",
         "firewall/firewall-intent.json": {
+            "transport_mode": transport_mode,
             "protocols": {
                 "udp500": protocols.get("udp500"),
                 "udp4500": protocols.get("udp4500"),
@@ -1383,8 +1450,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
         dynamic_provisioning,
         raw_outside_nat,
     )
-    peer_public_ip = str(peer.get("public_ip") or "").strip()
-    peer_public_cidr = f"{peer_public_ip}/32" if peer_public_ip and "/" not in peer_public_ip else peer_public_ip
+    headend_peer_route_cidr = _headend_peer_route_cidr(peer, transport)
     overlay = transport.get("overlay") or {}
     mux_overlay_ip = str(overlay.get("mux_ip") or "").strip()
     mux_overlay_host = _interface_host(mux_overlay_ip) if mux_overlay_ip else ""
@@ -1393,7 +1459,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     outside_nat_nftables = _render_outside_nat_nftables(customer_name, outside_nat, selectors, ipsec)
     transport_artifacts = _render_headend_transport_artifacts(
         customer_name=customer_name,
-        peer_public_cidr=peer_public_cidr,
+        peer_public_cidr=headend_peer_route_cidr,
         transport=transport,
         backend=backend,
     )
@@ -1412,17 +1478,32 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             for subnet in clear_route_subnets
         ],
     ]
-    if peer_public_cidr and mux_overlay_host and transport_interface:
+    if headend_peer_route_cidr and mux_overlay_host and transport_interface:
         route_commands.extend(
             [
                 "# Return IPsec transport traffic through the customer-scoped GRE path to the muxer edge",
-                f"ip route replace {peer_public_cidr} via {mux_overlay_host} dev {transport_interface}",
+                f"ip route replace {headend_peer_route_cidr} via {mux_overlay_host} dev {transport_interface}",
             ]
         )
 
     return {
-        "ipsec/ipsec-intent.json": _render_ipsec_intent(customer, peer, selectors, protocols, ipsec, outside_nat),
-        "ipsec/swanctl-connection.conf": _render_swanctl_connection(customer, peer, selectors, ipsec, outside_nat),
+        "ipsec/ipsec-intent.json": _render_ipsec_intent(
+            customer,
+            peer,
+            selectors,
+            protocols,
+            ipsec,
+            transport,
+            outside_nat,
+        ),
+        "ipsec/swanctl-connection.conf": _render_swanctl_connection(
+            customer,
+            peer,
+            selectors,
+            ipsec,
+            transport,
+            outside_nat,
+        ),
         "ipsec/initiation-intent.json": {
             **ipsec_initiation,
             "customer_name": customer_name,
@@ -1467,10 +1548,10 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "vti_shared": ipsec.get("vti_shared"),
             },
             "edge_return_path": {
-                "enabled": bool(peer_public_cidr and mux_overlay_host and transport_interface),
-                "peer_public_cidr": peer_public_cidr or None,
-                "next_hop": mux_overlay_host if peer_public_cidr else None,
-                "interface": transport_interface if peer_public_cidr else None,
+                "enabled": bool(headend_peer_route_cidr and mux_overlay_host and transport_interface),
+                "peer_public_cidr": headend_peer_route_cidr or None,
+                "next_hop": mux_overlay_host if headend_peer_route_cidr else None,
+                "interface": transport_interface if headend_peer_route_cidr else None,
                 "transport": {
                     "type": transport.get("tunnel_type"),
                     "mtu": transport.get("tunnel_mtu"),
