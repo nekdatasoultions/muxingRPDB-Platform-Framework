@@ -115,6 +115,74 @@
         }
       }
     },
+    "cgnat_pki_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "package_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "cgnat_pki_trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ca_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "cgnat_pki": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "reference",
+            "local_generate",
+            "provider_api"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ca_common_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "customer_package_format": {
+          "type": "string",
+          "enum": [
+            "pem_bundle"
+          ]
+        },
+        "headend": {
+          "$ref": "#/$defs/cgnat_pki_endpoint"
+        },
+        "customer": {
+          "$ref": "#/$defs/cgnat_pki_endpoint"
+        },
+        "trust": {
+          "$ref": "#/$defs/cgnat_pki_trust"
+        }
+      }
+    },
     "cgnat_transport": {
       "type": "object",
       "additionalProperties": false,
@@ -139,6 +207,9 @@
         },
         "service_reachable_subnets": {
           "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "pki": {
+          "$ref": "#/$defs/cgnat_pki"
         }
       }
     },

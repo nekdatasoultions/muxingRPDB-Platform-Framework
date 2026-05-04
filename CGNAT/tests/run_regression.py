@@ -66,6 +66,7 @@ def main() -> int:
     shared_nonnat = regression_root / "shared-nonnat-package"
     shared_nat = regression_root / "shared-nat-package"
     cgnat_review = regression_root / "cgnat-customer-review"
+    cgnat_local_pki_review = regression_root / "cgnat-customer-local-pki-review"
     cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
     cgnat_staged_request = regression_root / "example-minimal-cgnat-staged-apply.yaml"
     staged_env_path = regression_root / "example-rpdb-staged-live.yaml"
@@ -95,6 +96,15 @@ def main() -> int:
         "rpdb-empty-live",
         "--out-dir",
         str(cgnat_review),
+        "--json",
+    )
+    _run(
+        str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
+        str(request_examples / "example-minimal-cgnat-local-pki.yaml"),
+        "--environment",
+        "rpdb-empty-live",
+        "--out-dir",
+        str(cgnat_local_pki_review),
         "--json",
     )
 
@@ -258,12 +268,20 @@ def main() -> int:
     shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
     shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
     cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
+    cgnat_local_pki_review_summary = _load_json(cgnat_local_pki_review / "combined-review-summary.json")
+    cgnat_local_pki_surface = _load_json(cgnat_local_pki_review / "pki" / "pki-review.json")
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
         "shared_nonnat_ready_for_review": bool(shared_nonnat_summary.get("ready_for_review")),
         "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
         "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
+        "cgnat_customer_local_pki_review_ready_for_review": bool(
+            cgnat_local_pki_review_summary.get("ready_for_review")
+        ),
+        "cgnat_customer_local_pki_material_generated": bool(
+            cgnat_local_pki_surface.get("generated_material")
+        ),
         "cgnat_staged_apply_ok": str(cgnat_staged_apply_summary.get("status") or "").strip().lower() == "applied",
         "cgnat_staged_rollback_ok": rollback_cleanup_ok and all(
             (
@@ -284,6 +302,7 @@ def main() -> int:
             "shared_nonnat_package": str(shared_nonnat),
             "shared_nat_package": str(shared_nat),
             "cgnat_customer_review": str(cgnat_review),
+            "cgnat_customer_local_pki_review": str(cgnat_local_pki_review),
             "cgnat_customer_staged_apply": str(cgnat_staged_apply),
             "cgnat_customer_staged_rollback": str(cgnat_staged_apply / "rollback-execution-summary.json"),
             "sample_prep": str(sample_prep),

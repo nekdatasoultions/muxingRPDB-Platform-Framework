@@ -1,0 +1,46 @@
+schema_version: 1
+
+customer:
+  name: example-minimal-cgnat-local-pki
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.52
+    psk_secret_ref: /muxingrpdb/customers/example-minimal-cgnat-local-pki/psk
+  selectors:
+    local_subnets:
+      - 23.20.31.151/32
+      - 194.138.36.86/32
+    remote_subnets:
+      - 10.20.30.11/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true
+  transport:
+    mode: cgnat
+    tunnel_mtu: 1436
+    cgnat:
+      service_profile: scenario1
+      outer_identity_ref: customer-router-2/example-minimal-cgnat-local-pki
+      outer_auth_ref: pki/cgnat/customer-router-2
+      customer_loopback_ip: 10.250.1.11
+      known_inside_identity: 10.20.30.11/32
+      service_reachable_subnets:
+        - 23.20.31.151/32
+        - 194.138.36.86/32
+      pki:
+        mode: local_generate
+        ca_common_name: example-minimal-cgnat-local-pki-outer-ca
+        headend:
+          identity_ref: cgnat-head-end/example-minimal-cgnat-local-pki
+          auth_ref: pki/cgnat/headend/example-minimal-cgnat-local-pki
+        customer:
+          identity_ref: customer-router-2/example-minimal-cgnat-local-pki
+          auth_ref: pki/cgnat/customer-router-2/example-minimal-cgnat-local-pki
+          package_name: example-minimal-cgnat-local-pki-customer-router-2
+        trust:
+          ca_ref: pki/cgnat/ca/example-minimal-cgnat-local-pki

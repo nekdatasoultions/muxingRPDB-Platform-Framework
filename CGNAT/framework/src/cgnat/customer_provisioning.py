@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cgnat.pki_materializer import materialize_cgnat_pki, resolve_cgnat_pki_spec
+
 
 def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -23,14 +25,18 @@ def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "
     if mode != "cgnat":
         raise ValueError(f"{request_path} must declare customer.transport.mode = cgnat")
     cgnat = dict(transport.get("cgnat") or {})
+    pki = dict(cgnat.get("pki") or {})
+    customer_pki = dict(pki.get("customer") or {})
     required = [
         "service_profile",
-        "outer_identity_ref",
-        "outer_auth_ref",
         "customer_loopback_ip",
         "known_inside_identity",
     ]
     missing = [field for field in required if not str(cgnat.get(field) or "").strip()]
+    if not (str(cgnat.get("outer_identity_ref") or "").strip() or str(customer_pki.get("identity_ref") or "").strip()):
+        missing.append("outer_identity_ref|customer.transport.cgnat.pki.customer.identity_ref")
+    if not (str(cgnat.get("outer_auth_ref") or "").strip() or str(customer_pki.get("auth_ref") or "").strip()):
+        missing.append("outer_auth_ref|customer.transport.cgnat.pki.customer.auth_ref")
     if missing:
         raise ValueError(
             f"{request_path} is missing required customer.transport.cgnat fields: {', '.join(missing)}"
@@ -140,6 +146,7 @@ def build_cgnat_headend_surface_review(
     gate = _dry_run_gate(execution_plan)
     transport = _transport_doc(request_doc)
     cgnat = dict(transport.get("cgnat") or {})
+    pki_spec = resolve_cgnat_pki_spec(request_doc)
     headend = dict(targets.get("cgnat_headend_active") or {})
     service_reachable_subnets = list(cgnat.get("service_reachable_subnets") or [])
     return {
@@ -157,11 +164,26 @@ def build_cgnat_headend_surface_review(
             "known_inside_identity": cgnat.get("known_inside_identity"),
             "service_reachable_subnets": service_reachable_subnets,
         },
+        "pki_binding": {
+            "headend_identity_ref": pki_spec["headend"]["identity_ref"],
+            "headend_auth_ref": pki_spec["headend"]["auth_ref"],
+            "customer_identity_ref": pki_spec["customer"]["identity_ref"],
+            "customer_auth_ref": pki_spec["customer"]["auth_ref"],
+            "trust_ca_ref": pki_spec["trust"]["ca_ref"],
+        },
         "notes": [
             "The CGNAT head-end remains an explicit deployment surface with its own target and backup reference.",
             "This review surface captures the customer-specific outer transport identity and service selectors needed for live integration.",
         ],
     }
+
+
+def build_cgnat_pki_surface_review(
+    *,
+    request_doc: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any]:
+    return materialize_cgnat_pki(request_doc, output_dir)
 
 
 def build_cgnat_rollback_plan(
@@ -281,6 +303,7 @@ def build_cgnat_combined_review(
     backend_review: dict[str, Any],
     muxer_review: dict[str, Any],
     cgnat_headend_review: dict[str, Any],
+    pki_review: dict[str, Any],
     rollback_plan: dict[str, Any],
     live_test_bed_plan: dict[str, Any],
     shared_deploy_dir: Path,
@@ -291,6 +314,7 @@ def build_cgnat_combined_review(
         "backend": backend_review.get("status"),
         "muxer": muxer_review.get("status"),
         "cgnat_headend": cgnat_headend_review.get("status"),
+        "pki": pki_review.get("status"),
     }
     ready = all(status == "ready_for_review" or status == "dry_run_ready" for status in statuses.values())
     customer = dict(readiness.get("customer") or {})
@@ -317,6 +341,7 @@ def build_cgnat_combined_review(
             "backend": "backend/backend-review.json",
             "muxer": "muxer/muxer-review.json",
             "cgnat_headend": "cgnat/cgnat-headend-review.json",
+            "pki": "pki/pki-review.json",
             "rollback_plan": "rollback-plan.json",
             "live_test_bed_plan": "live-test-bed-plan.json",
         },
@@ -324,6 +349,7 @@ def build_cgnat_combined_review(
             "This review package layers CGNAT-specific deployment surfaces on top of the shared RPDB repo-only package and dry-run deploy plan.",
             "No live nodes were touched while building this review package.",
             "Future live testing must honor the backup-before-remove rule captured in the rollback plan.",
+            f"PKI material mode: {pki_review.get('mode')}",
             f"Preferred first live test bed: {live_test_bed_plan.get('test_bed_customer')}",
         ],
     }
@@ -335,6 +361,7 @@ def render_cgnat_combined_readme(
     backend_review: dict[str, Any],
     muxer_review: dict[str, Any],
     cgnat_headend_review: dict[str, Any],
+    pki_review: dict[str, Any],
 ) -> str:
     customer = dict(combined_review.get("customer") or {})
     shared = dict(combined_review.get("shared_deploy_review") or {})
@@ -358,6 +385,8 @@ def render_cgnat_combined_readme(
         f"- Backend target family: `{backend_review.get('headend_family')}`",
         f"- Muxer target: `{muxer_review.get('target')}`",
         f"- CGNAT head-end target: `{cgnat_headend_review.get('target')}`",
+        f"- PKI mode: `{pki_review.get('mode')}`",
+        f"- Customer handoff package: `{(pki_review.get('customer_handoff') or {}).get('package_name')}`",
         "",
         "## Safety",
         "",

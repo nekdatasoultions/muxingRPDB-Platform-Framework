@@ -63,8 +63,10 @@ That means:
 
 - shared requests may describe certificate identity/auth references
 - package/apply logic may validate those references
-- actual certificate issuance remains a separate concern until the PKI model is
-  explicitly extended
+- shared repo-only review may generate local lab/test-bed material without
+  changing the reference-first request model
+- third-party or provider-backed certificate issuance remains a separate concern
+  until the PKI adapter surface is explicitly extended
 
 This keeps the integration portable across:
 
@@ -349,6 +351,13 @@ Exit criteria:
   - locally generated
   - provider-issued
 - legacy CGNAT examples still validate or have a clearly documented migration
+
+Implementation note:
+
+- the initial slice is now implemented for:
+  - `reference`
+  - `local_generate`
+- `provider_api` remains a planned adapter and is not yet executable
 
 ### Phase 3: Build CGNAT Repo-Only Packaging
 

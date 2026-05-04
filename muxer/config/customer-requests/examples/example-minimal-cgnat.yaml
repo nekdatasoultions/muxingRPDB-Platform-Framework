@@ -32,3 +32,14 @@ customer:
       service_reachable_subnets:
         - 23.20.31.151/32
         - 194.138.36.86/32
+      pki:
+        mode: reference
+        headend:
+          identity_ref: cgnat-head-end/example-minimal-cgnat
+          auth_ref: pki/cgnat/headend/example-minimal-cgnat
+        customer:
+          identity_ref: customer-router-1/example-minimal-cgnat
+          auth_ref: pki/cgnat/customer-router-1/example-minimal-cgnat
+          package_name: example-minimal-cgnat-customer-router-1
+        trust:
+          ca_ref: pki/cgnat/ca/example-minimal-cgnat

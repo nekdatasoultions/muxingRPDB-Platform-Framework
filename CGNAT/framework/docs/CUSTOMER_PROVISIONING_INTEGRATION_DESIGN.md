@@ -175,26 +175,33 @@ The absence of a transport block should preserve the current legacy behavior.
 
 ## Current Certificate Scope
 
-The shared CGNAT provisioning flow currently carries certificate and identity
-**references only**.
+The shared CGNAT provisioning flow is now **reference-first with a local
+materializer lane**.
 
-Today it does **not**:
+Today it can:
 
-- generate a CGNAT head-end certificate
-- generate a customer-device certificate
-- call a CA or external PKI API
-- package private key material into the shared provisioning path
+- carry coarse legacy refs like `outer_identity_ref` and `outer_auth_ref`
+- carry richer PKI metadata under `customer.transport.cgnat.pki`
+- resolve **reference** mode into head-end and customer handoff review artifacts
+- generate **local** head-end and customer-device material for lab/test-bed use
+- emit a customer handoff bundle without logging into the customer device
 
-The current shared model carries:
+Today it still does **not**:
 
-- `outer_identity_ref`
-- `outer_auth_ref`
+- call a third-party CA or external PKI API
+- install customer-device material directly on customer equipment
+- replace provider-specific issuance workflows
 
-That is enough for package generation and validation, but it is not yet a
-complete PKI lifecycle.
+The current shared model now carries:
 
-This is separate from the Scenario 1 demo tooling under `CGNAT/server/`, which
-can generate local OpenSSL demo materials for testing.
+- separate head-end/customer/trust references
+- issuance mode metadata:
+  - `reference`
+  - `local_generate`
+  - `provider_api`
+
+That is enough for package generation, review, and local test-bed handoff, but
+it is not yet a complete provider-backed PKI lifecycle.
 
 ## PKI Design Direction
 
@@ -314,16 +321,16 @@ The shared provisioning integration currently supports:
 
 - transport metadata
 - certificate/auth references
+- repo-only PKI review artifacts
+- locally generated head-end/customer handoff material for lab or test-bed use
 - backend + muxer + CGNAT head-end package/apply surfaces
 
 ### Future Scope
 
 The next certificate-related extension should add:
 
-- separate head-end/customer/trust refs
-- issuance-mode metadata
 - provider abstraction points
-- validation rules for reference completeness
+- validation rules for provider-backed issuance completeness
 
 Actual third-party CA/API issuance should be added only after the reference
 model is stable.

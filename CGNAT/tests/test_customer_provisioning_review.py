@@ -16,6 +16,7 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
     build_cgnat_live_test_bed_plan,
+    build_cgnat_pki_surface_review,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
     validate_cgnat_request,
@@ -89,6 +90,10 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             request_doc=self.request_doc,
             execution_plan=self.execution_plan,
         )
+        pki_review = build_cgnat_pki_surface_review(
+            request_doc=self.request_doc,
+            output_dir=CGNAT_ROOT / "build" / "review-test" / "pki-reference",
+        )
 
         self.assertEqual(backend["headend_family"], "non_nat")
         self.assertEqual(backend["targets"]["active"], "vpn-headend-non-nat-graviton-dev-rpdb-empty-headend-a")
@@ -97,6 +102,16 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         self.assertEqual(cgnat_headend["target"], "cgnat-head-end-rpdb-empty-a")
         self.assertEqual(cgnat_headend["transport_profile"]["customer_loopback_ip"], "10.250.1.10")
         self.assertEqual(cgnat_headend["transport_profile"]["known_inside_identity"], "10.20.30.10/32")
+        self.assertEqual(pki_review["mode"], "reference")
+        self.assertTrue(pki_review["ready_for_review"])
+        self.assertEqual(
+            pki_review["headend"]["identity_ref"],
+            "cgnat-head-end/example-minimal-cgnat",
+        )
+        self.assertEqual(
+            pki_review["customer_handoff"]["package_name"],
+            "example-minimal-cgnat-customer-router-1",
+        )
 
     def test_combined_review_and_rollback_plan_stay_ready(self) -> None:
         backend = build_backend_surface_review(
@@ -113,6 +128,10 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         cgnat_headend = build_cgnat_headend_surface_review(
             request_doc=self.request_doc,
             execution_plan=self.execution_plan,
+        )
+        pki_review = build_cgnat_pki_surface_review(
+            request_doc=self.request_doc,
+            output_dir=CGNAT_ROOT / "build" / "review-test" / "pki-reference-combined",
         )
         rollback = build_cgnat_rollback_plan(
             execution_plan=self.execution_plan,
@@ -131,6 +150,7 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             backend_review=backend,
             muxer_review=muxer,
             cgnat_headend_review=cgnat_headend,
+            pki_review=pki_review,
             rollback_plan=rollback,
             live_test_bed_plan=live_test_bed,
             shared_deploy_dir=self.shared_deploy_dir,
@@ -146,6 +166,8 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             live_test_bed["backup_gate"]["references"]["backend_headend"],
             "s3://demo/backups/non-nat-headend",
         )
+        self.assertEqual(combined["surface_status"]["pki"], "ready_for_review")
+        self.assertIn("pki", combined["surfaces"])
         self.assertIn("live_test_bed_plan", combined["surfaces"])
         self.assertIn("CGNAT customer 1", " ".join(combined["notes"]))
 

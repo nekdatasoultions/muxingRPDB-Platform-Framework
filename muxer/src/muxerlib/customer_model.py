@@ -20,6 +20,29 @@ class Overlay:
 
 
 @dataclass(frozen=True)
+class CgnatPkiEndpoint:
+    identity_ref: str = ""
+    auth_ref: str = ""
+    package_name: str = ""
+
+
+@dataclass(frozen=True)
+class CgnatPkiTrust:
+    ca_ref: str = ""
+
+
+@dataclass(frozen=True)
+class CgnatPki:
+    mode: str = "reference"
+    provider: str = ""
+    ca_common_name: str = ""
+    customer_package_format: str = "pem_bundle"
+    headend: Optional[CgnatPkiEndpoint] = None
+    customer: Optional[CgnatPkiEndpoint] = None
+    trust: Optional[CgnatPkiTrust] = None
+
+
+@dataclass(frozen=True)
 class CgnatTransport:
     service_profile: str = ""
     outer_identity_ref: str = ""
@@ -27,6 +50,7 @@ class CgnatTransport:
     customer_loopback_ip: str = ""
     known_inside_identity: str = ""
     service_reachable_subnets: Optional[List[str]] = None
+    pki: Optional[CgnatPki] = None
 
 
 @dataclass(frozen=True)
@@ -339,7 +363,58 @@ def _normalized_transport_mode(value: Any) -> str:
     return normalized
 
 
+def _normalized_cgnat_pki_mode(value: Any) -> str:
+    if value in (None, ""):
+        return "reference"
+    normalized = str(value).strip().lower()
+    allowed = {"reference", "local_generate", "provider_api"}
+    if normalized not in allowed:
+        raise ValueError(f"unsupported customer.transport.cgnat.pki.mode {value!r}")
+    return normalized
+
+
+def _normalize_cgnat_pki_endpoint(doc: Dict[str, Any]) -> CgnatPkiEndpoint:
+    return CgnatPkiEndpoint(
+        identity_ref=str(doc.get("identity_ref") or ""),
+        auth_ref=str(doc.get("auth_ref") or ""),
+        package_name=str(doc.get("package_name") or ""),
+    )
+
+
+def _normalize_cgnat_pki(doc: Dict[str, Any]) -> CgnatPki:
+    headend_doc = doc.get("headend") or {}
+    customer_doc = doc.get("customer") or {}
+    trust_doc = doc.get("trust") or {}
+    customer_package_format = str(doc.get("customer_package_format") or "pem_bundle").strip().lower()
+    if customer_package_format not in {"pem_bundle"}:
+        raise ValueError(
+            f"unsupported customer.transport.cgnat.pki.customer_package_format {customer_package_format!r}"
+        )
+    return CgnatPki(
+        mode=_normalized_cgnat_pki_mode(doc.get("mode")),
+        provider=str(doc.get("provider") or ""),
+        ca_common_name=str(doc.get("ca_common_name") or ""),
+        customer_package_format=customer_package_format,
+        headend=(
+            _normalize_cgnat_pki_endpoint(headend_doc)
+            if isinstance(headend_doc, dict) and headend_doc
+            else None
+        ),
+        customer=(
+            _normalize_cgnat_pki_endpoint(customer_doc)
+            if isinstance(customer_doc, dict) and customer_doc
+            else None
+        ),
+        trust=(
+            CgnatPkiTrust(ca_ref=str(trust_doc.get("ca_ref") or ""))
+            if isinstance(trust_doc, dict) and trust_doc
+            else None
+        ),
+    )
+
+
 def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
+    pki_doc = doc.get("pki") or {}
     return CgnatTransport(
         service_profile=str(doc.get("service_profile") or ""),
         outer_identity_ref=str(doc.get("outer_identity_ref") or ""),
@@ -361,6 +436,11 @@ def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
         service_reachable_subnets=_validated_optional_cidr_list(
             doc.get("service_reachable_subnets"),
             "customer.transport.cgnat.service_reachable_subnets",
+        ),
+        pki=(
+            _normalize_cgnat_pki(pki_doc)
+            if isinstance(pki_doc, dict) and pki_doc
+            else None
         ),
     )
 

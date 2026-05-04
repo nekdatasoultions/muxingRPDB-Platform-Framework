@@ -36,6 +36,7 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
     build_cgnat_live_test_bed_plan,
+    build_cgnat_pki_surface_review,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
     render_cgnat_combined_readme,
@@ -174,6 +175,10 @@ def main() -> int:
         request_doc=request_doc,
         execution_plan=execution_plan,
     )
+    pki_review = build_cgnat_pki_surface_review(
+        request_doc=request_doc,
+        output_dir=output_dir / "pki",
+    )
     rollback_plan = build_cgnat_rollback_plan(
         execution_plan=execution_plan,
         test_bed_customer=args.test_bed_customer,
@@ -191,6 +196,7 @@ def main() -> int:
         backend_review=backend_review,
         muxer_review=muxer_review,
         cgnat_headend_review=cgnat_headend_review,
+        pki_review=pki_review,
         rollback_plan=rollback_plan,
         live_test_bed_plan=live_test_bed_plan,
         shared_deploy_dir=shared_deploy_dir,
@@ -199,6 +205,7 @@ def main() -> int:
     _write_surface(output_dir, "backend/backend-review.json", backend_review)
     _write_surface(output_dir, "muxer/muxer-review.json", muxer_review)
     _write_surface(output_dir, "cgnat/cgnat-headend-review.json", cgnat_headend_review)
+    _write_surface(output_dir, "pki/pki-review.json", pki_review)
     _write_surface(output_dir, "rollback-plan.json", rollback_plan)
     _write_surface(output_dir, "live-test-bed-plan.json", live_test_bed_plan)
     _write_surface(output_dir, "combined-review-summary.json", combined_review)
@@ -209,6 +216,7 @@ def main() -> int:
             backend_review=backend_review,
             muxer_review=muxer_review,
             cgnat_headend_review=cgnat_headend_review,
+            pki_review=pki_review,
         ),
     )
 

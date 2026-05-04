@@ -96,6 +96,19 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
             source_transport["cgnat"]["service_reachable_subnets"],
             ["23.20.31.151/32", "194.138.36.86/32"],
         )
+        self.assertEqual(source_transport["cgnat"]["pki"]["mode"], "reference")
+        self.assertEqual(
+            source_transport["cgnat"]["pki"]["headend"]["identity_ref"],
+            "cgnat-head-end/example-minimal-cgnat",
+        )
+        self.assertEqual(
+            source_transport["cgnat"]["pki"]["customer"]["package_name"],
+            "example-minimal-cgnat-customer-router-1",
+        )
+        self.assertEqual(
+            source_transport["cgnat"]["pki"]["trust"]["ca_ref"],
+            "pki/cgnat/ca/example-minimal-cgnat",
+        )
 
         self.assertEqual(module_transport["mode"], "cgnat")
         self.assertEqual(module_transport["cgnat"]["customer_loopback_ip"], "10.250.1.10")
@@ -103,6 +116,41 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(
             module_transport["cgnat"]["service_reachable_subnets"],
             ["23.20.31.151/32", "194.138.36.86/32"],
+        )
+        self.assertEqual(module_transport["cgnat"]["pki"]["mode"], "reference")
+        self.assertEqual(
+            module_transport["cgnat"]["pki"]["headend"]["auth_ref"],
+            "pki/cgnat/headend/example-minimal-cgnat",
+        )
+        self.assertEqual(
+            module_transport["cgnat"]["pki"]["customer"]["identity_ref"],
+            "customer-router-1/example-minimal-cgnat",
+        )
+
+    def test_local_pki_request_validates_and_survives_model_layers(self) -> None:
+        request_doc = self._load_request("example-minimal-cgnat-local-pki.yaml")
+        jsonschema.validate(instance=request_doc, schema=self.schema)
+
+        customer_source = self._render_source(request_doc)
+        customer_module = build_customer_module(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-minimal-cgnat-local-pki.yaml",
+        )
+
+        source_transport = customer_source["customer"]["transport"]
+        module_transport = customer_module["transport"]
+
+        self.assertEqual(source_transport["mode"], "cgnat")
+        self.assertEqual(source_transport["cgnat"]["pki"]["mode"], "local_generate")
+        self.assertEqual(
+            source_transport["cgnat"]["pki"]["customer"]["package_name"],
+            "example-minimal-cgnat-local-pki-customer-router-2",
+        )
+        self.assertEqual(
+            module_transport["cgnat"]["pki"]["trust"]["ca_ref"],
+            "pki/cgnat/ca/example-minimal-cgnat-local-pki",
         )
 
     def test_target_selection_adds_cgnat_headend_only_for_cgnat_transport(self) -> None:
