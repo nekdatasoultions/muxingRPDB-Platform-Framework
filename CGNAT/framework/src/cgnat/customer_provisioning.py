@@ -206,6 +206,73 @@ def build_cgnat_rollback_plan(
     }
 
 
+def build_cgnat_live_test_bed_plan(
+    *,
+    request_doc: dict[str, Any],
+    execution_plan: dict[str, Any],
+    rollback_plan: dict[str, Any],
+    test_bed_customer: str | None = None,
+) -> dict[str, Any]:
+    customer_name = str((_customer_doc(request_doc).get("name") or ""))
+    targets = _selected_targets(execution_plan)
+    gate = _dry_run_gate(execution_plan)
+    selected_family = str(targets.get("headend_family") or "").strip()
+    headend_backup_key = "nat_headend" if selected_family == "nat" else "non_nat_headend"
+    backup_refs = dict(gate.get("backup_refs") or {})
+    backend_headend_backup_ref = (
+        backup_refs.get(headend_backup_key)
+        or backup_refs.get("selected_headend")
+    )
+    backend_headend_backup_key = str(
+        backup_refs.get("selected_headend_key") or headend_backup_key
+    )
+    test_bed = str(test_bed_customer or customer_name).strip()
+    return {
+        "schema_version": 1,
+        "status": "review_required",
+        "generated_at": _now_utc(),
+        "customer_name": customer_name,
+        "test_bed_customer": test_bed,
+        "transport_mode": str((_transport_doc(request_doc).get("mode") or "")),
+        "target_summary": {
+            "muxer": dict(targets.get("muxer") or {}).get("name"),
+            "backend_headend_family": selected_family,
+            "backend_headend_active": dict(targets.get("headend_active") or {}).get("name"),
+            "backend_headend_standby": dict(targets.get("headend_standby") or {}).get("name"),
+            "cgnat_headend_active": dict(targets.get("cgnat_headend_active") or {}).get("name"),
+        },
+        "backup_gate": {
+            "required": True,
+            "references": {
+                "muxer": backup_refs.get("muxer"),
+                "backend_headend": backend_headend_backup_ref,
+                "backend_headend_key": backend_headend_backup_key,
+                "cgnat_headend": backup_refs.get("cgnat_headend"),
+            },
+        },
+        "pre_change_capture_order": [
+            "capture_cgnat_headend_backup",
+            "capture_muxer_backup",
+            "capture_backend_headend_backup",
+            "verify_backup_artifacts_before_remove_or_replace",
+        ],
+        "staged_apply_order": [
+            "apply_backend_customer_state",
+            "validate_backend_customer_state",
+            "apply_muxer_customer_state",
+            "validate_muxer_customer_state",
+            "apply_cgnat_headend_customer_state",
+            "validate_cgnat_headend_customer_state",
+        ],
+        "rollback_order": list(rollback_plan.get("rollback_order") or []),
+        "notes": [
+            "This plan is for the first controlled live CGNAT test-bed run and must remain backup-first.",
+            "Do not remove or replace any live configuration until the referenced backups are captured and verified.",
+            f"Use {test_bed} as the preferred first live test-bed customer unless a later review explicitly changes that choice.",
+        ],
+    }
+
+
 def build_cgnat_combined_review(
     *,
     request_doc: dict[str, Any],
@@ -215,6 +282,7 @@ def build_cgnat_combined_review(
     muxer_review: dict[str, Any],
     cgnat_headend_review: dict[str, Any],
     rollback_plan: dict[str, Any],
+    live_test_bed_plan: dict[str, Any],
     shared_deploy_dir: Path,
 ) -> dict[str, Any]:
     validate_cgnat_request(request_doc)
@@ -250,11 +318,13 @@ def build_cgnat_combined_review(
             "muxer": "muxer/muxer-review.json",
             "cgnat_headend": "cgnat/cgnat-headend-review.json",
             "rollback_plan": "rollback-plan.json",
+            "live_test_bed_plan": "live-test-bed-plan.json",
         },
         "notes": [
             "This review package layers CGNAT-specific deployment surfaces on top of the shared RPDB repo-only package and dry-run deploy plan.",
             "No live nodes were touched while building this review package.",
             "Future live testing must honor the backup-before-remove rule captured in the rollback plan.",
+            f"Preferred first live test bed: {live_test_bed_plan.get('test_bed_customer')}",
         ],
     }
 

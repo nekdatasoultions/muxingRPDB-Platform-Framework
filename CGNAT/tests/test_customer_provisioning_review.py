@@ -15,6 +15,7 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_backend_surface_review,
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
+    build_cgnat_live_test_bed_plan,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
     validate_cgnat_request,
@@ -61,6 +62,8 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
                 "backup_refs": {
                     "muxer": "s3://demo/backups/muxer",
                     "non_nat_headend": "s3://demo/backups/non-nat-headend",
+                    "selected_headend": "s3://demo/backups/non-nat-headend",
+                    "selected_headend_key": "non_nat_headend",
                     "cgnat_headend": "s3://demo/backups/cgnat-headend",
                 }
             },
@@ -115,6 +118,12 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             execution_plan=self.execution_plan,
             test_bed_customer="CGNAT customer 1",
         )
+        live_test_bed = build_cgnat_live_test_bed_plan(
+            request_doc=self.request_doc,
+            execution_plan=self.execution_plan,
+            rollback_plan=rollback,
+            test_bed_customer="CGNAT customer 1",
+        )
         combined = build_cgnat_combined_review(
             request_doc=self.request_doc,
             readiness=self.readiness,
@@ -123,6 +132,7 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
             muxer_review=muxer,
             cgnat_headend_review=cgnat_headend,
             rollback_plan=rollback,
+            live_test_bed_plan=live_test_bed,
             shared_deploy_dir=self.shared_deploy_dir,
         )
 
@@ -130,6 +140,14 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         self.assertEqual(combined["surface_status"]["shared_dry_run"], "dry_run_ready")
         self.assertTrue(rollback["preconditions"]["backup_before_remove_required"])
         self.assertIn("CGNAT customer 1", " ".join(rollback["notes"]))
+        self.assertEqual(live_test_bed["test_bed_customer"], "CGNAT customer 1")
+        self.assertTrue(live_test_bed["backup_gate"]["required"])
+        self.assertEqual(
+            live_test_bed["backup_gate"]["references"]["backend_headend"],
+            "s3://demo/backups/non-nat-headend",
+        )
+        self.assertIn("live_test_bed_plan", combined["surfaces"])
+        self.assertIn("CGNAT customer 1", " ".join(combined["notes"]))
 
 
 if __name__ == "__main__":

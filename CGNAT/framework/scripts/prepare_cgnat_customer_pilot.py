@@ -35,6 +35,7 @@ from cgnat.customer_provisioning import (  # noqa: E402
     build_backend_surface_review,
     build_cgnat_combined_review,
     build_cgnat_headend_surface_review,
+    build_cgnat_live_test_bed_plan,
     build_cgnat_rollback_plan,
     build_muxer_surface_review,
     render_cgnat_combined_readme,
@@ -177,6 +178,12 @@ def main() -> int:
         execution_plan=execution_plan,
         test_bed_customer=args.test_bed_customer,
     )
+    live_test_bed_plan = build_cgnat_live_test_bed_plan(
+        request_doc=request_doc,
+        execution_plan=execution_plan,
+        rollback_plan=rollback_plan,
+        test_bed_customer=args.test_bed_customer,
+    )
     combined_review = build_cgnat_combined_review(
         request_doc=request_doc,
         readiness=readiness,
@@ -185,6 +192,7 @@ def main() -> int:
         muxer_review=muxer_review,
         cgnat_headend_review=cgnat_headend_review,
         rollback_plan=rollback_plan,
+        live_test_bed_plan=live_test_bed_plan,
         shared_deploy_dir=shared_deploy_dir,
     )
 
@@ -192,6 +200,7 @@ def main() -> int:
     _write_surface(output_dir, "muxer/muxer-review.json", muxer_review)
     _write_surface(output_dir, "cgnat/cgnat-headend-review.json", cgnat_headend_review)
     _write_surface(output_dir, "rollback-plan.json", rollback_plan)
+    _write_surface(output_dir, "live-test-bed-plan.json", live_test_bed_plan)
     _write_surface(output_dir, "combined-review-summary.json", combined_review)
     dump_text(
         output_dir / "README.md",
