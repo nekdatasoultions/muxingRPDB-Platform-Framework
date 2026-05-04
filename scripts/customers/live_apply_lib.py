@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -213,6 +214,158 @@ def _aws_secret_string(region: str, secret_id: str) -> str:
     return secret
 
 
+def _load_customer_module(package_dir: Path) -> dict[str, Any]:
+    module_path = package_dir / "customer-module.json"
+    return json.loads(module_path.read_text(encoding="utf-8"))
+
+
+def _is_cgnat_local_generate(module: dict[str, Any]) -> bool:
+    transport = module.get("transport") or {}
+    if str(transport.get("mode") or "").strip().lower() != "cgnat":
+        return False
+    cgnat = transport.get("cgnat") or {}
+    pki = cgnat.get("pki") or {}
+    return str(pki.get("mode") or "").strip().lower() == "local_generate"
+
+
+def _try_aws_secret_string(region: str, secret_id: str) -> tuple[str | None, bool]:
+    completed = run_local(
+        [
+            "aws",
+            "secretsmanager",
+            "get-secret-value",
+            "--region",
+            region,
+            "--secret-id",
+            secret_id,
+            "--query",
+            "SecretString",
+            "--output",
+            "text",
+        ]
+    )
+    if completed.returncode == 0:
+        secret = completed.stdout.rstrip("\r\n")
+        if not secret or secret == "None":
+            raise RuntimeError(f"customer PSK secret {secret_id} did not contain SecretString")
+        return secret, True
+    output = (completed.stderr or completed.stdout).strip()
+    if "ResourceNotFoundException" in output:
+        return None, False
+    raise RuntimeError(
+        f"unable to resolve customer PSK secret {secret_id}: "
+        f"{output or 'AWS CLI command failed'}"
+    )
+
+
+def _write_generated_customer_psk(
+    *,
+    apply_dir: Path,
+    customer_name: str,
+    secret_ref: str,
+    secret: str,
+) -> Path:
+    handoff_dir = apply_dir / "customer-handoff"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    psk_path = handoff_dir / "customer-inner-psk.txt"
+    psk_path.write_text(secret + "\n", encoding="utf-8")
+    write_json(
+        handoff_dir / "customer-inner-psk-manifest.json",
+        {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "secret_ref": secret_ref,
+            "generated_locally": True,
+            "generated_at": utc_now(),
+            "psk_path": repo_relative(psk_path),
+            "psk_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+        },
+    )
+    return psk_path
+
+
+def _resolve_or_seed_customer_psk_secret(
+    *,
+    package_dir: Path,
+    region: str,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    module = _load_customer_module(package_dir)
+    customer = module.get("customer") or {}
+    peer = module.get("peer") or {}
+    customer_name = str(customer.get("name") or "").strip() or "customer"
+    secret_ref = str(peer.get("psk_secret_ref") or "").strip()
+    if not secret_ref:
+        raise RuntimeError("customer module is missing peer.psk_secret_ref for live head-end apply")
+
+    secret, existed = _try_aws_secret_string(region, secret_ref)
+    if existed and secret is not None:
+        return {
+            "secret": secret,
+            "secret_ref": secret_ref,
+            "created": False,
+            "secret_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+            "secret_length": len(secret),
+            "local_handoff_path": None,
+        }
+
+    if not _is_cgnat_local_generate(module):
+        raise RuntimeError(
+            f"customer PSK secret {secret_ref} was not found and automatic seeding is only enabled "
+            "for CGNAT local_generate customers"
+        )
+
+    generated_secret = secrets.token_urlsafe(24)
+    completed = run_local(
+        [
+            "aws",
+            "secretsmanager",
+            "create-secret",
+            "--region",
+            region,
+            "--name",
+            secret_ref,
+            "--secret-string",
+            generated_secret,
+        ]
+    )
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout).strip()
+        if "ResourceExistsException" not in output:
+            raise RuntimeError(
+                f"unable to create customer PSK secret {secret_ref}: "
+                f"{output or 'AWS CLI command failed'}"
+            )
+        generated_secret, existed = _try_aws_secret_string(region, secret_ref)
+        if not existed or generated_secret is None:
+            raise RuntimeError(
+                f"customer PSK secret {secret_ref} appeared to exist after create race but could not be read"
+            )
+        return {
+            "secret": generated_secret,
+            "secret_ref": secret_ref,
+            "created": False,
+            "secret_sha256": hashlib.sha256(generated_secret.encode("utf-8")).hexdigest(),
+            "secret_length": len(generated_secret),
+            "local_handoff_path": None,
+        }
+
+    local_handoff_path = _write_generated_customer_psk(
+        apply_dir=apply_dir,
+        customer_name=customer_name,
+        secret_ref=secret_ref,
+        secret=generated_secret,
+    )
+    return {
+        "secret": generated_secret,
+        "secret_ref": secret_ref,
+        "created": True,
+        "secret_sha256": hashlib.sha256(generated_secret.encode("utf-8")).hexdigest(),
+        "secret_length": len(generated_secret),
+        "local_handoff_path": repo_relative(local_handoff_path),
+    }
+
+
 def _swanctl_quote(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
@@ -224,15 +377,15 @@ def _inject_live_headend_secret(
     package_dir: Path,
     headend_prepared: dict[str, Any],
     region: str,
+    apply_dir: Path,
 ) -> dict[str, Any]:
-    module_path = package_dir / "customer-module.json"
-    module = json.loads(module_path.read_text(encoding="utf-8"))
-    peer = module.get("peer") or {}
-    secret_ref = str(peer.get("psk_secret_ref") or "").strip()
-    if not secret_ref:
-        raise RuntimeError("customer module is missing peer.psk_secret_ref for live head-end apply")
-
-    secret = _aws_secret_string(region, secret_ref)
+    secret_report = _resolve_or_seed_customer_psk_secret(
+        package_dir=package_dir,
+        region=region,
+        apply_dir=apply_dir,
+    )
+    secret_ref = str(secret_report["secret_ref"])
+    secret = str(secret_report["secret"])
     swanctl_conf = Path(str((headend_prepared.get("apply") or {}).get("swanctl_conf") or "")).resolve()
     if not swanctl_conf.exists():
         raise RuntimeError(f"prepared head-end swanctl config not found: {swanctl_conf}")
@@ -250,10 +403,12 @@ def _inject_live_headend_secret(
 
     report = {
         "secret_ref": secret_ref,
-        "secret_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
-        "secret_length": len(secret),
+        "secret_sha256": secret_report["secret_sha256"],
+        "secret_length": secret_report["secret_length"],
         "swanctl_conf": repo_relative(swanctl_conf),
         "injected": True,
+        "created": bool(secret_report["created"]),
+        "local_handoff_path": secret_report["local_handoff_path"],
     }
     _record_structured(
         journal,
@@ -1601,6 +1756,7 @@ def execute_ssh_live_apply(
             package_dir=package_dir,
             headend_prepared=headend_prepared,
             region=region,
+            apply_dir=apply_dir,
         )
         headend_prepared["secret_resolution"] = headend_secret
 
