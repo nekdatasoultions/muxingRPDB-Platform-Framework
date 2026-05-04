@@ -95,7 +95,7 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
         if self.test_root.exists():
             shutil.rmtree(self.test_root)
 
-    def test_cgnat_customer_approved_apply_succeeds_in_private_staged_environment(self) -> None:
+    def _run_approved_apply(self) -> dict:
         completed = subprocess.run(
             [
                 PYTHON,
@@ -116,8 +116,26 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr or completed.stdout)
-        execution_plan = json.loads(completed.stdout)
+        return json.loads(completed.stdout)
 
+    def _run_rollback(self, rollback_plan_path: Path) -> list[dict]:
+        rollback_plan = json.loads(rollback_plan_path.read_text(encoding="utf-8"))
+        results: list[dict] = []
+        for step in reversed(rollback_plan["steps"]):
+            completed = subprocess.run(
+                step["command"],
+                cwd=str(REPO_ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr or completed.stdout)
+            payload = json.loads(completed.stdout)
+            results.append(payload)
+        return results
+
+    def test_cgnat_customer_approved_apply_installs_rich_staged_surface(self) -> None:
+        execution_plan = self._run_approved_apply()
         self.assertEqual(execution_plan["status"], "applied")
         self.assertTrue(execution_plan["approved"])
         self.assertTrue(execution_plan["live_apply"])
@@ -136,15 +154,55 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
 
         customer_root = self.staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / self.customer_name
         config_json = self.staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / f"{self.customer_name}.json"
+        self.assertTrue((customer_root / "customer-summary.json").exists())
         self.assertTrue((customer_root / "install-state.json").exists())
         self.assertTrue((customer_root / "cgnat-transport.json").exists())
+        self.assertTrue((customer_root / "transport" / "transport-profile.json").exists())
+        self.assertTrue((customer_root / "transport" / "apply-transport.sh").exists())
+        self.assertTrue((customer_root / "transport" / "remove-transport.sh").exists())
+        self.assertTrue((customer_root / "validation" / "validation-intent.json").exists())
+        self.assertTrue((customer_root / "validation" / "activation-manifest.json").exists())
         self.assertTrue((customer_root / "apply-cgnat-customer.sh").exists())
+        self.assertTrue((customer_root / "remove-cgnat-customer.sh").exists())
         self.assertTrue(config_json.exists())
 
         rollback_plan_path = REPO_ROOT / apply_result["rollback_plan"]
         rollback_plan = json.loads(rollback_plan_path.read_text(encoding="utf-8"))
         self.assertIn("backup_gate", rollback_plan)
         self.assertTrue(any(step.get("action") == "rollback_cgnat_headend_activation_bundle" for step in rollback_plan["steps"]))
+
+    def test_cgnat_customer_approved_apply_rollback_cleans_all_surfaces(self) -> None:
+        execution_plan = self._run_approved_apply()
+        apply_result = execution_plan["apply"]
+        rollback_plan_path = REPO_ROOT / apply_result["rollback_plan"]
+        rollback_results = self._run_rollback(rollback_plan_path)
+
+        self.assertGreaterEqual(len(rollback_results), 4)
+
+        backend_customer_root = self.staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / self.customer_name
+        backend_allocation_root = self.staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / self.customer_name
+        muxer_customer_root = self.staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / self.customer_name
+        muxer_module_root = self.staged_root / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / self.customer_name
+        headend_active_customer_root = self.staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / self.customer_name
+        headend_active_conf = self.staged_root / "nonnat-active-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{self.customer_name}.conf"
+        headend_standby_customer_root = self.staged_root / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / self.customer_name
+        headend_standby_conf = self.staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{self.customer_name}.conf"
+        cgnat_customer_root = self.staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / self.customer_name
+        cgnat_config_json = self.staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / f"{self.customer_name}.json"
+
+        for path in (
+            backend_customer_root,
+            backend_allocation_root,
+            muxer_customer_root,
+            muxer_module_root,
+            headend_active_customer_root,
+            headend_active_conf,
+            headend_standby_customer_root,
+            headend_standby_conf,
+            cgnat_customer_root,
+            cgnat_config_json,
+        ):
+            self.assertFalse(path.exists(), msg=f"expected rollback to remove {path}")
 
 
 if __name__ == "__main__":

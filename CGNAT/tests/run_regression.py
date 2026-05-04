@@ -32,6 +32,19 @@ def _load_json(path: Path) -> dict:
         return json.load(handle)
 
 
+def _run_json_command(command: list[str]) -> dict:
+    completed = subprocess.run(
+        command,
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr or completed.stdout)
+    return json.loads(completed.stdout)
+
+
 def main() -> int:
     regression_root = CGNAT_ROOT / "build" / "regression"
     if regression_root.exists():
@@ -153,6 +166,36 @@ def main() -> int:
         "--approve",
         "--json",
     )
+    cgnat_staged_apply_summary = _load_json(cgnat_staged_apply / "execution-plan.json")
+    rollback_plan = _load_json(REPO_ROOT / cgnat_staged_apply_summary["apply"]["rollback_plan"])
+    rollback_results = [
+        _run_json_command(step["command"])
+        for step in reversed(rollback_plan["steps"])
+    ]
+    rollback_execution_summary = {
+        "schema_version": 1,
+        "customer_name": "example-minimal-cgnat-staged-apply",
+        "rollback_results": rollback_results,
+    }
+    (cgnat_staged_apply / "rollback-execution-summary.json").write_text(
+        json.dumps(rollback_execution_summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    rollback_cleanup_ok = not any(
+        path.exists()
+        for path in (
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "example-minimal-cgnat-staged-apply",
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "example-minimal-cgnat-staged-apply",
+            staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "example-minimal-cgnat-staged-apply",
+            staged_root / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / "example-minimal-cgnat-staged-apply",
+            staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "example-minimal-cgnat-staged-apply",
+            staged_root / "nonnat-active-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-staged-apply.conf",
+            staged_root / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "example-minimal-cgnat-staged-apply",
+            staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-staged-apply.conf",
+            staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-staged-apply",
+            staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-staged-apply.json",
+        )
+    )
 
     _run(
         str(CGNAT_ROOT / "framework" / "scripts" / "prepare_scenario1.py"),
@@ -215,7 +258,6 @@ def main() -> int:
     shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
     shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
     cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
-    cgnat_staged_apply_summary = _load_json(cgnat_staged_apply / "execution-plan.json")
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
@@ -223,6 +265,13 @@ def main() -> int:
         "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
         "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
         "cgnat_staged_apply_ok": str(cgnat_staged_apply_summary.get("status") or "").strip().lower() == "applied",
+        "cgnat_staged_rollback_ok": rollback_cleanup_ok and all(
+            (
+                str(result.get("status") or "").strip().lower() == "rolled_back"
+                or bool(result.get("removed"))
+            )
+            for result in rollback_results
+        ),
         "sample_validation_ok": bool(sample_summary.get("validation_ok")),
         "live_validation_ok": bool(live_summary.get("validation_ok")),
         "aws_live_create_allowed": bool(live_summary.get("aws_live_create_allowed")),
@@ -236,6 +285,7 @@ def main() -> int:
             "shared_nat_package": str(shared_nat),
             "cgnat_customer_review": str(cgnat_review),
             "cgnat_customer_staged_apply": str(cgnat_staged_apply),
+            "cgnat_customer_staged_rollback": str(cgnat_staged_apply / "rollback-execution-summary.json"),
             "sample_prep": str(sample_prep),
             "live_prep": str(live_prep),
             "live_predeploy_review": str(live_predeploy),
