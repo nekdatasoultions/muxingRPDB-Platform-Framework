@@ -106,10 +106,15 @@ def main() -> int:
     cgnat_local_pki_review = regression_root / "cgnat-customer-local-pki-review"
     cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
     cgnat_shared_gateway_staged_apply = regression_root / "cgnat-shared-gateway-staged-apply"
+    cgnat_scenario2_shared_gateway_staged_apply = regression_root / "cgnat-scenario2-shared-gateway-staged-apply"
     cgnat_dual_customer1_staged_apply = regression_root / "cgnat-customer1-staged-apply"
     cgnat_dual_customer2_staged_apply = regression_root / "cgnat-customer2-staged-apply"
     cgnat_staged_request = regression_root / "example-minimal-cgnat-staged-apply.yaml"
     cgnat_shared_gateway_staged_request = regression_root / "example-minimal-cgnat-shared-gateway-staged-apply.yaml"
+    cgnat_scenario2_shared_gateway_staged_request = (
+        regression_root / "example-minimal-cgnat-shared-gateway-scenario2-staged-apply.yaml"
+    )
+    cgnat_scenario2_shared_gateway_staged_name = "cgnat-s2-shared-gateway-staged-apply"
     cgnat_dual_customer1_request = regression_root / "example-cgnat-customer-1-staged-apply.yaml"
     cgnat_dual_customer2_request = regression_root / "example-cgnat-customer-2-staged-apply.yaml"
     staged_env_path = regression_root / "example-rpdb-staged-live.yaml"
@@ -208,6 +213,11 @@ def main() -> int:
         request_examples / "example-minimal-cgnat-shared-isp-local-pki.yaml",
         cgnat_shared_gateway_staged_request,
         "example-minimal-cgnat-shared-gateway-staged-apply",
+    )
+    _prepare_staged_customer_request(
+        request_examples / "example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml",
+        cgnat_scenario2_shared_gateway_staged_request,
+        cgnat_scenario2_shared_gateway_staged_name,
     )
     _prepare_staged_customer_request(
         request_examples / "example-cgnat-customer-1-local-pki.yaml",
@@ -327,6 +337,51 @@ def main() -> int:
             staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-shared-gateway-staged-apply.conf",
             staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
             staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply.json",
+        )
+    )
+    _run(
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        "--customer-file",
+        str(cgnat_scenario2_shared_gateway_staged_request),
+        "--environment",
+        str(staged_env_path),
+        "--out-dir",
+        str(cgnat_scenario2_shared_gateway_staged_apply),
+        "--approve",
+        "--json",
+    )
+    cgnat_scenario2_shared_gateway_staged_apply_summary = _load_json(
+        cgnat_scenario2_shared_gateway_staged_apply / "execution-plan.json"
+    )
+    cgnat_scenario2_shared_gateway_rollback_plan = _load_json(
+        REPO_ROOT / cgnat_scenario2_shared_gateway_staged_apply_summary["apply"]["rollback_plan"]
+    )
+    cgnat_scenario2_shared_gateway_rollback_results = [
+        _run_json_command(step["command"])
+        for step in reversed(cgnat_scenario2_shared_gateway_rollback_plan["steps"])
+    ]
+    cgnat_scenario2_shared_gateway_rollback_summary = {
+        "schema_version": 1,
+        "customer_name": cgnat_scenario2_shared_gateway_staged_name,
+        "rollback_results": cgnat_scenario2_shared_gateway_rollback_results,
+    }
+    (cgnat_scenario2_shared_gateway_staged_apply / "rollback-execution-summary.json").write_text(
+        json.dumps(cgnat_scenario2_shared_gateway_rollback_summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    cgnat_scenario2_shared_gateway_rollback_cleanup_ok = not any(
+        path.exists()
+        for path in (
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "nonnat-active-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{cgnat_scenario2_shared_gateway_staged_name}.conf",
+            staged_root / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / f"{cgnat_scenario2_shared_gateway_staged_name}.conf",
+            staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / cgnat_scenario2_shared_gateway_staged_name,
+            staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / f"{cgnat_scenario2_shared_gateway_staged_name}.json",
         )
     )
 
@@ -592,6 +647,21 @@ def main() -> int:
             )
             for result in cgnat_shared_gateway_rollback_results
         ),
+        "cgnat_scenario2_shared_gateway_staged_apply_ok": (
+            str(cgnat_scenario2_shared_gateway_staged_apply_summary.get("status") or "").strip().lower() == "applied"
+            and ((cgnat_scenario2_shared_gateway_staged_apply_summary.get("selected_targets") or {}).get("cgnat_isp_gateway") or {}).get("name")
+            == "rpdb-staged-cgnat-isp-gateway-2"
+            and str((cgnat_scenario2_shared_gateway_staged_apply_summary.get("selected_targets") or {}).get("cgnat_outer_gateway_ref") or "")
+            == "isp-cgnat-router-2"
+        ),
+        "cgnat_scenario2_shared_gateway_staged_rollback_ok": cgnat_scenario2_shared_gateway_rollback_cleanup_ok
+        and all(
+            (
+                str(result.get("status") or "").strip().lower() == "rolled_back"
+                or bool(result.get("removed"))
+            )
+            for result in cgnat_scenario2_shared_gateway_rollback_results
+        ),
         "cgnat_dual_customer_staged_apply_ok": dual_customer_installed_ok
         and str(dual_customer1_summary.get("status") or "").strip().lower() == "applied"
         and str(dual_customer2_summary.get("status") or "").strip().lower() == "applied",
@@ -627,6 +697,10 @@ def main() -> int:
             "cgnat_shared_gateway_staged_apply": str(cgnat_shared_gateway_staged_apply),
             "cgnat_shared_gateway_staged_rollback": str(
                 cgnat_shared_gateway_staged_apply / "rollback-execution-summary.json"
+            ),
+            "cgnat_scenario2_shared_gateway_staged_apply": str(cgnat_scenario2_shared_gateway_staged_apply),
+            "cgnat_scenario2_shared_gateway_staged_rollback": str(
+                cgnat_scenario2_shared_gateway_staged_apply / "rollback-execution-summary.json"
             ),
             "cgnat_dual_customer1_staged_apply": str(cgnat_dual_customer1_staged_apply),
             "cgnat_dual_customer2_staged_apply": str(cgnat_dual_customer2_staged_apply),

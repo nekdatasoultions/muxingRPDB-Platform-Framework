@@ -57,26 +57,7 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             newline="\n",
         )
 
-        request_doc = yaml.safe_load(
-            (MUXER_ROOT / "config" / "customer-requests" / "examples" / "example-minimal-cgnat.yaml").read_text(
-                encoding="utf-8"
-            )
-        ) or {}
-        customer = request_doc.setdefault("customer", {})
-        customer["name"] = self.customer_name
-        transport = customer.setdefault("transport", {})
-        cgnat_transport = transport.setdefault("cgnat", {})
-        outer_identity_ref = str(cgnat_transport.get("outer_identity_ref") or "").strip()
-        if outer_identity_ref:
-            cgnat_transport["outer_identity_ref"] = outer_identity_ref.replace(
-                "example-minimal-cgnat",
-                self.customer_name,
-            )
-        self.request_path.write_text(
-            yaml.safe_dump(request_doc, sort_keys=False),
-            encoding="utf-8",
-            newline="\n",
-        )
+        self._write_request("example-minimal-cgnat.yaml")
 
         for relative_path in (
             "muxer-root",
@@ -85,6 +66,8 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             "nonnat-active-root",
             "nonnat-standby-root",
             "cgnat-headend-root",
+            "cgnat-isp-gateway-1-root",
+            "cgnat-isp-gateway-2-root",
             "datastores",
             "artifacts",
             "logs",
@@ -96,6 +79,8 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             "backups/baseline/nat-headend",
             "backups/baseline/non-nat-headend",
             "backups/baseline/cgnat-headend",
+            "backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1",
+            "backups/baseline/cgnat-isp-gateways/isp-cgnat-router-2",
         ):
             (self.staged_root / relative_path).mkdir(parents=True, exist_ok=True)
 
@@ -127,6 +112,41 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr or completed.stdout)
         return json.loads(completed.stdout)
+
+    def _write_request(self, example_name: str) -> None:
+        request_doc = yaml.safe_load(
+            (MUXER_ROOT / "config" / "customer-requests" / "examples" / example_name).read_text(
+                encoding="utf-8"
+            )
+        ) or {}
+        customer = request_doc.setdefault("customer", {})
+        original_name = str(customer.get("name") or "").strip()
+        customer["name"] = self.customer_name
+        request_doc = self._replace_in_doc(request_doc, original_name, self.customer_name)
+        customer = request_doc.setdefault("customer", {})
+        customer["name"] = self.customer_name
+        transport = customer.setdefault("transport", {})
+        cgnat_transport = transport.setdefault("cgnat", {})
+        outer_identity_ref = str(cgnat_transport.get("outer_identity_ref") or "").strip()
+        if outer_identity_ref and original_name:
+            cgnat_transport["outer_identity_ref"] = outer_identity_ref.replace(
+                original_name,
+                self.customer_name,
+            )
+        self.request_path.write_text(
+            yaml.safe_dump(request_doc, sort_keys=False),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    def _replace_in_doc(self, value: object, old: str, new: str) -> object:
+        if isinstance(value, str):
+            return value.replace(old, new)
+        if isinstance(value, dict):
+            return {key: self._replace_in_doc(nested, old, new) for key, nested in value.items()}
+        if isinstance(value, list):
+            return [self._replace_in_doc(nested, old, new) for nested in value]
+        return value
 
     def _run_rollback(self, rollback_plan_path: Path) -> list[dict]:
         rollback_plan = json.loads(rollback_plan_path.read_text(encoding="utf-8"))
@@ -213,6 +233,34 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             cgnat_config_json,
         ):
             self.assertFalse(path.exists(), msg=f"expected rollback to remove {path}")
+
+    def test_scenario2_shared_gateway_approved_apply_selects_second_gateway(self) -> None:
+        self._write_request("example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml")
+
+        execution_plan = self._run_approved_apply()
+        self.assertEqual(execution_plan["status"], "applied")
+        self.assertEqual(execution_plan["selected_targets"]["cgnat_outer_topology"], "shared_isp_gateway")
+        self.assertEqual(execution_plan["selected_targets"]["cgnat_outer_gateway_ref"], "isp-cgnat-router-2")
+        self.assertEqual(execution_plan["selected_targets"]["cgnat_isp_gateway"]["name"], "rpdb-staged-cgnat-isp-gateway-2")
+        self.assertEqual(
+            execution_plan["dry_run_gate"]["backup_refs"]["cgnat_isp_gateway"],
+            str((self.staged_root / "backups" / "baseline" / "cgnat-isp-gateways" / "isp-cgnat-router-2").resolve()),
+        )
+        self.assertEqual(
+            execution_plan["touch_plan"]["cgnat_isp_gateway"],
+            "rpdb-staged-cgnat-isp-gateway-2",
+        )
+        self.assertTrue(execution_plan["apply"]["validation"]["cgnat_headend"]["valid"])
+
+        rollback_plan_path = REPO_ROOT / execution_plan["apply"]["rollback_plan"]
+        rollback_results = self._run_rollback(rollback_plan_path)
+        self.assertTrue(
+            all(
+                str(result.get("status") or "").strip().lower() == "rolled_back"
+                or bool(result.get("removed"))
+                for result in rollback_results
+            )
+        )
 
 
 if __name__ == "__main__":
