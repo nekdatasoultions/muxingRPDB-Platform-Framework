@@ -106,6 +106,8 @@ targets:
           type: tag
           key: Name
           value: isp-cgnat-router-2
+          private_ip: 172.31.57.183
+          public_ip: 100.30.83.15
         access:
           method: ssh
 
