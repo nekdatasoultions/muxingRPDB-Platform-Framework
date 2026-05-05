@@ -360,6 +360,12 @@ def _cgnat_transport_doc(transport: Dict[str, Any]) -> Dict[str, Any]:
     return cgnat if isinstance(cgnat, dict) else {}
 
 
+def _cgnat_outer_topology(transport: Dict[str, Any]) -> str:
+    cgnat = _cgnat_transport_doc(transport)
+    topology = str(cgnat.get("outer_topology") or "").strip().lower().replace("-", "_")
+    return topology or "per_customer_outer"
+
+
 def _cgnat_unique_customer_peer(peer: Dict[str, Any], transport: Dict[str, Any]) -> str:
     cgnat = _cgnat_transport_doc(transport)
     loopback_ip = str(cgnat.get("customer_loopback_ip") or "").strip()
@@ -419,10 +425,13 @@ def _render_ipsec_intent(
     effective_remote_ts = _effective_remote_ts(selectors)
     resolved_transport = transport or {}
     headend_peer_endpoint = _headend_peer_endpoint(peer, resolved_transport)
+    cgnat = _cgnat_transport_doc(resolved_transport)
     return {
         "customer_name": customer.get("name"),
         "peer_public_ip": headend_peer_endpoint,
         "outer_peer_public_ip": peer.get("public_ip"),
+        "outer_topology": _cgnat_outer_topology(resolved_transport) if resolved_transport else "",
+        "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
         "local_addrs": local_addrs,
         "remote_id": _headend_remote_id(peer, ipsec, resolved_transport),
         "local_id": ipsec.get("local_id") or _placeholder("HEADEND_ID"),
@@ -1401,6 +1410,8 @@ def build_muxer_artifacts(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[
         + "\n",
         "firewall/firewall-intent.json": {
             "transport_mode": transport_mode,
+            "outer_topology": _cgnat_outer_topology(transport) if transport_mode == "cgnat" else "",
+            "outer_gateway_ref": _cgnat_transport_doc(transport).get("outer_gateway_ref") if transport_mode == "cgnat" else "",
             "protocols": {
                 "udp500": protocols.get("udp500"),
                 "udp4500": protocols.get("udp4500"),
@@ -1527,6 +1538,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             "backend_assignment": backend.get("assignment"),
             "backend_role": backend.get("role"),
             "backend_underlay_ip": backend.get("underlay_ip"),
+            "outer_topology": _cgnat_outer_topology(transport) if _transport_mode(transport) == "cgnat" else "",
+            "outer_gateway_ref": _cgnat_transport_doc(transport).get("outer_gateway_ref"),
             "selectors": {
                 "local_subnets": selectors.get("local_subnets") or [],
                 "remote_subnets": selectors.get("remote_subnets") or [],

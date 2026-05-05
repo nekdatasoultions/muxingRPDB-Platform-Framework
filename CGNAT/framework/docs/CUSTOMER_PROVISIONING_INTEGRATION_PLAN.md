@@ -19,6 +19,8 @@ At the end of this project:
 
 1. the shared customer provisioning flow can accept a customer with
    `transport.mode = cgnat`
+2. CGNAT can express more than one outer topology while using the same hosted
+   CGNAT head-end platform
 2. the same deploy shape is preserved:
    - request validation
    - repo-only package generation
@@ -28,7 +30,10 @@ At the end of this project:
    - backend customer state
    - muxer activation state
    - CGNAT head-end customer state
+   - gateway-scoped outer state where required
 4. legacy direct non-NAT and NAT-T customers still work unchanged
+5. inner-tunnel termination preserves the same backend VPN capabilities as a
+   regular customer, including inside and outside NAT behavior
 
 ## Project Principles
 
@@ -53,6 +58,32 @@ environment YAML, not from DynamoDB host discovery.
 
 The first integration should add one hosted CGNAT head-end target and one
 customer transport family before attempting broader HA or topology expansion.
+
+### 4b. Treat Topology as a First-Class Choice
+
+CGNAT should support multiple outer-tunnel ownership models without becoming
+multiple deployment products.
+
+The first-class topologies are:
+
+- `per_customer_outer`
+- `shared_isp_gateway`
+
+Both topologies should target the same hosted CGNAT head-end platform.
+
+### 4c. Keep Inner Service Semantics Full-Featured
+
+When the inner tunnel terminates, it must behave like a regular backend VPN
+customer.
+
+That means the inner tunnel must still be able to use the same backend service
+capabilities as current direct customers, including:
+
+- non-NAT service behavior
+- NAT-T service behavior
+- inside NAT
+- outside NAT
+- existing backend routing and policy behavior
 
 ### 4a. Keep PKI Reference-First
 
@@ -156,6 +187,54 @@ Exit criteria:
 - a request can declare `transport.mode = cgnat`
 - legacy requests without transport changes still validate
 
+### Workstream 1a: CGNAT Topology Extension
+
+Add explicit outer-topology modeling to the shared CGNAT transport shape.
+
+Primary changes:
+
+- add outer topology selector
+- add optional ISP gateway reference
+- preserve legacy per-customer behavior as the default
+
+Likely files:
+
+- `muxer/config/schema/customer-request.schema.json`
+- `muxer/config/schema/customer-source.schema.json`
+- `muxer/src/muxerlib/customer_model.py`
+- `CGNAT/framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_DESIGN.md`
+
+Exit criteria:
+
+- a CGNAT request can declare:
+  - `per_customer_outer`
+  - `shared_isp_gateway`
+- the same CGNAT head-end target model still applies to both
+- legacy CGNAT request examples continue to validate
+
+### Workstream 1b: Backend Service Capability Alignment
+
+Make explicit in the shared model and downstream package flow that the inner
+termination remains a regular backend VPN service surface.
+
+Primary changes:
+
+- preserve backend family selection independent of CGNAT transport
+- preserve inside/outside NAT controls independent of CGNAT transport
+- validate that CGNAT does not collapse the service model into a reduced class
+
+Likely files:
+
+- `muxer/src/muxerlib/customer_model.py`
+- backend packaging helpers
+- integration docs and validation fixtures
+
+Exit criteria:
+
+- a CGNAT customer can still select normal backend service behavior
+- inside and outside NAT controls remain available after inner termination
+- regression covers both direct and CGNAT-backed service capability parity
+
 ### Workstream 2: Environment Target Extension
 
 Add CGNAT head-end targets to environment YAML and target-selection logic.
@@ -230,6 +309,9 @@ Exit criteria:
 
 - a CGNAT customer generates a review package with all three surfaces
 - readiness clearly reports CGNAT-specific package status
+- topology-specific package shape is reviewable:
+  - per-customer outer package
+  - shared-ISP-gateway package
 
 ### Workstream 4: Live Apply Integration
 
@@ -276,6 +358,7 @@ Exit criteria:
 This workstream is governed by:
 
 - `CGNAT/framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md`
+- `CGNAT/framework/docs/CGNAT_TOPOLOGY_EXPANSION_EXECUTION_PLAN.md`
 
 ## Implementation Phases
 

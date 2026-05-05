@@ -1,0 +1,48 @@
+schema_version: 1
+
+customer:
+  name: example-minimal-cgnat-shared-isp-local-pki
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.62
+    psk_secret_ref: /muxingrpdb/customers/example-minimal-cgnat-shared-isp-local-pki/psk
+  selectors:
+    local_subnets:
+      - 23.20.31.151/32
+      - 194.138.36.86/32
+    remote_subnets:
+      - 10.20.30.12/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true
+  transport:
+    mode: cgnat
+    tunnel_mtu: 1436
+    cgnat:
+      service_profile: scenario1
+      outer_topology: shared_isp_gateway
+      outer_gateway_ref: isp-cgnat-router-1
+      outer_identity_ref: isp-cgnat-router-1/example-minimal-cgnat-shared-isp-local-pki
+      outer_auth_ref: pki/cgnat/gateway/isp-cgnat-router-1
+      customer_loopback_ip: 10.250.1.12
+      known_inside_identity: 10.20.30.12/32
+      service_reachable_subnets:
+        - 23.20.31.151/32
+        - 194.138.36.86/32
+      pki:
+        mode: local_generate
+        ca_common_name: example-minimal-cgnat-shared-isp-local-pki-outer-ca
+        headend:
+          identity_ref: cgnat-head-end/example-minimal-cgnat-shared-isp-local-pki
+          auth_ref: pki/cgnat/headend/example-minimal-cgnat-shared-isp-local-pki
+        gateway:
+          identity_ref: isp-cgnat-router-1/example-minimal-cgnat-shared-isp-local-pki
+          auth_ref: pki/cgnat/gateway/isp-cgnat-router-1/example-minimal-cgnat-shared-isp-local-pki
+          package_name: example-minimal-cgnat-shared-isp-local-pki-isp-cgnat-router-1
+        trust:
+          ca_ref: pki/cgnat/ca/example-minimal-cgnat-shared-isp-local-pki

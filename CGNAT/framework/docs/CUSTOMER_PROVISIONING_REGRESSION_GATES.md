@@ -76,6 +76,9 @@ This should cover:
 - staged muxer apply
 - staged head-end apply
 - staged CGNAT head-end apply once integrated
+- both CGNAT outer topologies once modeled:
+  - `per_customer_outer`
+  - `shared_isp_gateway`
 
 ### Layer 4: Review Artifact Regression
 
@@ -91,6 +94,8 @@ This should cover:
 - execution plan
 - target selection summary
 - rollback plan
+- topology-specific package shape
+- backend feature parity expectations for inner termination
 
 ## Required Gates
 
@@ -162,6 +167,7 @@ Pass criteria:
 
 - one CGNAT package contains backend, muxer, and CGNAT surfaces
 - readiness is reviewable and complete
+- topology-specific surfaces are explicit and internally consistent
 
 ### Gate 4: Staged Apply Gate
 
@@ -181,6 +187,8 @@ Pass criteria:
 
 - the integrated apply order works in staged mode
 - the rollback plan is complete and reviewable
+- inner termination still preserves the expected backend service capabilities
+  for the customer, including NAT-related behavior
 
 ### Gate 5: Full Regression Gate
 
@@ -244,6 +252,7 @@ Recommended docs:
 
 - `CGNAT/framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_DESIGN.md`
 - `CGNAT/framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_PLAN.md`
+- `CGNAT/framework/docs/CGNAT_TOPOLOGY_EXPANSION_EXECUTION_PLAN.md`
 - `CGNAT/framework/docs/VALIDATION_PLAN.md`
 
 ## Regression Expectations by Phase

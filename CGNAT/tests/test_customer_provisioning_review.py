@@ -73,6 +73,15 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         }
         self.shared_deploy_dir = CGNAT_ROOT / "build" / "review-test" / "shared-dry-run"
 
+    def _shared_isp_request(self) -> dict:
+        return load_yaml_file(
+            MUXER_ROOT
+            / "config"
+            / "customer-requests"
+            / "examples"
+            / "example-minimal-cgnat-shared-isp-local-pki.yaml"
+        )
+
     def test_validate_cgnat_request_accepts_example(self) -> None:
         validate_cgnat_request(self.request_doc, request_path="example-minimal-cgnat.yaml")
 
@@ -192,6 +201,45 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         self.assertIn("Package name", checklist)
         self.assertIn("live_test_bed_plan", combined["surfaces"])
         self.assertIn("CGNAT customer 1", " ".join(combined["notes"]))
+
+    def test_shared_isp_gateway_live_plan_switches_outer_handoff_to_gateway(self) -> None:
+        request_doc = self._shared_isp_request()
+        validate_cgnat_request(request_doc, request_path="example-minimal-cgnat-shared-isp-local-pki.yaml")
+
+        pki_review = build_cgnat_pki_surface_review(
+            request_doc=request_doc,
+            output_dir=CGNAT_ROOT / "build" / "review-test" / "pki-shared-isp",
+        )
+        rollback = build_cgnat_rollback_plan(
+            execution_plan=self.execution_plan,
+            test_bed_customer="CGNAT customer 1",
+        )
+        live_test_bed = build_cgnat_live_test_bed_plan(
+            request_doc=request_doc,
+            execution_plan=self.execution_plan,
+            rollback_plan=rollback,
+            test_bed_customer="CGNAT customer 1",
+        )
+        live_execution = build_cgnat_live_execution_plan(
+            request_doc=request_doc,
+            execution_plan=self.execution_plan,
+            pki_review=pki_review,
+            rollback_plan=rollback,
+            live_test_bed_plan=live_test_bed,
+        )
+        checklist = render_cgnat_live_execution_checklist(live_execution_plan=live_execution)
+
+        self.assertEqual(live_execution["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(live_execution["edge_device_role"], "isp_gateway")
+        self.assertTrue(live_execution["gateway_device_backup_required"])
+        self.assertFalse(live_execution["customer_device_backup_required"])
+        self.assertEqual(live_execution["outer_handoff"]["recipient_type"], "isp_gateway")
+        self.assertEqual(
+            live_execution["gateway_handoff"]["package_name"],
+            "example-minimal-cgnat-shared-isp-local-pki-isp-cgnat-router-1",
+        )
+        self.assertFalse(live_execution["customer_handoff"]["outer_material_required"])
+        self.assertIn("Gateway Device Apply Order", checklist)
 
 
 if __name__ == "__main__":

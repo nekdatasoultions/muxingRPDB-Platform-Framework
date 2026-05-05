@@ -60,6 +60,10 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         shared_outer_peer = "203.0.113.61"
         customer1_request["customer"]["peer"]["public_ip"] = shared_outer_peer
         customer2_request["customer"]["peer"]["public_ip"] = shared_outer_peer
+        customer1_request["customer"]["transport"]["cgnat"]["outer_topology"] = "shared_isp_gateway"
+        customer1_request["customer"]["transport"]["cgnat"]["outer_gateway_ref"] = "isp-cgnat-router-1"
+        customer2_request["customer"]["transport"]["cgnat"]["outer_topology"] = "shared_isp_gateway"
+        customer2_request["customer"]["transport"]["cgnat"]["outer_gateway_ref"] = "isp-cgnat-router-1"
 
         customer1_module, customer1_item = self._render_customer(customer1_request)
         customer2_module, customer2_item = self._render_customer(customer2_request)
@@ -100,10 +104,16 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         self.assertEqual(customer2_ipsec_intent["outer_peer_public_ip"], shared_outer_peer)
         self.assertEqual(customer1_ipsec_intent["remote_id"], "10.250.1.10")
         self.assertEqual(customer2_ipsec_intent["remote_id"], "10.250.1.11")
+        self.assertEqual(customer1_ipsec_intent["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(customer2_ipsec_intent["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(customer1_ipsec_intent["outer_gateway_ref"], "isp-cgnat-router-1")
+        self.assertEqual(customer2_ipsec_intent["outer_gateway_ref"], "isp-cgnat-router-1")
 
     def test_cgnat_muxer_artifacts_disable_direct_public_peer_snat_rules(self) -> None:
         request_doc = deepcopy(self._load_request("example-cgnat-customer-1-local-pki.yaml"))
         request_doc["customer"]["peer"]["public_ip"] = "203.0.113.61"
+        request_doc["customer"]["transport"]["cgnat"]["outer_topology"] = "shared_isp_gateway"
+        request_doc["customer"]["transport"]["cgnat"]["outer_gateway_ref"] = "isp-cgnat-router-1"
 
         customer_module, customer_item = self._render_customer(request_doc)
         artifacts = build_customer_artifact_tree(customer_module, customer_item)
@@ -114,6 +124,8 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         firewall_apply = artifacts["muxer"]["firewall/nftables.apply.nft"]
 
         self.assertEqual(firewall_intent["transport_mode"], "cgnat")
+        self.assertEqual(firewall_intent["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(firewall_intent["outer_gateway_ref"], "isp-cgnat-router-1")
         self.assertFalse(firewall_intent["snat_coverage"]["required"])
         self.assertEqual(
             firewall_intent["snat_coverage"]["disabled_reason"],

@@ -514,6 +514,9 @@ def render_allocated_customer_source(request_doc: Dict[str, Any], allocation_pla
     cgnat_transport_doc = request_transport_doc.get("cgnat")
     if isinstance(cgnat_transport_doc, dict) and cgnat_transport_doc:
         transport_doc["cgnat"] = copy.deepcopy(cgnat_transport_doc)
+        transport_doc["cgnat"]["outer_topology"] = str(
+            transport_doc["cgnat"].get("outer_topology") or "per_customer_outer"
+        ).strip()
 
     rendered_customer = {
         "id": int(allocation_plan["customer_id"]),

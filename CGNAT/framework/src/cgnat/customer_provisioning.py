@@ -19,24 +19,43 @@ def _transport_doc(request_doc: dict[str, Any]) -> dict[str, Any]:
     return dict((_customer_doc(request_doc).get("transport") or {}))
 
 
+def _cgnat_doc(request_doc: dict[str, Any]) -> dict[str, Any]:
+    return dict((_transport_doc(request_doc).get("cgnat") or {}))
+
+
+def _outer_topology(request_doc: dict[str, Any]) -> str:
+    topology = str((_cgnat_doc(request_doc).get("outer_topology") or "")).strip().lower().replace("-", "_")
+    return topology or "per_customer_outer"
+
+
 def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "request") -> None:
     transport = _transport_doc(request_doc)
     mode = str(transport.get("mode") or "").strip().lower()
     if mode != "cgnat":
         raise ValueError(f"{request_path} must declare customer.transport.mode = cgnat")
-    cgnat = dict(transport.get("cgnat") or {})
+    cgnat = _cgnat_doc(request_doc)
     pki = dict(cgnat.get("pki") or {})
     customer_pki = dict(pki.get("customer") or {})
+    gateway_pki = dict(pki.get("gateway") or {})
+    topology = _outer_topology(request_doc)
     required = [
         "service_profile",
         "customer_loopback_ip",
         "known_inside_identity",
     ]
     missing = [field for field in required if not str(cgnat.get(field) or "").strip()]
-    if not (str(cgnat.get("outer_identity_ref") or "").strip() or str(customer_pki.get("identity_ref") or "").strip()):
-        missing.append("outer_identity_ref|customer.transport.cgnat.pki.customer.identity_ref")
-    if not (str(cgnat.get("outer_auth_ref") or "").strip() or str(customer_pki.get("auth_ref") or "").strip()):
-        missing.append("outer_auth_ref|customer.transport.cgnat.pki.customer.auth_ref")
+    if topology == "shared_isp_gateway" and not str(cgnat.get("outer_gateway_ref") or "").strip():
+        missing.append("outer_gateway_ref")
+    if topology == "shared_isp_gateway":
+        if not (str(cgnat.get("outer_identity_ref") or "").strip() or str(gateway_pki.get("identity_ref") or "").strip()):
+            missing.append("outer_identity_ref|customer.transport.cgnat.pki.gateway.identity_ref")
+        if not (str(cgnat.get("outer_auth_ref") or "").strip() or str(gateway_pki.get("auth_ref") or "").strip()):
+            missing.append("outer_auth_ref|customer.transport.cgnat.pki.gateway.auth_ref")
+    else:
+        if not (str(cgnat.get("outer_identity_ref") or "").strip() or str(customer_pki.get("identity_ref") or "").strip()):
+            missing.append("outer_identity_ref|customer.transport.cgnat.pki.customer.identity_ref")
+        if not (str(cgnat.get("outer_auth_ref") or "").strip() or str(customer_pki.get("auth_ref") or "").strip()):
+            missing.append("outer_auth_ref|customer.transport.cgnat.pki.customer.auth_ref")
     if missing:
         raise ValueError(
             f"{request_path} is missing required customer.transport.cgnat fields: {', '.join(missing)}"
@@ -126,6 +145,8 @@ def build_muxer_surface_review(
         "backup_ref": (gate.get("backup_refs") or {}).get("muxer"),
         "service_inputs": {
             "peer_ip": customer.get("peer_ip"),
+            "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
+            "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
             "service_reachable_subnets": list(cgnat.get("service_reachable_subnets") or []),
             "known_inside_identity": cgnat.get("known_inside_identity"),
             "backend_family": targets.get("headend_family"),
@@ -158,6 +179,8 @@ def build_cgnat_headend_surface_review(
         "backup_ref": (gate.get("backup_refs") or {}).get("cgnat_headend"),
         "transport_profile": {
             "service_profile": cgnat.get("service_profile"),
+            "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
+            "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
             "outer_identity_ref": cgnat.get("outer_identity_ref"),
             "outer_auth_ref": cgnat.get("outer_auth_ref"),
             "customer_loopback_ip": cgnat.get("customer_loopback_ip"),
@@ -169,6 +192,8 @@ def build_cgnat_headend_surface_review(
             "headend_auth_ref": pki_spec["headend"]["auth_ref"],
             "customer_identity_ref": pki_spec["customer"]["identity_ref"],
             "customer_auth_ref": pki_spec["customer"]["auth_ref"],
+            "gateway_identity_ref": pki_spec["gateway"]["identity_ref"],
+            "gateway_auth_ref": pki_spec["gateway"]["auth_ref"],
             "trust_ca_ref": pki_spec["trust"]["ca_ref"],
         },
         "notes": [
@@ -304,59 +329,141 @@ def build_cgnat_live_execution_plan(
     live_test_bed_plan: dict[str, Any],
 ) -> dict[str, Any]:
     customer_name = str((_customer_doc(request_doc).get("name") or ""))
+    cgnat = _cgnat_doc(request_doc)
+    topology = _outer_topology(request_doc)
+    outer_handoff = dict(pki_review.get("outer_handoff") or {})
     customer_handoff = dict(pki_review.get("customer_handoff") or {})
+    gateway_handoff = dict(pki_review.get("gateway_handoff") or {})
     artifacts = dict(pki_review.get("artifacts") or {})
+    edge_is_gateway = topology == "shared_isp_gateway"
+    edge_role = "isp_gateway" if edge_is_gateway else "customer_device"
+    edge_backup_items = [
+        "existing outer tunnel connection config",
+        "existing certificate and private key",
+        "existing CA/trust bundle",
+        "existing service status and loaded SAs",
+        "existing routes and interface addresses",
+    ]
+    if edge_is_gateway:
+        edge_backup_items[0] = "existing ISP gateway outer tunnel connection config"
     return {
         "schema_version": 1,
         "status": "review_required",
         "generated_at": _now_utc(),
         "customer_name": customer_name,
         "test_bed_customer": live_test_bed_plan.get("test_bed_customer"),
+        "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
+        "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
         "platform_backup_refs": dict((live_test_bed_plan.get("backup_gate") or {}).get("references") or {}),
-        "customer_device_backup_required": True,
-        "customer_device_backup_items": [
-            "existing outer tunnel connection config",
-            "existing customer certificate and private key",
-            "existing CA/trust bundle",
-            "existing service status and loaded SAs",
-            "existing routes and interface addresses",
-        ],
+        "edge_device_backup_required": True,
+        "edge_device_role": edge_role,
+        "customer_device_backup_required": not edge_is_gateway,
+        "gateway_device_backup_required": edge_is_gateway,
+        "edge_device_backup_items": edge_backup_items,
+        "customer_device_backup_items": edge_backup_items if not edge_is_gateway else [],
+        "gateway_device_backup_items": edge_backup_items if edge_is_gateway else [],
+        "outer_handoff": {
+            "recipient_type": outer_handoff.get("recipient_type"),
+            "package_name": outer_handoff.get("package_name"),
+            "identity_ref": outer_handoff.get("identity_ref"),
+            "auth_ref": outer_handoff.get("auth_ref"),
+            "manifest": outer_handoff.get("manifest"),
+            "readme": outer_handoff.get("readme"),
+            "generated_material": bool(pki_review.get("generated_material")),
+            "certificate_path": artifacts.get("outer_certificate_path")
+            or artifacts.get("customer_certificate_path")
+            or artifacts.get("gateway_certificate_path"),
+            "private_key_path": artifacts.get("outer_private_key_path")
+            or artifacts.get("customer_private_key_path")
+            or artifacts.get("gateway_private_key_path"),
+            "ca_certificate_path": artifacts.get("ca_certificate_path"),
+        },
         "customer_handoff": {
             "package_name": customer_handoff.get("package_name"),
             "identity_ref": customer_handoff.get("identity_ref"),
             "auth_ref": customer_handoff.get("auth_ref"),
             "manifest": artifacts.get("customer_handoff_manifest"),
             "readme": artifacts.get("customer_handoff_readme"),
+            "outer_material_required": bool(customer_handoff.get("outer_material_required")),
             "generated_material": bool(pki_review.get("generated_material")),
             "certificate_path": artifacts.get("customer_certificate_path"),
             "private_key_path": artifacts.get("customer_private_key_path"),
             "ca_certificate_path": artifacts.get("ca_certificate_path"),
         },
+        "gateway_handoff": {
+            "package_name": gateway_handoff.get("package_name"),
+            "identity_ref": gateway_handoff.get("identity_ref"),
+            "auth_ref": gateway_handoff.get("auth_ref"),
+            "manifest": artifacts.get("gateway_handoff_manifest"),
+            "readme": artifacts.get("gateway_handoff_readme"),
+            "outer_material_required": bool(gateway_handoff.get("outer_material_required")),
+            "generated_material": bool(pki_review.get("generated_material")),
+            "certificate_path": artifacts.get("gateway_certificate_path"),
+            "private_key_path": artifacts.get("gateway_private_key_path"),
+            "ca_certificate_path": artifacts.get("ca_certificate_path"),
+        },
         "platform_apply_order": list(live_test_bed_plan.get("staged_apply_order") or []),
-        "customer_device_apply_order": [
-            "capture_customer_device_backups",
-            "stage_new_outer_tunnel_cert_bundle",
-            "stage_new_outer_tunnel_config_without_removing_previous_state",
-            "load_or_reload_customer_outer_tunnel_config",
-            "bring_up_new_outer_tunnel",
-            "validate_customer_outer_tunnel_certificate_identity",
-            "validate_inner_tunnel_and_service_path",
-            "retire_previous_customer_outer_tunnel_state_only_after_validation",
-        ],
+        "customer_device_apply_order": (
+            [
+                "capture_customer_device_backups",
+                "stage_new_outer_tunnel_cert_bundle",
+                "stage_new_outer_tunnel_config_without_removing_previous_state",
+                "load_or_reload_customer_outer_tunnel_config",
+                "bring_up_new_outer_tunnel",
+                "validate_customer_outer_tunnel_certificate_identity",
+                "validate_inner_tunnel_and_service_path",
+                "retire_previous_customer_outer_tunnel_state_only_after_validation",
+            ]
+            if not edge_is_gateway
+            else [
+                "capture_customer_device_backups",
+                "validate_inner_tunnel_and_service_path",
+            ]
+        ),
+        "gateway_device_apply_order": (
+            [
+                "capture_gateway_device_backups",
+                "stage_new_outer_tunnel_cert_bundle",
+                "stage_new_outer_tunnel_config_without_removing_previous_state",
+                "load_or_reload_gateway_outer_tunnel_config",
+                "bring_up_new_outer_tunnel",
+                "validate_gateway_outer_tunnel_certificate_identity",
+                "validate_inner_tunnel_and_service_path",
+                "retire_previous_gateway_outer_tunnel_state_only_after_validation",
+            ]
+            if edge_is_gateway
+            else []
+        ),
         "validation_order": [
             "validate_platform_state_after_backend_muxer_cgnat_apply",
-            "validate_customer_outer_tunnel_on_customer_and_cgnat_headend",
+            (
+                "validate_gateway_outer_tunnel_on_isp_gateway_and_cgnat_headend"
+                if edge_is_gateway
+                else "validate_customer_outer_tunnel_on_customer_and_cgnat_headend"
+            ),
             "validate_inner_tunnel_on_backend_headend",
             "validate_service_path_and_bidirectional counters",
         ],
         "rollback_order": [
-            "restore_previous_customer_device_cert_and_config",
+            (
+                "restore_previous_gateway_device_cert_and_config"
+                if edge_is_gateway
+                else "restore_previous_customer_device_cert_and_config"
+            ),
             *list(rollback_plan.get("rollback_order") or []),
         ],
         "guard_rails": [
-            "Do not remove previous customer-device cert or config until the new outer tunnel is established and validated.",
+            (
+                "Do not remove previous gateway cert or config until the new outer tunnel is established and validated."
+                if edge_is_gateway
+                else "Do not remove previous customer-device cert or config until the new outer tunnel is established and validated."
+            ),
             "Stop after each platform surface if validation fails; do not continue to the next surface on partial success.",
-            "Rollback immediately if the customer outer tunnel does not establish with the expected identity and trust chain.",
+            (
+                "Rollback immediately if the gateway outer tunnel does not establish with the expected identity and trust chain."
+                if edge_is_gateway
+                else "Rollback immediately if the customer outer tunnel does not establish with the expected identity and trust chain."
+            ),
             "Rollback immediately if customer-1 traffic validation fails after a platform or customer-device change.",
         ],
         "execution_plan_ref": execution_plan.get("artifacts", {}).get("execution_plan"),
@@ -433,6 +540,8 @@ def build_cgnat_combined_review(
 
 def render_cgnat_live_execution_checklist(*, live_execution_plan: dict[str, Any]) -> str:
     handoff = dict(live_execution_plan.get("customer_handoff") or {})
+    outer_handoff = dict(live_execution_plan.get("outer_handoff") or {})
+    edge_role = str(live_execution_plan.get("edge_device_role") or "customer_device")
     lines = [
         f"# CGNAT Live Execution Checklist: {live_execution_plan.get('customer_name')}",
         "",
@@ -453,14 +562,24 @@ def render_cgnat_live_execution_checklist(*, live_execution_plan: dict[str, Any]
     lines.extend(
         [
             "",
-            "## Customer Device Backups",
+            f"## Outer Peer Backups ({edge_role})",
             "",
         ]
     )
-    for item in live_execution_plan.get("customer_device_backup_items") or []:
+    for item in live_execution_plan.get("edge_device_backup_items") or []:
         lines.append(f"- {item}")
     lines.extend(
         [
+            "",
+            "## Outer Handoff Package",
+            "",
+            f"- Recipient type: `{outer_handoff.get('recipient_type')}`",
+            f"- Package name: `{outer_handoff.get('package_name')}`",
+            f"- Manifest: `{outer_handoff.get('manifest')}`",
+            f"- README: `{outer_handoff.get('readme')}`",
+            f"- Certificate path: `{outer_handoff.get('certificate_path')}`",
+            f"- Private key path: `{outer_handoff.get('private_key_path')}`",
+            f"- CA path: `{outer_handoff.get('ca_certificate_path')}`",
             "",
             "## Customer Handoff Package",
             "",
@@ -487,6 +606,10 @@ def render_cgnat_live_execution_checklist(*, live_execution_plan: dict[str, Any]
     )
     for step in live_execution_plan.get("customer_device_apply_order") or []:
         lines.append(f"1. `{step}`")
+    if live_execution_plan.get("gateway_device_apply_order"):
+        lines.extend(["", "## Gateway Device Apply Order", ""])
+        for step in live_execution_plan.get("gateway_device_apply_order") or []:
+            lines.append(f"1. `{step}`")
     lines.extend(
         [
             "",

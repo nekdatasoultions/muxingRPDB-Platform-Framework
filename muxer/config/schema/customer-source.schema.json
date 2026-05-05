@@ -178,6 +178,9 @@
         "customer": {
           "$ref": "#/$defs/cgnat_pki_endpoint"
         },
+        "gateway": {
+          "$ref": "#/$defs/cgnat_pki_endpoint"
+        },
         "trust": {
           "$ref": "#/$defs/cgnat_pki_trust"
         }
@@ -188,6 +191,17 @@
       "additionalProperties": false,
       "properties": {
         "service_profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outer_topology": {
+          "type": "string",
+          "enum": [
+            "per_customer_outer",
+            "shared_isp_gateway"
+          ]
+        },
+        "outer_gateway_ref": {
           "type": "string",
           "minLength": 1
         },
@@ -211,7 +225,26 @@
         "pki": {
           "$ref": "#/$defs/cgnat_pki"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outer_topology": {
+                "const": "shared_isp_gateway"
+              }
+            },
+            "required": [
+              "outer_topology"
+            ]
+          },
+          "then": {
+            "required": [
+              "outer_gateway_ref"
+            ]
+          }
+        }
+      ]
     },
     "peer": {
       "type": "object",

@@ -39,12 +39,15 @@ class CgnatPki:
     customer_package_format: str = "pem_bundle"
     headend: Optional[CgnatPkiEndpoint] = None
     customer: Optional[CgnatPkiEndpoint] = None
+    gateway: Optional[CgnatPkiEndpoint] = None
     trust: Optional[CgnatPkiTrust] = None
 
 
 @dataclass(frozen=True)
 class CgnatTransport:
     service_profile: str = ""
+    outer_topology: str = "per_customer_outer"
+    outer_gateway_ref: str = ""
     outer_identity_ref: str = ""
     outer_auth_ref: str = ""
     customer_loopback_ip: str = ""
@@ -373,6 +376,16 @@ def _normalized_cgnat_pki_mode(value: Any) -> str:
     return normalized
 
 
+def _normalized_cgnat_outer_topology(value: Any) -> str:
+    if value in (None, ""):
+        return "per_customer_outer"
+    normalized = str(value).strip().lower().replace("-", "_")
+    allowed = {"per_customer_outer", "shared_isp_gateway"}
+    if normalized not in allowed:
+        raise ValueError(f"unsupported customer.transport.cgnat.outer_topology {value!r}")
+    return normalized
+
+
 def _normalize_cgnat_pki_endpoint(doc: Dict[str, Any]) -> CgnatPkiEndpoint:
     return CgnatPkiEndpoint(
         identity_ref=str(doc.get("identity_ref") or ""),
@@ -384,6 +397,7 @@ def _normalize_cgnat_pki_endpoint(doc: Dict[str, Any]) -> CgnatPkiEndpoint:
 def _normalize_cgnat_pki(doc: Dict[str, Any]) -> CgnatPki:
     headend_doc = doc.get("headend") or {}
     customer_doc = doc.get("customer") or {}
+    gateway_doc = doc.get("gateway") or {}
     trust_doc = doc.get("trust") or {}
     customer_package_format = str(doc.get("customer_package_format") or "pem_bundle").strip().lower()
     if customer_package_format not in {"pem_bundle"}:
@@ -405,6 +419,11 @@ def _normalize_cgnat_pki(doc: Dict[str, Any]) -> CgnatPki:
             if isinstance(customer_doc, dict) and customer_doc
             else None
         ),
+        gateway=(
+            _normalize_cgnat_pki_endpoint(gateway_doc)
+            if isinstance(gateway_doc, dict) and gateway_doc
+            else None
+        ),
         trust=(
             CgnatPkiTrust(ca_ref=str(trust_doc.get("ca_ref") or ""))
             if isinstance(trust_doc, dict) and trust_doc
@@ -417,6 +436,8 @@ def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
     pki_doc = doc.get("pki") or {}
     return CgnatTransport(
         service_profile=str(doc.get("service_profile") or ""),
+        outer_topology=_normalized_cgnat_outer_topology(doc.get("outer_topology")),
+        outer_gateway_ref=str(doc.get("outer_gateway_ref") or ""),
         outer_identity_ref=str(doc.get("outer_identity_ref") or ""),
         outer_auth_ref=str(doc.get("outer_auth_ref") or ""),
         customer_loopback_ip=(

@@ -100,12 +100,15 @@ def main() -> int:
     shared_nonnat = regression_root / "shared-nonnat-package"
     shared_nat = regression_root / "shared-nat-package"
     cgnat_review = regression_root / "cgnat-customer-review"
+    cgnat_shared_gateway_review = regression_root / "cgnat-shared-gateway-review"
     cgnat_customer1_live_review = regression_root / "cgnat-customer1-live-review"
     cgnat_local_pki_review = regression_root / "cgnat-customer-local-pki-review"
     cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
+    cgnat_shared_gateway_staged_apply = regression_root / "cgnat-shared-gateway-staged-apply"
     cgnat_dual_customer1_staged_apply = regression_root / "cgnat-customer1-staged-apply"
     cgnat_dual_customer2_staged_apply = regression_root / "cgnat-customer2-staged-apply"
     cgnat_staged_request = regression_root / "example-minimal-cgnat-staged-apply.yaml"
+    cgnat_shared_gateway_staged_request = regression_root / "example-minimal-cgnat-shared-gateway-staged-apply.yaml"
     cgnat_dual_customer1_request = regression_root / "example-cgnat-customer-1-staged-apply.yaml"
     cgnat_dual_customer2_request = regression_root / "example-cgnat-customer-2-staged-apply.yaml"
     staged_env_path = regression_root / "example-rpdb-staged-live.yaml"
@@ -157,6 +160,15 @@ def main() -> int:
         str(cgnat_local_pki_review),
         "--json",
     )
+    _run(
+        str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
+        str(request_examples / "example-minimal-cgnat-shared-isp-local-pki.yaml"),
+        "--environment",
+        "rpdb-empty-live",
+        "--out-dir",
+        str(cgnat_shared_gateway_review),
+        "--json",
+    )
 
     base_staged_env = REPO_ROOT / "muxer" / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"
     staged_env_doc = yaml.safe_load(base_staged_env.read_text(encoding="utf-8")) or {}
@@ -181,6 +193,11 @@ def main() -> int:
         request_examples / "example-minimal-cgnat.yaml",
         cgnat_staged_request,
         "example-minimal-cgnat-staged-apply",
+    )
+    _prepare_staged_customer_request(
+        request_examples / "example-minimal-cgnat-shared-isp-local-pki.yaml",
+        cgnat_shared_gateway_staged_request,
+        "example-minimal-cgnat-shared-gateway-staged-apply",
     )
     _prepare_staged_customer_request(
         request_examples / "example-cgnat-customer-1-local-pki.yaml",
@@ -253,6 +270,49 @@ def main() -> int:
             staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-staged-apply.conf",
             staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-staged-apply",
             staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-staged-apply.json",
+        )
+    )
+    _run(
+        str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+        "--customer-file",
+        str(cgnat_shared_gateway_staged_request),
+        "--environment",
+        str(staged_env_path),
+        "--out-dir",
+        str(cgnat_shared_gateway_staged_apply),
+        "--approve",
+        "--json",
+    )
+    cgnat_shared_gateway_staged_apply_summary = _load_json(cgnat_shared_gateway_staged_apply / "execution-plan.json")
+    cgnat_shared_gateway_rollback_plan = _load_json(
+        REPO_ROOT / cgnat_shared_gateway_staged_apply_summary["apply"]["rollback_plan"]
+    )
+    cgnat_shared_gateway_rollback_results = [
+        _run_json_command(step["command"])
+        for step in reversed(cgnat_shared_gateway_rollback_plan["steps"])
+    ]
+    cgnat_shared_gateway_rollback_summary = {
+        "schema_version": 1,
+        "customer_name": "example-minimal-cgnat-shared-gateway-staged-apply",
+        "rollback_results": cgnat_shared_gateway_rollback_results,
+    }
+    (cgnat_shared_gateway_staged_apply / "rollback-execution-summary.json").write_text(
+        json.dumps(cgnat_shared_gateway_rollback_summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    cgnat_shared_gateway_rollback_cleanup_ok = not any(
+        path.exists()
+        for path in (
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "datastores" / "var" / "lib" / "rpdb-backend" / "allocations" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "muxer-root" / "var" / "lib" / "rpdb-muxer" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "muxer-root" / "etc" / "muxer" / "config" / "customer-modules" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "nonnat-active-root" / "var" / "lib" / "rpdb-headend" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "nonnat-active-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-shared-gateway-staged-apply.conf",
+            staged_root / "nonnat-standby-root" / "var" / "lib" / "rpdb-headend" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "nonnat-standby-root" / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "example-minimal-cgnat-shared-gateway-staged-apply.conf",
+            staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply",
+            staged_root / "cgnat-headend-root" / "etc" / "rpdb-cgnat" / "customers" / "example-minimal-cgnat-shared-gateway-staged-apply.json",
         )
     )
 
@@ -388,16 +448,39 @@ def main() -> int:
     shared_nonnat_summary = _load_json(shared_nonnat / "provisioning-run.json")
     shared_nat_summary = _load_json(shared_nat / "provisioning-run.json")
     cgnat_review_summary = _load_json(cgnat_review / "combined-review-summary.json")
+    cgnat_profile_override_report = _load_json(
+        cgnat_review / "shared-dry-run" / "package" / "cgnat-profile-override-report.json"
+    )
+    cgnat_review_source = yaml.safe_load(
+        (cgnat_review / "shared-dry-run" / "package" / "customer-source.yaml").read_text(encoding="utf-8")
+    ) or {}
+    cgnat_shared_gateway_review_summary = _load_json(cgnat_shared_gateway_review / "combined-review-summary.json")
+    cgnat_shared_gateway_live_execution_plan = _load_json(cgnat_shared_gateway_review / "live-execution-plan.json")
     cgnat_customer1_live_review_summary = _load_json(cgnat_customer1_live_review / "combined-review-summary.json")
     cgnat_customer1_live_execution_plan = _load_json(cgnat_customer1_live_review / "live-execution-plan.json")
     cgnat_local_pki_review_summary = _load_json(cgnat_local_pki_review / "combined-review-summary.json")
     cgnat_local_pki_surface = _load_json(cgnat_local_pki_review / "pki" / "pki-review.json")
+    cgnat_review_outside_nat = dict((cgnat_review_source.get("customer") or {}).get("outside_nat") or {})
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
         "shared_nonnat_ready_for_review": bool(shared_nonnat_summary.get("ready_for_review")),
         "shared_nat_ready_for_review": bool(shared_nat_summary.get("ready_for_review")),
         "cgnat_customer_review_ready_for_review": bool(cgnat_review_summary.get("ready_for_review")),
+        "cgnat_profile_override_applied": bool(cgnat_profile_override_report.get("applied")),
+        "cgnat_profile_override_route_via_ok": (
+            cgnat_review_outside_nat.get("route_via") == "172.31.63.44"
+            and cgnat_review_outside_nat.get("route_dev") == "ens36"
+            and cgnat_review_outside_nat.get("real_subnets") == ["194.138.36.86/32"]
+        ),
+        "cgnat_shared_gateway_review_ready_for_review": bool(
+            cgnat_shared_gateway_review_summary.get("ready_for_review")
+        ),
+        "cgnat_shared_gateway_live_execution_plan_ready": bool(
+            cgnat_shared_gateway_live_execution_plan.get("gateway_device_backup_required")
+            and (cgnat_shared_gateway_live_execution_plan.get("outer_handoff") or {}).get("recipient_type")
+            == "isp_gateway"
+        ),
         "cgnat_customer1_live_review_ready_for_review": bool(
             cgnat_customer1_live_review_summary.get("ready_for_review")
         ),
@@ -418,6 +501,17 @@ def main() -> int:
                 or bool(result.get("removed"))
             )
             for result in rollback_results
+        ),
+        "cgnat_shared_gateway_staged_apply_ok": str(
+            cgnat_shared_gateway_staged_apply_summary.get("status") or ""
+        ).strip().lower() == "applied",
+        "cgnat_shared_gateway_staged_rollback_ok": cgnat_shared_gateway_rollback_cleanup_ok
+        and all(
+            (
+                str(result.get("status") or "").strip().lower() == "rolled_back"
+                or bool(result.get("removed"))
+            )
+            for result in cgnat_shared_gateway_rollback_results
         ),
         "cgnat_dual_customer_staged_apply_ok": dual_customer_installed_ok
         and str(dual_customer1_summary.get("status") or "").strip().lower() == "applied"
@@ -442,10 +536,18 @@ def main() -> int:
             "shared_nonnat_package": str(shared_nonnat),
             "shared_nat_package": str(shared_nat),
             "cgnat_customer_review": str(cgnat_review),
+            "cgnat_profile_override_report": str(
+                cgnat_review / "shared-dry-run" / "package" / "cgnat-profile-override-report.json"
+            ),
+            "cgnat_shared_gateway_review": str(cgnat_shared_gateway_review),
             "cgnat_customer1_live_review": str(cgnat_customer1_live_review),
             "cgnat_customer_local_pki_review": str(cgnat_local_pki_review),
             "cgnat_customer_staged_apply": str(cgnat_staged_apply),
             "cgnat_customer_staged_rollback": str(cgnat_staged_apply / "rollback-execution-summary.json"),
+            "cgnat_shared_gateway_staged_apply": str(cgnat_shared_gateway_staged_apply),
+            "cgnat_shared_gateway_staged_rollback": str(
+                cgnat_shared_gateway_staged_apply / "rollback-execution-summary.json"
+            ),
             "cgnat_dual_customer1_staged_apply": str(cgnat_dual_customer1_staged_apply),
             "cgnat_dual_customer2_staged_apply": str(cgnat_dual_customer2_staged_apply),
             "cgnat_dual_customer_rollback": str(regression_root / "dual-customer-rollback-summary.json"),

@@ -94,6 +94,31 @@ The current backend family distinction remains:
 
 CGNAT is an ingress/transport mode layered in front of that backend.
 
+### 2a. Separate Transport Topology from Service Semantics
+
+CGNAT should describe **how traffic reaches the platform**, not reduce what
+the terminating VPN service can do.
+
+That means the inner tunnel must terminate into the same functional service
+model as a regular RPDB VPN customer. After termination, the customer should
+have the same feature surface as an ordinary:
+
+- non-NAT VPN customer
+- NAT-T VPN customer
+
+including support for:
+
+- inside NAT
+- outside NAT
+- route-via / egress handoff behavior
+- normal selector, backend, and policy handling
+
+In other words:
+
+- the **outer CGNAT transport** determines how we reach the platform
+- the **inner VPN service** determines what the customer can do once
+  terminated
+
 ### 3. Reuse Existing Backend Provisioning
 
 CGNAT should continue to reuse the existing backend customer packaging and
@@ -140,6 +165,21 @@ Apply CGNAT head end
 Validate
 ```
 
+The same CGNAT head-end platform should be able to support more than one outer
+topology at the same time:
+
+1. `per_customer_outer`
+   - the customer router establishes the outer certificate-auth tunnel
+   - the customer router also establishes the inner PSK tunnel
+
+2. `shared_isp_gateway`
+   - the ISP CGNAT gateway establishes the shared outer certificate-auth
+     tunnel
+   - the customer router establishes the inner PSK tunnel only
+
+These are two topologies of the same CGNAT transport family, not two separate
+products.
+
 ## Proposed Data Model Changes
 
 ### Customer Request / Source
@@ -155,6 +195,7 @@ customer:
   transport:
     mode: cgnat
     cgnat:
+      outer_topology: per_customer_outer
       service_profile: scenario1
       outer_identity_ref: customer-router-1/example-customer
       outer_auth_ref: pki/cgnat/customer-router-1
@@ -171,7 +212,41 @@ Recommended transport mode values:
 - `direct_nat_t`
 - `cgnat`
 
+Recommended CGNAT outer topology values:
+
+- `per_customer_outer`
+- `shared_isp_gateway`
+
+For `shared_isp_gateway`, the model should also allow a reusable gateway
+reference, for example:
+
+```yaml
+customer:
+  transport:
+    mode: cgnat
+    cgnat:
+      outer_topology: shared_isp_gateway
+      outer_gateway_ref: isp-cgnat-router-1
+      customer_loopback_ip: 10.250.1.12
+      known_inside_identity: 10.20.30.12/32
+```
+
 The absence of a transport block should preserve the current legacy behavior.
+
+### Inner Termination Requirement
+
+The inner tunnel should terminate as a first-class backend VPN customer and
+must preserve the same service capabilities as a direct customer.
+
+That means the backend package and deploy path must continue to own:
+
+- non-NAT service behavior
+- NAT-T service behavior
+- inside NAT enablement/disablement
+- outside NAT enablement/disablement
+- existing backend routing and policy semantics
+
+CGNAT should not introduce a reduced-function backend service class.
 
 ## Current Certificate Scope
 
@@ -344,6 +419,8 @@ At minimum the module or its adjacent source should preserve:
 
 - `transport.mode`
 - backend family
+- CGNAT outer topology
+- optional ISP gateway reference
 - CGNAT outer identity/auth references
 - customer loopback IP
 - known inside identity
@@ -434,6 +511,12 @@ For CGNAT customers, the repo-only package should contain three logical parts:
    - any generated cert/identity references
    - any route or xfrm-specific customer artifacts
 
+For `shared_isp_gateway`, the CGNAT package may additionally contain:
+
+- gateway-scoped outer-tunnel payloads
+- gateway PKI refs or handoff package artifacts
+- customer inner-only handoff artifacts
+
 Recommended combined package layout:
 
 ```text
@@ -471,6 +554,12 @@ Rationale:
 - backend responder should exist before CGNAT-side traffic arrives
 - muxer/service ingress should exist before CGNAT customer traffic is used
 - CGNAT customer activation should be last among the transport components
+
+For `shared_isp_gateway`, the same order still applies, but the CGNAT phase
+may be split into:
+
+1. apply or validate shared gateway outer state
+2. apply customer-specific inner/backend state
 
 ## Validation Design
 
@@ -529,6 +618,12 @@ The first integration should not try to solve:
 This design is successful when:
 
 1. an RPDB customer request can explicitly declare `transport.mode = cgnat`
+2. a CGNAT request can explicitly declare its outer topology
+3. the same CGNAT head-end platform can support both:
+   - `per_customer_outer`
+   - `shared_isp_gateway`
+4. inner-tunnel termination preserves the full backend VPN feature surface,
+   including inside and outside NAT behavior
 2. the deploy flow still selects muxer/backend hosts from environment YAML
 3. backend provisioning is reused, not reimplemented
 4. a CGNAT head-end package is generated alongside the backend package

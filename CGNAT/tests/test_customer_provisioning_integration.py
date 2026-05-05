@@ -88,6 +88,7 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(source_transport["mode"], "cgnat")
         self.assertEqual(source_transport["tunnel_mtu"], 1436)
         self.assertEqual(source_transport["cgnat"]["service_profile"], "scenario1")
+        self.assertEqual(source_transport["cgnat"]["outer_topology"], "per_customer_outer")
         self.assertEqual(source_transport["cgnat"]["outer_identity_ref"], "customer-router-1/example-minimal-cgnat")
         self.assertEqual(source_transport["cgnat"]["outer_auth_ref"], "pki/cgnat/customer-router-1")
         self.assertEqual(source_transport["cgnat"]["customer_loopback_ip"], "10.250.1.10")
@@ -111,6 +112,7 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(module_transport["mode"], "cgnat")
+        self.assertEqual(module_transport["cgnat"]["outer_topology"], "per_customer_outer")
         self.assertEqual(module_transport["cgnat"]["customer_loopback_ip"], "10.250.1.10")
         self.assertEqual(module_transport["cgnat"]["known_inside_identity"], "10.20.30.10/32")
         self.assertEqual(
@@ -151,6 +153,35 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(
             module_transport["cgnat"]["pki"]["trust"]["ca_ref"],
             "pki/cgnat/ca/example-minimal-cgnat-local-pki",
+        )
+
+    def test_shared_isp_gateway_request_survives_request_source_and_module_layers(self) -> None:
+        request_doc = self._load_request("example-minimal-cgnat-shared-isp-local-pki.yaml")
+        jsonschema.validate(instance=request_doc, schema=self.schema)
+
+        customer_source = self._render_source(request_doc)
+        customer_module = build_customer_module(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-minimal-cgnat-shared-isp-local-pki.yaml",
+        )
+
+        source_transport = customer_source["customer"]["transport"]
+        module_transport = customer_module["transport"]
+
+        self.assertEqual(source_transport["mode"], "cgnat")
+        self.assertEqual(source_transport["cgnat"]["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(source_transport["cgnat"]["outer_gateway_ref"], "isp-cgnat-router-1")
+        self.assertEqual(
+            source_transport["cgnat"]["pki"]["gateway"]["package_name"],
+            "example-minimal-cgnat-shared-isp-local-pki-isp-cgnat-router-1",
+        )
+        self.assertEqual(module_transport["cgnat"]["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(module_transport["cgnat"]["outer_gateway_ref"], "isp-cgnat-router-1")
+        self.assertEqual(
+            module_transport["cgnat"]["pki"]["gateway"]["identity_ref"],
+            "isp-cgnat-router-1/example-minimal-cgnat-shared-isp-local-pki",
         )
 
     def test_target_selection_adds_cgnat_headend_only_for_cgnat_transport(self) -> None:

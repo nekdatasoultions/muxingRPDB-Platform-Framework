@@ -15,6 +15,17 @@ from typing import Any
 
 import yaml
 
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from muxerlib.cgnat_profile_overrides import apply_cgnat_service_profile_overrides
+from muxerlib.customer_merge import (
+    build_customer_item,
+    build_customer_module,
+    load_yaml_file as _load_customer_yaml,
+)
+
 
 REQUIRED_PACKAGE_PATHS = [
     "customer-source.yaml",
@@ -53,9 +64,83 @@ def _write_text(path: Path, payload: str) -> None:
         handle.write(payload if payload.endswith("\n") else payload + "\n")
 
 
+def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
 def _copy_file(source: str | Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(Path(source), destination)
+
+
+def _environment_name(environment_doc: dict[str, Any]) -> str:
+    environment = environment_doc.get("environment") or {}
+    return str(environment.get("name") or "").strip()
+
+
+def _rebuild_customer_outputs_from_source(
+    *,
+    muxer_dir: Path,
+    request_path: Path,
+    source_path: Path,
+    module_path: Path,
+    item_path: Path,
+) -> dict[str, Any]:
+    source_doc = _load_yaml(source_path)
+    customer_class = str((source_doc.get("customer") or {}).get("customer_class") or "").strip()
+    defaults_doc = _load_customer_yaml(muxer_dir / "config" / "customer-defaults" / "defaults.yaml")
+    class_doc = _load_customer_yaml(
+        muxer_dir / "config" / "customer-defaults" / "classes" / f"{customer_class}.yaml"
+    )
+    source_ref = request_path.as_posix()
+    module = build_customer_module(
+        source_doc,
+        defaults_doc,
+        class_doc,
+        source_ref=source_ref,
+    )
+    item = build_customer_item(
+        source_doc,
+        defaults_doc,
+        class_doc,
+        source_ref=source_ref,
+    )
+    _write_json(module_path, module)
+    _write_json(item_path, item)
+    return {
+        "customer_class": customer_class,
+        "module_path": str(module_path),
+        "item_path": str(item_path),
+    }
+
+
+def _apply_cgnat_profile_overrides_if_needed(
+    *,
+    muxer_dir: Path,
+    request_path: Path,
+    environment_file: Path,
+    source_path: Path,
+    module_path: Path,
+    item_path: Path,
+) -> dict[str, Any]:
+    source_doc = _load_yaml(source_path)
+    environment_doc = _load_yaml(environment_file)
+    updated_source, report = apply_cgnat_service_profile_overrides(
+        source_doc,
+        deployment_environment=_environment_name(environment_doc),
+        environment_doc=environment_doc,
+    )
+    if report.get("applied"):
+        _write_yaml(source_path, updated_source)
+        report["rebuilt_outputs"] = _rebuild_customer_outputs_from_source(
+            muxer_dir=muxer_dir,
+            request_path=request_path,
+            source_path=source_path,
+            module_path=module_path,
+            item_path=item_path,
+        )
+    return report
 
 
 def _customer_name_from_request(path: Path) -> str:
@@ -549,6 +634,7 @@ def main() -> int:
     bundle_dir = package_dir / "bundle"
     bundle_validation_path = package_dir / "bundle-validation.json"
     double_verification_path = package_dir / "double-verification.json"
+    override_report_path = package_dir / "cgnat-profile-override-report.json"
     readiness_path = package_dir / "pilot-readiness.json"
     readme_path = package_dir / "README.md"
 
@@ -556,6 +642,7 @@ def main() -> int:
     steps: list[dict[str, Any]] = []
     python = sys.executable
     dynamic_result: dict[str, Any] | None = None
+    override_report: dict[str, Any] | None = None
 
     try:
         _run_step(
@@ -622,6 +709,16 @@ def main() -> int:
             assert provisioning_result is not None
             _write_json(allocation_ddb_items_path, provisioning_result["allocation_ddb_items"])
 
+        override_report = _apply_cgnat_profile_overrides_if_needed(
+            muxer_dir=muxer_dir,
+            request_path=request_path,
+            environment_file=environment_file,
+            source_path=source_path,
+            module_path=module_path,
+            item_path=item_path,
+        )
+        _write_json(override_report_path, override_report)
+
         double_verification = _run_double_verification(
             repo_root=repo_root,
             source_path=source_path,
@@ -669,6 +766,12 @@ def main() -> int:
             double_verification=double_verification,
             dynamic_result=dynamic_result,
         )
+        if override_report is not None:
+            readiness["profile_overrides"] = {
+                "report": _repo_relative(override_report_path, repo_root),
+                "applied": bool(override_report.get("applied")),
+                "reason": override_report.get("reason"),
+            }
         _write_json(readiness_path, readiness)
         _write_text(readme_path, _build_readme(customer_name=customer_name, readiness=readiness, dynamic_result=dynamic_result))
 

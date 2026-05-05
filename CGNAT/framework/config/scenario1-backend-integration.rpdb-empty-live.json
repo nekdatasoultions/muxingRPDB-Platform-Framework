@@ -8,6 +8,13 @@
     "23.20.31.151/32",
     "194.138.36.86/32"
   ],
+  "environment_aliases": [
+    "rpdb-empty-nonnat-active-a",
+    "rpdb-empty-nat-active-a"
+  ],
+  "outside_nat_excluded_real_subnets": [
+    "23.20.31.151/32"
+  ],
   "outside_nat_route_via": "172.31.63.44",
   "outside_nat_route_dev": "ens36",
   "service_local_subnets_mode": "customer_facing_public_ip_loopback",

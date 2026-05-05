@@ -29,6 +29,25 @@ class CgnatPkiMaterializerTests(unittest.TestCase):
         self.assertEqual(spec["customer"]["identity_ref"], "customer-router-1/example-minimal-cgnat")
         self.assertEqual(spec["trust"]["ca_ref"], "pki/cgnat/ca/example-minimal-cgnat")
 
+    def test_shared_isp_gateway_local_generate_targets_gateway_handoff(self) -> None:
+        request_doc = load_yaml_file(
+            MUXER_ROOT
+            / "config"
+            / "customer-requests"
+            / "examples"
+            / "example-minimal-cgnat-shared-isp-local-pki.yaml"
+        )
+        spec = resolve_cgnat_pki_spec(request_doc)
+
+        self.assertEqual(spec["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(spec["outer_gateway_ref"], "isp-cgnat-router-1")
+        self.assertEqual(
+            spec["gateway"]["identity_ref"],
+            "isp-cgnat-router-1/example-minimal-cgnat-shared-isp-local-pki",
+        )
+        self.assertEqual(spec["customer"]["identity_ref"], "customer-inner/example-minimal-cgnat-shared-isp-local-pki")
+        self.assertEqual(spec["customer"]["auth_ref"], "inner-psk/example-minimal-cgnat-shared-isp-local-pki")
+
     def test_local_generate_writes_customer_handoff_bundle(self) -> None:
         request_doc = load_yaml_file(
             MUXER_ROOT / "config" / "customer-requests" / "examples" / "example-minimal-cgnat-local-pki.yaml"
@@ -59,6 +78,41 @@ class CgnatPkiMaterializerTests(unittest.TestCase):
         self.assertTrue(customer_key.exists())
         self.assertTrue(ca_cert.exists())
         self.assertTrue(headend_cert.exists())
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+    def test_shared_isp_gateway_local_generate_writes_gateway_handoff_bundle(self) -> None:
+        request_doc = load_yaml_file(
+            MUXER_ROOT
+            / "config"
+            / "customer-requests"
+            / "examples"
+            / "example-minimal-cgnat-shared-isp-local-pki.yaml"
+        )
+        build_root = CGNAT_ROOT / "build"
+        build_root.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(tempfile.mkdtemp(prefix="pki-materializer-shared-isp-", dir=str(build_root)))
+
+        try:
+            review = materialize_cgnat_pki(request_doc, output_dir)
+        except FileNotFoundError as exc:
+            self.skipTest(str(exc))
+
+        self.assertTrue(review["ready_for_review"])
+        self.assertEqual(review["outer_topology"], "shared_isp_gateway")
+        self.assertEqual(review["outer_handoff"]["recipient_type"], "isp_gateway")
+        self.assertFalse(review["customer_handoff"]["outer_material_required"])
+        self.assertTrue(review["gateway_handoff"]["outer_material_required"])
+
+        gateway_manifest = Path(review["artifacts"]["gateway_handoff_manifest"])
+        gateway_readme = Path(review["artifacts"]["gateway_handoff_readme"])
+        gateway_cert = Path(review["artifacts"]["gateway_certificate_path"])
+        gateway_key = Path(review["artifacts"]["gateway_private_key_path"])
+
+        self.assertTrue(gateway_manifest.exists())
+        self.assertTrue(gateway_readme.exists())
+        self.assertTrue(gateway_cert.exists())
+        self.assertTrue(gateway_key.exists())
+        self.assertNotIn("customer_certificate_path", review["artifacts"])
         shutil.rmtree(output_dir, ignore_errors=True)
 
 

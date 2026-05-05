@@ -83,6 +83,7 @@ def load_cgnat_package(package_dir: Path) -> dict[str, Any]:
     module_cgnat = dict(module_transport.get("cgnat") or {})
     required = [
         "service_profile",
+        "outer_topology",
         "outer_identity_ref",
         "outer_auth_ref",
         "customer_loopback_ip",
@@ -97,6 +98,13 @@ def load_cgnat_package(package_dir: Path) -> dict[str, Any]:
     for field in required:
         if str(module_cgnat.get(field) or "").strip() != str(cgnat_transport.get(field) or "").strip():
             raise ValueError(f"package customer-module.json transport.cgnat.{field} does not match customer-source.yaml")
+    if str(cgnat_transport.get("outer_topology") or "").strip() == "shared_isp_gateway":
+        if not str(cgnat_transport.get("outer_gateway_ref") or "").strip():
+            raise ValueError("package customer-source.yaml shared_isp_gateway requires customer.transport.cgnat.outer_gateway_ref")
+        if str(module_cgnat.get("outer_gateway_ref") or "").strip() != str(cgnat_transport.get("outer_gateway_ref") or "").strip():
+            raise ValueError(
+                "package customer-module.json transport.cgnat.outer_gateway_ref does not match customer-source.yaml"
+            )
 
     return {
         "package_dir": resolved_package,
@@ -139,6 +147,8 @@ def _build_runtime_payloads(package: dict[str, Any]) -> dict[str, dict[str, Any]
         "schema_version": 1,
         "customer_name": package["customer_name"],
         "service_profile": cgnat_transport.get("service_profile"),
+        "outer_topology": cgnat_transport.get("outer_topology"),
+        "outer_gateway_ref": cgnat_transport.get("outer_gateway_ref"),
         "outer_identity_ref": cgnat_transport.get("outer_identity_ref"),
         "outer_auth_ref": cgnat_transport.get("outer_auth_ref"),
         "customer_loopback_ip": cgnat_transport.get("customer_loopback_ip"),
@@ -165,6 +175,8 @@ def _build_runtime_payloads(package: dict[str, Any]) -> dict[str, dict[str, Any]
         "customer_name": package["customer_name"],
         "required_transport_mode": "cgnat",
         "expected_peer_public_ip": peer.get("public_ip"),
+        "expected_outer_topology": cgnat_transport.get("outer_topology"),
+        "expected_outer_gateway_ref": cgnat_transport.get("outer_gateway_ref"),
         "expected_outer_identity_ref": cgnat_transport.get("outer_identity_ref"),
         "expected_outer_auth_ref": cgnat_transport.get("outer_auth_ref"),
         "expected_known_inside_identity": cgnat_transport.get("known_inside_identity"),
@@ -205,6 +217,8 @@ def validate_cgnat_package(package_dir: Path) -> dict[str, Any]:
     report["customer_name"] = package["customer_name"]
     profile = runtime_payloads["transport_profile"]
     report["details"]["service_profile"] = profile.get("service_profile")
+    report["details"]["outer_topology"] = profile.get("outer_topology")
+    report["details"]["outer_gateway_ref"] = profile.get("outer_gateway_ref")
     report["details"]["outer_identity_ref"] = profile.get("outer_identity_ref")
     report["details"]["outer_auth_ref"] = profile.get("outer_auth_ref")
     report["details"]["customer_loopback_ip"] = profile.get("customer_loopback_ip")
