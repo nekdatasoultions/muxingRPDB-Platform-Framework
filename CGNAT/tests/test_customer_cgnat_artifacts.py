@@ -136,6 +136,49 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         self.assertNotIn("203.0.113.61/32", firewall_apply)
         self.assertNotIn("snat to", firewall_apply.lower())
 
+    def test_customer1_dual_nat_artifacts_render_expected_inside_and_outside_nat(self) -> None:
+        request_doc = deepcopy(self._load_request("example-cgnat-customer-1-local-pki.yaml"))
+
+        customer_module, customer_item = self._render_customer(request_doc)
+        artifacts = build_customer_artifact_tree(customer_module, customer_item)
+
+        headend_conf = artifacts["headend"]["ipsec/swanctl-connection.conf"]
+        post_ipsec_nat_intent = artifacts["headend"]["post-ipsec-nat/post-ipsec-nat-intent.json"]
+        outside_nat_intent = artifacts["headend"]["outside-nat/outside-nat-intent.json"]
+        routing_intent = artifacts["headend"]["routing/routing-intent.json"]
+        route_commands = artifacts["headend"]["routing/ip-route.commands.txt"]
+
+        self.assertIn("local_ts = 23.20.31.151/32,10.20.40.10/32", headend_conf)
+
+        self.assertTrue(post_ipsec_nat_intent["enabled"])
+        self.assertEqual(post_ipsec_nat_intent["mode"], "netmap")
+        self.assertEqual(post_ipsec_nat_intent["mapping_strategy"], "one_to_one")
+        self.assertEqual(post_ipsec_nat_intent["real_subnets"], ["10.20.30.10/32"])
+        self.assertEqual(post_ipsec_nat_intent["translated_subnets"], ["10.20.20.10/32"])
+        self.assertEqual(
+            post_ipsec_nat_intent["core_subnets"],
+            ["23.20.31.151/32", "194.138.36.86/32"],
+        )
+
+        self.assertTrue(outside_nat_intent["enabled"])
+        self.assertEqual(outside_nat_intent["mode"], "netmap")
+        self.assertEqual(outside_nat_intent["mapping_strategy"], "one_to_one")
+        self.assertEqual(outside_nat_intent["real_subnets"], ["194.138.36.86/32"])
+        self.assertEqual(outside_nat_intent["translated_subnets"], ["10.20.40.10/32"])
+        self.assertEqual(outside_nat_intent["route_via"], "172.31.63.44")
+        self.assertEqual(outside_nat_intent["route_dev"], "ens36")
+        self.assertEqual(outside_nat_intent["customer_sources"], ["10.20.30.10/32"])
+
+        self.assertEqual(
+            routing_intent["outside_nat"]["presented_local_subnets"],
+            ["10.20.40.10/32"],
+        )
+        self.assertEqual(
+            routing_intent["outside_nat"]["real_local_subnets"],
+            ["194.138.36.86/32"],
+        )
+        self.assertIn("ip route replace 194.138.36.86/32 via 172.31.63.44 dev ens36", route_commands)
+
 
 if __name__ == "__main__":
     unittest.main()

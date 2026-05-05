@@ -9,7 +9,7 @@ customer:
   selectors:
     local_subnets:
       - 23.20.31.151/32
-      - 194.138.36.86/32
+      - 10.20.40.10/32
     remote_subnets:
       - 10.20.30.10/32
   backend:
@@ -20,6 +20,27 @@ customer:
     esp50: true
   natd_rewrite:
     enabled: true
+  post_ipsec_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 10.20.30.10/32
+    translated_subnets:
+      - 10.20.20.10/32
+    core_subnets:
+      - 23.20.31.151/32
+      - 194.138.36.86/32
+  outside_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 194.138.36.86/32
+    translated_subnets:
+      - 10.20.40.10/32
+    route_via: 172.31.63.44
+    route_dev: ens36
   transport:
     mode: cgnat
     tunnel_mtu: 1436

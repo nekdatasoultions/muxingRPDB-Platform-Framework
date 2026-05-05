@@ -478,9 +478,43 @@ def main() -> int:
     )
     cgnat_customer1_live_review_summary = _load_json(cgnat_customer1_live_review / "combined-review-summary.json")
     cgnat_customer1_live_execution_plan = _load_json(cgnat_customer1_live_review / "live-execution-plan.json")
+    cgnat_customer1_source = yaml.safe_load(
+        (cgnat_customer1_live_review / "shared-dry-run" / "package" / "customer-source.yaml").read_text(encoding="utf-8")
+    ) or {}
+    cgnat_customer1_post_ipsec_nat = _load_json(
+        cgnat_customer1_live_review
+        / "shared-dry-run"
+        / "package"
+        / "bound"
+        / "headend"
+        / "post-ipsec-nat"
+        / "post-ipsec-nat-intent.json"
+    )
+    cgnat_customer1_outside_nat = _load_json(
+        cgnat_customer1_live_review
+        / "shared-dry-run"
+        / "package"
+        / "bound"
+        / "headend"
+        / "outside-nat"
+        / "outside-nat-intent.json"
+    )
+    cgnat_customer1_swanctl_connection = (
+        cgnat_customer1_live_review
+        / "shared-dry-run"
+        / "package"
+        / "bound"
+        / "headend"
+        / "ipsec"
+        / "swanctl-connection.conf"
+    ).read_text(encoding="utf-8")
     cgnat_local_pki_review_summary = _load_json(cgnat_local_pki_review / "combined-review-summary.json")
     cgnat_local_pki_surface = _load_json(cgnat_local_pki_review / "pki" / "pki-review.json")
     cgnat_review_outside_nat = dict((cgnat_review_source.get("customer") or {}).get("outside_nat") or {})
+    cgnat_customer1_source_customer = cgnat_customer1_source.get("customer") or {}
+    cgnat_customer1_source_selectors = dict(cgnat_customer1_source_customer.get("selectors") or {})
+    cgnat_customer1_source_post_ipsec_nat = dict(cgnat_customer1_source_customer.get("post_ipsec_nat") or {})
+    cgnat_customer1_source_outside_nat = dict(cgnat_customer1_source_customer.get("outside_nat") or {})
 
     regression_summary = {
         "regression_type": "cgnat_full_regression",
@@ -517,6 +551,21 @@ def main() -> int:
         "cgnat_customer1_live_execution_plan_ready": bool(
             cgnat_customer1_live_execution_plan.get("customer_device_backup_required")
             and (cgnat_customer1_live_execution_plan.get("customer_handoff") or {}).get("package_name")
+        ),
+        "cgnat_customer1_inside_nat_ok": (
+            cgnat_customer1_source_post_ipsec_nat.get("enabled") is True
+            and cgnat_customer1_source_post_ipsec_nat.get("real_subnets") == ["10.20.30.10/32"]
+            and cgnat_customer1_source_post_ipsec_nat.get("translated_subnets") == ["10.20.20.10/32"]
+            and cgnat_customer1_post_ipsec_nat.get("core_subnets") == ["23.20.31.151/32", "194.138.36.86/32"]
+        ),
+        "cgnat_customer1_outside_nat_ok": (
+            cgnat_customer1_source_selectors.get("local_subnets") == ["23.20.31.151/32", "10.20.40.10/32"]
+            and cgnat_customer1_source_outside_nat.get("enabled") is True
+            and cgnat_customer1_outside_nat.get("real_subnets") == ["194.138.36.86/32"]
+            and cgnat_customer1_outside_nat.get("translated_subnets") == ["10.20.40.10/32"]
+            and cgnat_customer1_outside_nat.get("route_via") == "172.31.63.44"
+            and cgnat_customer1_outside_nat.get("route_dev") == "ens36"
+            and "local_ts = 23.20.31.151/32,10.20.40.10/32" in cgnat_customer1_swanctl_connection
         ),
         "cgnat_customer_local_pki_review_ready_for_review": bool(
             cgnat_local_pki_review_summary.get("ready_for_review")
