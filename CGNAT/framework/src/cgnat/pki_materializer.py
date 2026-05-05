@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import secrets
 import shutil
 import subprocess
@@ -42,6 +43,15 @@ def _sanitize(value: str) -> str:
 def _runtime_identity(value: str) -> str:
     candidate = str(value or "").strip().replace("/", ".")
     return _sanitize(candidate)
+
+
+def _subject_common_name(value: str, *, max_length: int = 64) -> str:
+    candidate = _runtime_identity(value)
+    if len(candidate) <= max_length:
+        return candidate
+    digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:8]
+    keep = max_length - len(digest) - 1
+    return f"{candidate[:keep]}-{digest}"
 
 
 def _find_openssl() -> str:
@@ -273,7 +283,7 @@ def _write_local_handoff(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
         "-days",
         "365",
         "-subj",
-        f"/CN={spec['ca_common_name']}",
+        f"/CN={_subject_common_name(spec['ca_common_name'])}",
     )
     _run(
         openssl_bin,
@@ -287,7 +297,7 @@ def _write_local_handoff(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
         "-out",
         str(headend_csr),
         "-subj",
-        f"/CN={safe_headend}",
+        f"/CN={_subject_common_name(safe_headend)}",
     )
     dump_text(
         headend_ext,
@@ -332,7 +342,7 @@ def _write_local_handoff(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
         "-out",
         str(outer_csr),
         "-subj",
-        f"/CN={safe_handoff_identity}",
+        f"/CN={_subject_common_name(safe_handoff_identity)}",
     )
     dump_text(
         outer_ext,

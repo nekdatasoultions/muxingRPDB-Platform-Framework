@@ -85,6 +85,29 @@ targets:
           public_ip: 44.198.245.90
         access:
           method: ssh
+    isp_gateways:
+      isp-cgnat-router-1:
+        name: isp-cgnat-router-1
+        role: cgnat-isp-gateway
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: isp-cgnat-router-1
+          private_ip: 172.31.36.155
+          public_ip: 52.1.142.146
+        access:
+          method: ssh
+      isp-cgnat-router-2:
+        name: isp-cgnat-router-2
+        role: cgnat-isp-gateway
+        rpdb_managed: true
+        selector:
+          type: tag
+          key: Name
+          value: isp-cgnat-router-2
+        access:
+          method: ssh
 
 datastores:
   mode: dynamodb
@@ -102,6 +125,9 @@ backups:
   nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend
   non_nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend
   cgnat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-headend
+  cgnat_isp_gateways:
+    isp-cgnat-router-1: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1
+    isp-cgnat-router-2: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-2
 
 nat_t_watcher:
   log_source:

@@ -307,6 +307,9 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     backend_cluster = str(customer.get("backend_cluster") or "").strip()
     customer_class = str(customer.get("customer_class") or "").strip()
     transport_mode = str(customer.get("transport_mode") or "").strip().lower()
+    cgnat = dict(customer.get("cgnat") or {})
+    cgnat_outer_topology = str(cgnat.get("outer_topology") or "").strip().lower().replace("-", "_")
+    cgnat_outer_gateway_ref = str(cgnat.get("outer_gateway_ref") or "").strip()
     use_nat = backend_cluster == "nat" or customer_class == "nat" or bool(dynamic_nat_t.get("used"))
     headend_key = "nat" if use_nat else "non_nat"
     targets = environment_doc.get("targets") or {}
@@ -315,6 +318,12 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     selected_pair = headends.get(headend_key) or {}
     cgnat_required = transport_mode == "cgnat"
     cgnat_headend_active = ((cgnat_targets.get("headend") or {}).get("active")) if cgnat_required else None
+    cgnat_gateway_targets = (cgnat_targets.get("isp_gateways") or {}) if cgnat_required else {}
+    cgnat_isp_gateway = (
+        cgnat_gateway_targets.get(cgnat_outer_gateway_ref)
+        if cgnat_outer_topology == "shared_isp_gateway" and cgnat_outer_gateway_ref
+        else None
+    )
     return {
         "mode": "dry_run",
         "environment_access_method": ((environment_doc.get("environment") or {}).get("access") or {}).get("method"),
@@ -324,7 +333,10 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
         "headend_standby": selected_pair.get("standby"),
         "transport_mode": transport_mode,
         "cgnat_required": cgnat_required,
+        "cgnat_outer_topology": cgnat_outer_topology,
+        "cgnat_outer_gateway_ref": cgnat_outer_gateway_ref,
         "cgnat_headend_active": cgnat_headend_active,
+        "cgnat_isp_gateway": cgnat_isp_gateway,
         "datastores": environment_doc.get("datastores"),
         "artifacts": environment_doc.get("artifacts"),
         "backups": environment_doc.get("backups"),
@@ -378,6 +390,9 @@ def _evaluate_dry_run_gate(
     }
     if bool((target_selection or {}).get("cgnat_required")):
         backup_refs["cgnat_headend"] = backups.get("cgnat_headend")
+        if str((target_selection or {}).get("cgnat_outer_topology") or "").strip() == "shared_isp_gateway":
+            gateway_ref = str((target_selection or {}).get("cgnat_outer_gateway_ref") or "").strip()
+            backup_refs["cgnat_isp_gateway"] = ((backups.get("cgnat_isp_gateways") or {}).get(gateway_ref))
     backup_status = {
         key: _reference_is_concrete(value)
         for key, value in backup_refs.items()
@@ -400,6 +415,15 @@ def _evaluate_dry_run_gate(
         cgnat_headend = (target_selection or {}).get("cgnat_headend_active") or {}
         if not cgnat_headend:
             errors.append("CGNAT transport requires targets.cgnat.headend.active in the deployment environment")
+        if str((target_selection or {}).get("cgnat_outer_topology") or "").strip() == "shared_isp_gateway":
+            cgnat_gateway = (target_selection or {}).get("cgnat_isp_gateway") or {}
+            gateway_ref = str((target_selection or {}).get("cgnat_outer_gateway_ref") or "").strip()
+            if not gateway_ref:
+                errors.append("shared_isp_gateway requires customer.transport.cgnat.outer_gateway_ref")
+            if not cgnat_gateway:
+                errors.append(
+                    "shared_isp_gateway requires targets.cgnat.isp_gateways.<outer_gateway_ref> in the deployment environment"
+                )
 
     environment_live_apply = (((environment_doc or {}).get("environment") or {}).get("live_apply") or {})
     environment_access_method = str(
@@ -492,6 +516,9 @@ def _build_execution_plan(
             "headend_active": ((target_selection or {}).get("headend_active") or {}).get("name"),
             "headend_standby": ((target_selection or {}).get("headend_standby") or {}).get("name"),
             "cgnat_headend_active": ((target_selection or {}).get("cgnat_headend_active") or {}).get("name"),
+            "cgnat_outer_topology": (target_selection or {}).get("cgnat_outer_topology"),
+            "cgnat_outer_gateway_ref": (target_selection or {}).get("cgnat_outer_gateway_ref"),
+            "cgnat_isp_gateway": ((target_selection or {}).get("cgnat_isp_gateway") or {}).get("name"),
             "customer_sot_table": (((target_selection or {}).get("datastores") or {}).get("customer_sot_table")),
             "allocation_table": (((target_selection or {}).get("datastores") or {}).get("allocation_table")),
             "artifact_bucket": (((target_selection or {}).get("artifacts") or {}).get("bucket")),

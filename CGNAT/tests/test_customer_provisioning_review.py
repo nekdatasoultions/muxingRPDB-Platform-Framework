@@ -205,24 +205,38 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
     def test_shared_isp_gateway_live_plan_switches_outer_handoff_to_gateway(self) -> None:
         request_doc = self._shared_isp_request()
         validate_cgnat_request(request_doc, request_path="example-minimal-cgnat-shared-isp-local-pki.yaml")
+        shared_execution_plan = {
+            **self.execution_plan,
+            "selected_targets": {
+                **dict(self.execution_plan["selected_targets"]),
+                "cgnat_isp_gateway": {"name": "rpdb-staged-cgnat-isp-gateway-1"},
+            },
+            "dry_run_gate": {
+                **dict(self.execution_plan["dry_run_gate"]),
+                "backup_refs": {
+                    **dict((self.execution_plan["dry_run_gate"] or {}).get("backup_refs") or {}),
+                    "cgnat_isp_gateway": "s3://demo/backups/cgnat-isp-gateways/isp-cgnat-router-1",
+                },
+            },
+        }
 
         pki_review = build_cgnat_pki_surface_review(
             request_doc=request_doc,
             output_dir=CGNAT_ROOT / "build" / "review-test" / "pki-shared-isp",
         )
         rollback = build_cgnat_rollback_plan(
-            execution_plan=self.execution_plan,
+            execution_plan=shared_execution_plan,
             test_bed_customer="CGNAT customer 1",
         )
         live_test_bed = build_cgnat_live_test_bed_plan(
             request_doc=request_doc,
-            execution_plan=self.execution_plan,
+            execution_plan=shared_execution_plan,
             rollback_plan=rollback,
             test_bed_customer="CGNAT customer 1",
         )
         live_execution = build_cgnat_live_execution_plan(
             request_doc=request_doc,
-            execution_plan=self.execution_plan,
+            execution_plan=shared_execution_plan,
             pki_review=pki_review,
             rollback_plan=rollback,
             live_test_bed_plan=live_test_bed,
@@ -234,11 +248,16 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
         self.assertTrue(live_execution["gateway_device_backup_required"])
         self.assertFalse(live_execution["customer_device_backup_required"])
         self.assertEqual(live_execution["outer_handoff"]["recipient_type"], "isp_gateway")
+        self.assertEqual(live_execution["gateway_target"], "rpdb-staged-cgnat-isp-gateway-1")
         self.assertEqual(
             live_execution["gateway_handoff"]["package_name"],
             "example-minimal-cgnat-shared-isp-local-pki-isp-cgnat-router-1",
         )
         self.assertFalse(live_execution["customer_handoff"]["outer_material_required"])
+        self.assertEqual(
+            live_test_bed["backup_gate"]["references"]["cgnat_isp_gateway"],
+            "s3://demo/backups/cgnat-isp-gateways/isp-cgnat-router-1",
+        )
         self.assertIn("Gateway Device Apply Order", checklist)
 
 

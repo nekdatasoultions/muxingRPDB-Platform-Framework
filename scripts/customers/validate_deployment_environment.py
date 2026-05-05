@@ -82,6 +82,9 @@ def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
     cgnat_headend = (cgnat.get("headend") or {}).get("active")
     if isinstance(cgnat_headend, dict):
         docs.append(cgnat_headend)
+    for gateway in (cgnat.get("isp_gateways") or {}).values():
+        if isinstance(gateway, dict):
+            docs.append(gateway)
     return docs
 
 
@@ -184,6 +187,11 @@ def _target_summary(document: dict[str, Any]) -> dict[str, Any]:
         "non_nat_active": (((headends.get("non_nat") or {}).get("active") or {}).get("name")),
         "non_nat_standby": (((headends.get("non_nat") or {}).get("standby") or {}).get("name")),
         "cgnat_headend_active": ((((cgnat.get("headend") or {}).get("active") or {}).get("name"))),
+        "cgnat_isp_gateways": {
+            str(name): (gateway or {}).get("name")
+            for name, gateway in sorted((cgnat.get("isp_gateways") or {}).items())
+            if isinstance(gateway, dict)
+        },
     }
 
 

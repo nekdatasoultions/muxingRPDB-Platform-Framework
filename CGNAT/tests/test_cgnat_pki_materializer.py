@@ -115,6 +115,30 @@ class CgnatPkiMaterializerTests(unittest.TestCase):
         self.assertNotIn("customer_certificate_path", review["artifacts"])
         shutil.rmtree(output_dir, ignore_errors=True)
 
+    def test_local_generate_handles_long_identity_names(self) -> None:
+        request_doc = load_yaml_file(
+            MUXER_ROOT
+            / "config"
+            / "customer-requests"
+            / "examples"
+            / "example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml"
+        )
+        build_root = CGNAT_ROOT / "build"
+        build_root.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(tempfile.mkdtemp(prefix="pki-materializer-long-cn-", dir=str(build_root)))
+
+        try:
+            review = materialize_cgnat_pki(request_doc, output_dir)
+        except FileNotFoundError as exc:
+            self.skipTest(str(exc))
+
+        self.assertTrue(review["ready_for_review"])
+        self.assertTrue(review["generated_material"])
+        self.assertEqual(review["outer_handoff"]["recipient_type"], "isp_gateway")
+        self.assertTrue(Path(review["artifacts"]["headend_certificate_path"]).exists())
+        self.assertTrue(Path(review["artifacts"]["gateway_certificate_path"]).exists())
+        shutil.rmtree(output_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

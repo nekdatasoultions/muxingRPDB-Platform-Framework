@@ -1,0 +1,54 @@
+{
+  "environment": "rpdb-empty-live",
+  "customer_name": "cgnat-s2-backend",
+  "customer_name_template": "cgnat-s2-be-r{index}",
+  "backend_psk_secret_ref": "/muxingrpdb/customers/cgnat-scenario2-rpdb-empty-live-backend/psk",
+  "backend_psk_secret_ref_template": "/muxingrpdb/customers/{customer_name}/psk",
+  "service_local_subnets": [
+    "23.20.31.151/32",
+    "194.138.36.86/32"
+  ],
+  "environment_aliases": [
+    "rpdb-empty-nonnat-active-a",
+    "rpdb-empty-nat-active-a"
+  ],
+  "outside_nat_excluded_real_subnets": [
+    "23.20.31.151/32"
+  ],
+  "outside_nat_route_via": "172.31.63.44",
+  "outside_nat_route_dev": "ens36",
+  "service_local_subnets_mode": "customer_facing_public_ip_loopback",
+  "ipsec": {
+    "ike_version": "ikev2",
+    "ike_policies": [
+      "aes256-sha256-modp2048"
+    ],
+    "esp_policies": [
+      "aes256-sha256-modp2048"
+    ],
+    "dpddelay": "30s",
+    "dpdtimeout": "120s",
+    "dpdaction": "restart",
+    "mobike": false,
+    "fragmentation": true,
+    "clear_df_bit": true,
+    "replay_protection": true,
+    "pfs_required": false,
+    "pfs_groups": [
+      "modp2048"
+    ]
+  },
+  "ipsec_initiation": {
+    "mode": "customer_only",
+    "headend_can_initiate": false,
+    "customer_can_initiate": true,
+    "traffic_can_start_tunnel": true,
+    "bring_up_on_apply": false,
+    "swanctl_start_action": "trap"
+  },
+  "post_ipsec_nat": {
+    "mode": "netmap",
+    "mapping_strategy": "one_to_one",
+    "tcp_mss_clamp": 1360
+  }
+}

@@ -54,6 +54,35 @@ class CgnatProfileOverridesTests(unittest.TestCase):
         self.assertEqual(outside_nat["translated_subnets"], ["194.138.36.86/32"])
         self.assertEqual(report["excluded_real_subnets"], ["23.20.31.151/32"])
 
+    def test_scenario2_override_uses_second_profile_file(self) -> None:
+        request_doc = load_yaml_file(
+            MUXER_ROOT
+            / "config"
+            / "customer-requests"
+            / "examples"
+            / "example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml"
+        )
+        allocation_plan = plan_customer_allocations(
+            request_doc,
+            self.pools,
+            inventory=empty_allocation_inventory(),
+        )
+        customer_source = render_allocated_customer_source(request_doc, allocation_plan)
+
+        updated_source, report = apply_cgnat_service_profile_overrides(
+            customer_source,
+            deployment_environment="rpdb-empty-live",
+            environment_doc=self.environment_doc,
+        )
+
+        outside_nat = dict((updated_source.get("customer") or {}).get("outside_nat") or {})
+        self.assertTrue(report["applied"])
+        self.assertEqual(report["reason"], "scenario_profile_route_via_applied")
+        self.assertIn("scenario2-backend-integration.rpdb-empty-live.json", str(report["integration_path"]))
+        self.assertEqual(outside_nat["route_via"], "172.31.63.44")
+        self.assertEqual(outside_nat["route_dev"], "ens36")
+        self.assertEqual(outside_nat["real_subnets"], ["194.138.36.86/32"])
+
 
 if __name__ == "__main__":
     unittest.main()

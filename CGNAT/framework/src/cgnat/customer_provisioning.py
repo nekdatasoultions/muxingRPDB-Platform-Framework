@@ -147,6 +147,7 @@ def build_muxer_surface_review(
             "peer_ip": customer.get("peer_ip"),
             "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
             "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
+            "outer_gateway_target": dict(targets.get("cgnat_isp_gateway") or {}).get("name"),
             "service_reachable_subnets": list(cgnat.get("service_reachable_subnets") or []),
             "known_inside_identity": cgnat.get("known_inside_identity"),
             "backend_family": targets.get("headend_family"),
@@ -181,6 +182,7 @@ def build_cgnat_headend_surface_review(
             "service_profile": cgnat.get("service_profile"),
             "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
             "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
+            "outer_gateway_target": dict(targets.get("cgnat_isp_gateway") or {}).get("name"),
             "outer_identity_ref": cgnat.get("outer_identity_ref"),
             "outer_auth_ref": cgnat.get("outer_auth_ref"),
             "customer_loopback_ip": cgnat.get("customer_loopback_ip"),
@@ -195,6 +197,10 @@ def build_cgnat_headend_surface_review(
             "gateway_identity_ref": pki_spec["gateway"]["identity_ref"],
             "gateway_auth_ref": pki_spec["gateway"]["auth_ref"],
             "trust_ca_ref": pki_spec["trust"]["ca_ref"],
+        },
+        "gateway_binding": {
+            "target": dict(targets.get("cgnat_isp_gateway") or {}).get("name"),
+            "backup_ref": (gate.get("backup_refs") or {}).get("cgnat_isp_gateway"),
         },
         "notes": [
             "The CGNAT head-end remains an explicit deployment surface with its own target and backup reference.",
@@ -287,6 +293,9 @@ def build_cgnat_live_test_bed_plan(
             "backend_headend_active": dict(targets.get("headend_active") or {}).get("name"),
             "backend_headend_standby": dict(targets.get("headend_standby") or {}).get("name"),
             "cgnat_headend_active": dict(targets.get("cgnat_headend_active") or {}).get("name"),
+            "cgnat_outer_topology": str((_cgnat_doc(request_doc).get("outer_topology") or "per_customer_outer")),
+            "cgnat_outer_gateway_ref": str((_cgnat_doc(request_doc).get("outer_gateway_ref") or "")),
+            "cgnat_isp_gateway": dict(targets.get("cgnat_isp_gateway") or {}).get("name"),
         },
         "backup_gate": {
             "required": True,
@@ -295,6 +304,7 @@ def build_cgnat_live_test_bed_plan(
                 "backend_headend": backend_headend_backup_ref,
                 "backend_headend_key": backend_headend_backup_key,
                 "cgnat_headend": backup_refs.get("cgnat_headend"),
+                "cgnat_isp_gateway": backup_refs.get("cgnat_isp_gateway"),
             },
         },
         "pre_change_capture_order": [
@@ -355,6 +365,7 @@ def build_cgnat_live_execution_plan(
         "outer_topology": cgnat.get("outer_topology") or "per_customer_outer",
         "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
         "platform_backup_refs": dict((live_test_bed_plan.get("backup_gate") or {}).get("references") or {}),
+        "gateway_target": dict((_selected_targets(execution_plan).get("cgnat_isp_gateway") or {})).get("name"),
         "edge_device_backup_required": True,
         "edge_device_role": edge_role,
         "customer_device_backup_required": not edge_is_gateway,
@@ -469,7 +480,7 @@ def build_cgnat_live_execution_plan(
         "execution_plan_ref": execution_plan.get("artifacts", {}).get("execution_plan"),
         "notes": [
             "The shared provisioning flow still owns platform-side state only; customer-device installation uses the generated handoff package.",
-            "This checklist is intended for the first controlled customer-1 live run and should be reused for customer 2 only after customer 1 is green.",
+            "This checklist is intended for the next controlled live canary and should be reused for later customers only after the earlier gate is green.",
         ],
     }
 

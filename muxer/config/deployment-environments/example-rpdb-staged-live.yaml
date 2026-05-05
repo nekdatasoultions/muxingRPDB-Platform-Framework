@@ -78,6 +78,27 @@ targets:
           private_ip: 172.31.38.227
         access:
           method: staged
+    isp_gateways:
+      isp-cgnat-router-1:
+        name: rpdb-staged-cgnat-isp-gateway-1
+        role: cgnat-isp-gateway
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/cgnat-isp-gateway-1-root
+          private_ip: 172.31.36.155
+        access:
+          method: staged
+      isp-cgnat-router-2:
+        name: rpdb-staged-cgnat-isp-gateway-2
+        role: cgnat-isp-gateway
+        rpdb_managed: true
+        selector:
+          type: staged
+          value: build/staged-live/cgnat-isp-gateway-2-root
+          private_ip: 172.31.36.156
+        access:
+          method: staged
 
 datastores:
   mode: staged
@@ -97,6 +118,9 @@ backups:
   nat_headend: build/staged-live/backups/baseline/nat-headend
   non_nat_headend: build/staged-live/backups/baseline/non-nat-headend
   cgnat_headend: build/staged-live/backups/baseline/cgnat-headend
+  cgnat_isp_gateways:
+    isp-cgnat-router-1: build/staged-live/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1
+    isp-cgnat-router-2: build/staged-live/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-2
 
 nat_t_watcher:
   log_source:

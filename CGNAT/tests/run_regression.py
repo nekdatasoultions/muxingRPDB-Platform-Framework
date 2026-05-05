@@ -101,6 +101,7 @@ def main() -> int:
     shared_nat = regression_root / "shared-nat-package"
     cgnat_review = regression_root / "cgnat-customer-review"
     cgnat_shared_gateway_review = regression_root / "cgnat-shared-gateway-review"
+    cgnat_scenario2_shared_gateway_review = regression_root / "cgnat-scenario2-shared-gateway-review"
     cgnat_customer1_live_review = regression_root / "cgnat-customer1-live-review"
     cgnat_local_pki_review = regression_root / "cgnat-customer-local-pki-review"
     cgnat_staged_apply = regression_root / "cgnat-customer-staged-apply"
@@ -169,6 +170,15 @@ def main() -> int:
         str(cgnat_shared_gateway_review),
         "--json",
     )
+    _run(
+        str(CGNAT_ROOT / "framework" / "scripts" / "prepare_cgnat_customer_pilot.py"),
+        str(request_examples / "example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml"),
+        "--environment",
+        "rpdb-empty-live",
+        "--out-dir",
+        str(cgnat_scenario2_shared_gateway_review),
+        "--json",
+    )
 
     base_staged_env = REPO_ROOT / "muxer" / "config" / "deployment-environments" / "example-rpdb-staged-live.yaml"
     staged_env_doc = yaml.safe_load(base_staged_env.read_text(encoding="utf-8")) or {}
@@ -218,6 +228,8 @@ def main() -> int:
         "nonnat-active-root",
         "nonnat-standby-root",
         "cgnat-headend-root",
+        "cgnat-isp-gateway-1-root",
+        "cgnat-isp-gateway-2-root",
         "datastores",
         "artifacts",
         "logs",
@@ -229,6 +241,8 @@ def main() -> int:
         "backups/baseline/nat-headend",
         "backups/baseline/non-nat-headend",
         "backups/baseline/cgnat-headend",
+        "backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1",
+        "backups/baseline/cgnat-isp-gateways/isp-cgnat-router-2",
     ):
         (staged_root / relative_path).mkdir(parents=True, exist_ok=True)
     _run(
@@ -456,6 +470,12 @@ def main() -> int:
     ) or {}
     cgnat_shared_gateway_review_summary = _load_json(cgnat_shared_gateway_review / "combined-review-summary.json")
     cgnat_shared_gateway_live_execution_plan = _load_json(cgnat_shared_gateway_review / "live-execution-plan.json")
+    cgnat_scenario2_shared_gateway_review_summary = _load_json(
+        cgnat_scenario2_shared_gateway_review / "combined-review-summary.json"
+    )
+    cgnat_scenario2_shared_gateway_live_execution_plan = _load_json(
+        cgnat_scenario2_shared_gateway_review / "live-execution-plan.json"
+    )
     cgnat_customer1_live_review_summary = _load_json(cgnat_customer1_live_review / "combined-review-summary.json")
     cgnat_customer1_live_execution_plan = _load_json(cgnat_customer1_live_review / "live-execution-plan.json")
     cgnat_local_pki_review_summary = _load_json(cgnat_local_pki_review / "combined-review-summary.json")
@@ -480,6 +500,16 @@ def main() -> int:
             cgnat_shared_gateway_live_execution_plan.get("gateway_device_backup_required")
             and (cgnat_shared_gateway_live_execution_plan.get("outer_handoff") or {}).get("recipient_type")
             == "isp_gateway"
+        ),
+        "cgnat_scenario2_shared_gateway_review_ready_for_review": bool(
+            cgnat_scenario2_shared_gateway_review_summary.get("ready_for_review")
+        ),
+        "cgnat_scenario2_gateway_target_selected": bool(
+            cgnat_scenario2_shared_gateway_live_execution_plan.get("gateway_target")
+            and cgnat_scenario2_shared_gateway_live_execution_plan.get("gateway_target")
+            == "isp-cgnat-router-2"
+            and cgnat_scenario2_shared_gateway_live_execution_plan.get("outer_topology")
+            == "shared_isp_gateway"
         ),
         "cgnat_customer1_live_review_ready_for_review": bool(
             cgnat_customer1_live_review_summary.get("ready_for_review")
@@ -540,6 +570,7 @@ def main() -> int:
                 cgnat_review / "shared-dry-run" / "package" / "cgnat-profile-override-report.json"
             ),
             "cgnat_shared_gateway_review": str(cgnat_shared_gateway_review),
+            "cgnat_scenario2_shared_gateway_review": str(cgnat_scenario2_shared_gateway_review),
             "cgnat_customer1_live_review": str(cgnat_customer1_live_review),
             "cgnat_customer_local_pki_review": str(cgnat_local_pki_review),
             "cgnat_customer_staged_apply": str(cgnat_staged_apply),

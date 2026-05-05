@@ -151,6 +151,13 @@
                   "$ref": "#/$defs/target"
                 }
               }
+            },
+            "isp_gateways": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/target"
+              }
             }
           }
         }
@@ -230,6 +237,13 @@
         },
         "cgnat_headend": {
           "$ref": "#/$defs/non_empty_string"
+        },
+        "cgnat_isp_gateways": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/non_empty_string"
+          }
         }
       }
     },
@@ -396,7 +410,8 @@
             "muxer",
             "nat-headend",
             "non-nat-headend",
-            "cgnat-headend"
+            "cgnat-headend",
+            "cgnat-isp-gateway"
           ]
         },
         "rpdb_managed": {
