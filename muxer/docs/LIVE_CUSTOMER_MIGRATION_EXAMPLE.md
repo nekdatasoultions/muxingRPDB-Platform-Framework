@@ -1,5 +1,11 @@
 # Live Customer Migration Example
 
+> Manual migration inventory example.
+>
+> This document exists to help move legacy customers into the RPDB model. It is
+> not the current canary provisioning path and should not be confused with the
+> validated CGNAT customer flow.
+
 ## Goal
 
 Show how one real production-shaped customer can be represented in the RPDB

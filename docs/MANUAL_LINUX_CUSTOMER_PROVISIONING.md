@@ -1,5 +1,16 @@
 # Manual Linux Customer Provisioning
 
+> Manual operator path only.
+>
+> This runbook is intentionally outside the shared RPDB customer deployment
+> flow. Use it for lab work, break-glass validation, or manual migration
+> exercises. It is not the preferred path for the current automated customer
+> canary flow, which should start with:
+>
+> - `scripts/customers/deploy_customer.py`
+> - `CGNAT/framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md`
+> - `CGNAT/framework/docs/CGNAT_LIVE_STATUS_2026-05-05.md`
+
 This runbook shows how to provision one non-NAT customer and one NAT-T customer by hand with Linux commands only.
 
 It intentionally does not use:

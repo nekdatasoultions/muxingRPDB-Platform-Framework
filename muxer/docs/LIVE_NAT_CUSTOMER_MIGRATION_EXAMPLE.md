@@ -1,5 +1,11 @@
 # Live NAT Customer Migration Example
 
+> Manual migration inventory example.
+>
+> This document exists to help move legacy NAT customers into the RPDB model.
+> It is not the current canary provisioning path and should not be confused
+> with the validated CGNAT customer flow.
+
 ## Goal
 
 Show how a current NAT-T production-shaped customer fits into the RPDB

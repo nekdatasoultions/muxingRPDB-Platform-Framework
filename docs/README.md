@@ -34,16 +34,15 @@ tree.
 
 ## Current-State Reference
 
-The `current-state` folder contains imported baseline references for the
-existing deploy shape. Treat these as reference material, not the final RPDB
-architecture:
+The `current-state` folder now keeps only a small amount of retained reference
+material. Older node-specific deployment snapshots and runtime status files
+were retired once the legacy muxer and legacy head-end tiers were removed.
 
-- [Deployment runbook](current-state/DEPLOYMENT_RUNBOOK.md)
-- [Deploy muxer, VPN head ends, and customer runbook](current-state/DEPLOY_MUXER_HEADENDS_AND_CUSTOMER_RUNBOOK.md)
 - [CloudFormation and NetBox SoT runbook](current-state/CLOUDFORMATION_NETBOX_RUNBOOK.md)
 - [Head-end active/standby model](current-state/HEADEND_HA_ACTIVE_STANDBY.md)
-- [Head-end runtime status](current-state/HEADEND_RUNTIME_STATUS.md)
-- [Stack SoT for us-east-1](current-state/STACK_SOT_US_EAST_1.md)
+
+Removed current-state snapshots remain recoverable from Git history if we need
+to audit the older environment.
 
 ## Muxer Internals
 

@@ -258,7 +258,6 @@ CGNAT/
       framework.example.json
       deployment-bundle.example.json
     scripts/
-      build_bundle.py
       validate_bundle.py
       render_bundle.py
     src/

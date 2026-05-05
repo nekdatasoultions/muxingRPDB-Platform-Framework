@@ -45,23 +45,31 @@ and should be protected.
 
 ## Verify Before Delete
 
-These nodes are not in the current `rpdb-empty-live` contract, but they look
-like shared or earlier environment infrastructure. They should not be deleted
-until we verify they are truly unused.
+These nodes are not in the current `rpdb-empty-live` contract and still deserve
+manual confirmation before removal.
 
 | Instance ID | Name | Why verify first |
 |---|---|---|
-| `i-0b9501e2561b934a5` | `muxer-single-prod-node` | older muxer prod naming; may serve non-RPDB workflows |
-| `i-0b645c1e664914002` | `muxer-single-prod-node` | second older muxer prod node; likely redundant but verify |
-| `i-0e36a4b5425774b74` | `vpn-headend-nat-graviton-dev-headend-a` | older NAT head end set |
-| `i-042fc7e06b4992e74` | `vpn-headend-nat-graviton-dev-headend-b` | older NAT head end set |
-| `i-03df357b7d4031524` | `vpn-headend-non-nat-graviton-dev-headend-a` | older non-NAT head end set |
-| `i-077040652765b7928` | `vpn-headend-non-nat-graviton-dev-headend-b` | older non-NAT head end set |
-| `i-0d6e8714b9a99043e` | `vpn-headend-nat-headend-a` | even older NAT head end naming tier |
-| `i-0f1cc1c76ef0a583f` | `vpn-headend-nat-headend-b` | even older NAT head end naming tier |
-| `i-0463e6d6906bf6c58` | `vpn-headend-non-nat-headend-a` | even older non-NAT head end naming tier |
-| `i-0d08ca2559bb0438f` | `vpn-headend-non-nat-headend-b` | even older non-NAT head end naming tier |
 | `i-002b96b2e50f906ce` | `NetBox-SoT-01` | unrelated to current CGNAT path, but may still matter to operations |
+
+## Retired 2026-05-05
+
+These legacy infrastructure nodes were terminated after backups were taken and
+after confirming they were outside the current keep set and outside the legacy
+VPN customer migration queue.
+
+| Instance ID | Name |
+|---|---|
+| `i-0b9501e2561b934a5` | `muxer-single-prod-node` |
+| `i-0b645c1e664914002` | `muxer-single-prod-node` |
+| `i-0e36a4b5425774b74` | `vpn-headend-nat-graviton-dev-headend-a` |
+| `i-042fc7e06b4992e74` | `vpn-headend-nat-graviton-dev-headend-b` |
+| `i-03df357b7d4031524` | `vpn-headend-non-nat-graviton-dev-headend-a` |
+| `i-077040652765b7928` | `vpn-headend-non-nat-graviton-dev-headend-b` |
+| `i-0d6e8714b9a99043e` | `vpn-headend-nat-headend-a` |
+| `i-0f1cc1c76ef0a583f` | `vpn-headend-nat-headend-b` |
+| `i-0463e6d6906bf6c58` | `vpn-headend-non-nat-headend-a` |
+| `i-0d08ca2559bb0438f` | `vpn-headend-non-nat-headend-b` |
 
 ## Manual Migration Queue
 
