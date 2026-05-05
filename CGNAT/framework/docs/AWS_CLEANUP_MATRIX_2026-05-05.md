@@ -71,6 +71,17 @@ VPN customer migration queue.
 | `i-0463e6d6906bf6c58` | `vpn-headend-non-nat-headend-a` |
 | `i-0d08ca2559bb0438f` | `vpn-headend-non-nat-headend-b` |
 
+## Retired Legacy Stack Control Plane
+
+The legacy single-muxer CloudFormation stack was also retired so that the old
+`muxer-single-prod-node` instances would stop respawning through Auto Scaling.
+
+| Resource | Status |
+|---|---|
+| `muxer-single-prod` CloudFormation stack | delete started on `2026-05-05` |
+| `muxer-single-prod-asg` Auto Scaling Group | scaled to zero during stack delete |
+| respawned legacy muxer instances | terminated during stack retirement |
+
 ## Manual Migration Queue
 
 These look like old stage/demo/customer-era customer nodes and are not part of

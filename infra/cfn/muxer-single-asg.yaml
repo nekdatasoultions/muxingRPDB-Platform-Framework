@@ -4,7 +4,7 @@ Description: Single muxer with AWS recovery, per-AZ transport ENIs, and schedule
 Parameters:
   ClusterName:
     Type: String
-    Default: muxer-single-prod
+    Default: muxer-single-rpdb
   VpcId:
     Type: AWS::EC2::VPC::Id
   PublicSubnetAId:

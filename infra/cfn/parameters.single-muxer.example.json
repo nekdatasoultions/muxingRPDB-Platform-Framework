@@ -1,5 +1,5 @@
 [
-  { "ParameterKey": "ClusterName", "ParameterValue": "muxer-single-prod" },
+  { "ParameterKey": "ClusterName", "ParameterValue": "muxer-single-rpdb-example" },
   { "ParameterKey": "VpcId", "ParameterValue": "vpc-xxxxxxxx" },
   { "ParameterKey": "PublicSubnetAId", "ParameterValue": "subnet-public-a" },
   { "ParameterKey": "PublicSubnetBId", "ParameterValue": "subnet-public-b" },
