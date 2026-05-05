@@ -989,9 +989,6 @@ def main() -> int:
     single_muxer_template_text = (REPO_ROOT / "infra" / "cfn" / "muxer-single-asg.yaml").read_text(
         encoding="utf-8"
     )
-    cluster_muxer_template_text = (REPO_ROOT / "infra" / "cfn" / "muxer-cluster.yaml").read_text(
-        encoding="utf-8"
-    )
     live_apply_lib_text = (REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py").read_text(
         encoding="utf-8"
     )
@@ -1018,9 +1015,6 @@ def main() -> int:
         "single_muxer_template": [
             "systemctl enable --now rpdb-nat-t-listener.service",
         ],
-        "cluster_muxer_template": [
-            "systemctl enable --now rpdb-nat-t-listener.service",
-        ],
         "ssh_live_apply": [
             "nat_t_event_listener.py",
             "rpdb-nat-t-listener.service",
@@ -1043,7 +1037,6 @@ def main() -> int:
         "listener_unit": listener_unit_text,
         "installer": installer_text,
         "single_muxer_template": single_muxer_template_text,
-        "cluster_muxer_template": cluster_muxer_template_text,
         "ssh_live_apply": live_apply_lib_text,
         "runtime_config": muxer_runtime_config_text,
         "deployment_environment": rpdb_empty_environment_text,

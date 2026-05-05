@@ -38,7 +38,6 @@ The `current-state` folder now keeps only a small amount of retained reference
 material. Older node-specific deployment snapshots and runtime status files
 were retired once the legacy muxer and legacy head-end tiers were removed.
 
-- [CloudFormation and NetBox SoT runbook](current-state/CLOUDFORMATION_NETBOX_RUNBOOK.md)
 - [Head-end active/standby model](current-state/HEADEND_HA_ACTIVE_STANDBY.md)
 
 Removed current-state snapshots remain recoverable from Git history if we need

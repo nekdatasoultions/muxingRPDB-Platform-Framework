@@ -40,3 +40,10 @@ For the database side of a fresh empty platform deploy, start with:
 For the full current production-shaped empty platform flow, start with:
 
 - [FRESH_EMPTY_PLATFORM_RUNBOOK.md](../../docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md)
+
+Legacy regional/multi-muxer and NetBox-driven CloudFormation helpers were
+retired during the RPDB-empty cleanup. The current active path is:
+
+- single muxer via `cfn_deploy_single_muxer.sh`
+- NAT head-end pair via `cfn_deploy_vpn_headend.sh`
+- non-NAT head-end pair via `cfn_deploy_vpn_headend.sh`
