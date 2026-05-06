@@ -11,6 +11,11 @@
 > - `CGNAT/framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md`
 > - `CGNAT/framework/docs/CGNAT_LIVE_STATUS_2026-05-05.md`
 
+## Positioning
+
+Treat this document as part of the migration/reference path, not the current
+supported onboarding path.
+
 This runbook shows how to provision one non-NAT customer and one NAT-T customer by hand with Linux commands only.
 
 It intentionally does not use:

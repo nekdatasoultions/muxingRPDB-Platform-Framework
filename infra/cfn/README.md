@@ -6,6 +6,8 @@ parameter files for the RPDB-empty muxer and VPN head-end platform.
 These are here so the RPDB repo can carry the same base-platform deployment
 entrypoints while the customer lifecycle moves into the new model.
 
+## Current Supported Path
+
 Current use:
 
 - deploy a fresh empty platform
@@ -25,5 +27,11 @@ Important boundary:
 - these are imported current-state assets
 - they are not yet reworked into a fully RPDB-native infrastructure model
 
+## Migration And Reference Boundary
+
+This folder now documents only the active RPDB-empty CloudFormation surface.
+
 Legacy multi-muxer, regional, customer-vpn-ecs, and NetBox-oriented
-CloudFormation artifacts were retired during the 2026-05-05 cleanup.
+CloudFormation artifacts were retired during the 2026-05-05 cleanup and should
+be treated as historical material recoverable from Git history, not as current
+deployment options.

@@ -75,6 +75,33 @@ This means the project is not only about packet flow. It is also about:
 - Customer-device and ISP-gateway device cutover remain separate operator
   lanes, even when platform-side provisioning is automated.
 
+## Current Supported Path
+
+The current supported CGNAT path in this repo is:
+
+- platform-side provisioning through the shared RPDB customer flow
+- CGNAT review, staged apply, and rollback artifacts under `CGNAT/framework`
+- live platform changes only after the documented regression and pre-live gates
+  are green
+
+For the current shared provisioning boundary, start with:
+
+- [Customer Provisioning Integration Design](./framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_DESIGN.md)
+- [Customer Provisioning Integration Plan](./framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_PLAN.md)
+- [Customer Provisioning Regression Gates](./framework/docs/CUSTOMER_PROVISIONING_REGRESSION_GATES.md)
+- [CGNAT Topology Expansion Execution Plan](./framework/docs/CGNAT_TOPOLOGY_EXPANSION_EXECUTION_PLAN.md)
+
+## Migration And Reference Path
+
+The following remain intentionally available for lab, migration, or operator
+handoff work, but they are not the primary validated canary flow:
+
+- customer-device installation and cutover steps
+- ISP-gateway installation and cutover steps
+- rendered review artifacts under `CGNAT/build`
+- older scenario-specific handoff material preserved in Git history and backup
+  sets
+
 ## Workspace Lanes
 
 - [Framework](./framework/README.md)

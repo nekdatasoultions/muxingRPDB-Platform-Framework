@@ -5,6 +5,14 @@
 This is the operator-facing guide for onboarding one customer into the RPDB
 platform.
 
+This guide describes the current supported onboarding path. If you are working
+through a legacy customer migration or a break-glass manual exercise, use the
+reference-only documents instead:
+
+- `docs/MANUAL_LINUX_CUSTOMER_PROVISIONING.md`
+- `muxer/docs/LIVE_CUSTOMER_MIGRATION_EXAMPLE.md`
+- `muxer/docs/LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md`
+
 Use this guide when you need to answer:
 
 - what information do I need from the customer

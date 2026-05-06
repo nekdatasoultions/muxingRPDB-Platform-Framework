@@ -6,6 +6,11 @@
 > not the current canary provisioning path and should not be confused with the
 > validated CGNAT customer flow.
 
+## Positioning
+
+Treat this document as part of the migration/reference path, not the current
+supported provisioning path.
+
 ## Goal
 
 Show how one real production-shaped customer can be represented in the RPDB

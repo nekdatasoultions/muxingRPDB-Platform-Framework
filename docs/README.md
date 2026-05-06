@@ -9,7 +9,10 @@ operators, engineers, and reviewers. Historical project plans, dated status
 reports, and superseded notes are kept in Git history instead of the active docs
 tree.
 
-## Operator Workflows
+## Current Supported Path
+
+These documents describe the current validated RPDB-empty platform and customer
+workflow.
 
 - [Muxer and head-end platform deploy checklist](MUXER_AND_HEADEND_PLATFORM_DEPLOY_CHECKLIST.md)
 - [Fresh empty platform runbook](FRESH_EMPTY_PLATFORM_RUNBOOK.md)
@@ -31,6 +34,26 @@ tree.
 - [Dynamic-routing project plan](DYNAMIC_ROUTING_PROJECT_PLAN.md)
 - [Database bootstrap](DATABASE_BOOTSTRAP.md)
 - [Head-end customer orchestration](HEADEND_CUSTOMER_ORCHESTRATION.md)
+
+The current supported platform path uses:
+
+- the single-muxer CloudFormation surface under `infra/cfn`
+- the VPN head-end unit CloudFormation surface under `infra/cfn`
+- the RPDB customer provisioning and deployment scripts under `muxer/scripts`
+  and `scripts/customers`
+- the CGNAT framework under `CGNAT/`
+
+## Migration And Reference Path
+
+These documents are intentionally kept for migration, lab, or operator
+reference work. They are not the primary validated onboarding path for new
+RPDB-empty or CGNAT canary work.
+
+- [Manual Linux customer provisioning](MANUAL_LINUX_CUSTOMER_PROVISIONING.md)
+- [Live customer migration example](../muxer/docs/LIVE_CUSTOMER_MIGRATION_EXAMPLE.md)
+- [Live NAT customer migration example](../muxer/docs/LIVE_NAT_CUSTOMER_MIGRATION_EXAMPLE.md)
+- migrated customer requests under `muxer/config/customer-requests/migrated`
+- migrated customer sources under `muxer/config/customer-sources/migrated`
 
 ## Current-State Reference
 

@@ -7,6 +7,8 @@ This directory contains imported current-state platform scripts for:
 - S3 packaging
 - bootstrap support utilities
 
+## Current Supported Path
+
 Use these when you need to stand up or validate the **base platform**:
 
 - muxer
@@ -40,6 +42,17 @@ For the database side of a fresh empty platform deploy, start with:
 For the full current production-shaped empty platform flow, start with:
 
 - [FRESH_EMPTY_PLATFORM_RUNBOOK.md](../../docs/FRESH_EMPTY_PLATFORM_RUNBOOK.md)
+
+## Migration And Reference Boundary
+
+These scripts are part of the active RPDB-empty base-platform path.
+
+They are not the place to look for:
+
+- legacy multi-muxer deployment
+- legacy regional CloudFormation wrappers
+- legacy NetBox-driven parameter generation
+- manual customer migration exercises
 
 Legacy regional/multi-muxer and NetBox-driven CloudFormation helpers were
 retired during the RPDB-empty cleanup. The current active path is:
