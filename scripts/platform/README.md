@@ -58,5 +58,10 @@ Legacy regional/multi-muxer and NetBox-driven CloudFormation helpers were
 retired during the RPDB-empty cleanup. The current active path is:
 
 - single muxer via `cfn_deploy_single_muxer.sh`
-- NAT head-end pair via `cfn_deploy_vpn_headend.sh`
-- non-NAT head-end pair via `cfn_deploy_vpn_headend.sh`
+- NAT head-end pair via `cfn_deploy_vpn_headend.sh` with
+  `infra/cfn/parameters.vpn-headend.nat.graviton-efs.us-east-1.json`
+- non-NAT head-end pair via `cfn_deploy_vpn_headend.sh` with
+  `infra/cfn/parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json`
+
+The old non-Graviton head-end parameter sets were retired and should not be
+used for new deploys or validation.

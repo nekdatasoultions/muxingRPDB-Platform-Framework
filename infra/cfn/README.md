@@ -19,13 +19,16 @@ Current active surface:
 - `muxer-single-asg.yaml`
 - `vpn-headend-unit.yaml`
 - `parameters.single-muxer.*`
-- `parameters.vpn-headend.nat.*`
-- `parameters.vpn-headend.non-nat.*`
+- `parameters.vpn-headend.nat.graviton-efs.us-east-1.json`
+- `parameters.vpn-headend.non-nat.graviton-efs.us-east-1.json`
+- `parameters.vpn-headend.nat.example.json`
+- `parameters.vpn-headend.non-nat.example.json`
 
 Important boundary:
 
 - these are imported current-state assets
 - they are not yet reworked into a fully RPDB-native infrastructure model
+- the supported VPN head-end shape is now Graviton-only
 
 ## Migration And Reference Boundary
 
