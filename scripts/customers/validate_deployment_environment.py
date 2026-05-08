@@ -68,6 +68,7 @@ def _walk_strings(value: Any) -> Iterable[str]:
 def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
     targets = document.get("targets") or {}
     headends = targets.get("headends") or {}
+    smartconnect = targets.get("smartconnect") or {}
     cgnat = targets.get("cgnat") or {}
     docs = []
     muxer = targets.get("muxer")
@@ -79,6 +80,9 @@ def _target_docs(document: dict[str, Any]) -> list[dict[str, Any]]:
             node = pair.get(node_name)
             if isinstance(node, dict):
                 docs.append(node)
+    smartconnect_gateway = smartconnect.get("gateway")
+    if isinstance(smartconnect_gateway, dict):
+        docs.append(smartconnect_gateway)
     cgnat_headend = (cgnat.get("headend") or {}).get("active")
     if isinstance(cgnat_headend, dict):
         docs.append(cgnat_headend)
@@ -179,6 +183,7 @@ def _validate_guardrails(report: dict[str, Any], document: dict[str, Any], *, al
 def _target_summary(document: dict[str, Any]) -> dict[str, Any]:
     targets = document.get("targets") or {}
     headends = targets.get("headends") or {}
+    smartconnect = targets.get("smartconnect") or {}
     cgnat = targets.get("cgnat") or {}
     return {
         "muxer": (targets.get("muxer") or {}).get("name"),
@@ -186,6 +191,7 @@ def _target_summary(document: dict[str, Any]) -> dict[str, Any]:
         "nat_standby": (((headends.get("nat") or {}).get("standby") or {}).get("name")),
         "non_nat_active": (((headends.get("non_nat") or {}).get("active") or {}).get("name")),
         "non_nat_standby": (((headends.get("non_nat") or {}).get("standby") or {}).get("name")),
+        "smartconnect_gateway": (((smartconnect.get("gateway") or {}).get("name"))),
         "cgnat_headend_active": ((((cgnat.get("headend") or {}).get("active") or {}).get("name"))),
         "cgnat_isp_gateways": {
             str(name): (gateway or {}).get("name")

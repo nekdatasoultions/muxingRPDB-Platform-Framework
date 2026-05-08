@@ -27,6 +27,7 @@ from live_backend_lib import (
     rollback_backend_payloads,
     validate_backend_payloads,
 )
+from dynamic_peer_ip_registry_lib import ensure_dynamic_peer_ip_registry_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -497,6 +498,8 @@ def execute_staged_live_apply(
     muxer_root = staged_target_root(target_selection.get("muxer") or {})
     headend_active_root = staged_target_root(target_selection.get("headend_active") or {})
     headend_standby_root = staged_target_root(target_selection.get("headend_standby") or {})
+    smartconnect_target = target_selection.get("smartconnect_gateway") or {}
+    smartconnect_root = staged_target_root(smartconnect_target) if smartconnect_target else None
     cgnat_target = target_selection.get("cgnat_headend_active") or {}
     cgnat_root = staged_target_root(cgnat_target) if cgnat_target else None
 
@@ -511,6 +514,10 @@ def execute_staged_live_apply(
     rollback_steps: list[dict[str, Any]] = []
 
     try:
+        seeded_backup_roots = _ensure_staged_backup_roots(
+            journal,
+            target_selection=target_selection,
+        )
         backup_gate = _verify_backup_gate(
             journal,
             target_selection=target_selection,
@@ -531,6 +538,16 @@ def execute_staged_live_apply(
             customer_name=customer_name,
             bundle_dir=bundle_dir,
             apply_dir=apply_dir,
+        )
+        smartconnect_prepared = (
+            _prepare_smartconnect_root(
+                journal,
+                customer_name=customer_name,
+                bundle_dir=bundle_dir,
+                apply_dir=apply_dir,
+            )
+            if smartconnect_root is not None
+            else None
         )
         cgnat_prepared = (
             _prepare_cgnat_headend_root(
@@ -616,6 +633,28 @@ def execute_staged_live_apply(
             apply_script=Path(headend_prepared["apply"]["master_apply_script"]).resolve(),
             remove_script=Path(headend_prepared["apply"]["master_remove_script"]).resolve(),
         )
+        smartconnect_activation = None
+        if smartconnect_prepared is not None and smartconnect_root is not None:
+            smartconnect_prepared_root = Path(smartconnect_prepared["root"]).resolve()
+            smartconnect_customer_root = Path(smartconnect_prepared["apply"]["state_json"]).resolve().parent
+            smartconnect_activation = _build_activation_bundle(
+                journal,
+                customer_name=customer_name,
+                component_name="smartconnect",
+                target_name=str(smartconnect_target.get("name") or "smartconnect-gateway"),
+                apply_dir=apply_dir,
+                prepared_root=smartconnect_prepared_root,
+                target_root=smartconnect_root,
+                relative_paths=[smartconnect_customer_root.relative_to(smartconnect_prepared_root)],
+                validate_paths=[
+                    Path(smartconnect_prepared["apply"]["state_json"]).resolve().relative_to(smartconnect_prepared_root),
+                    Path(smartconnect_prepared["apply"]["master_apply_script"]).resolve().relative_to(smartconnect_prepared_root),
+                ],
+                cleanup_paths=[smartconnect_customer_root.relative_to(smartconnect_prepared_root)],
+                cleanup_files=[],
+                apply_script=Path(smartconnect_prepared["apply"]["master_apply_script"]).resolve(),
+                remove_script=Path(smartconnect_prepared["apply"]["master_remove_script"]).resolve(),
+            )
         cgnat_activation = None
         if cgnat_prepared is not None and cgnat_root is not None:
             cgnat_prepared_root = Path(cgnat_prepared["root"]).resolve()
@@ -811,6 +850,48 @@ def execute_staged_live_apply(
                 "--json",
             ],
         )
+        smartconnect_apply = None
+        smartconnect_validation = None
+        if smartconnect_activation is not None and smartconnect_root is not None:
+            smartconnect_apply = _execute_json(
+                journal,
+                action="apply_smartconnect_activation_bundle",
+                target=str(smartconnect_target.get("name") or "smartconnect-gateway"),
+                command=[
+                    sys.executable,
+                    "scripts/customers/node_activation_runner.py",
+                    "--request",
+                    str(smartconnect_activation["request_path_obj"]),
+                    "--json",
+                ],
+            )
+            rollback_steps.append(
+                {
+                    "action": "rollback_smartconnect_activation_bundle",
+                    "target": str(smartconnect_target.get("name") or "smartconnect-gateway"),
+                    "command": [
+                        sys.executable,
+                        "scripts/customers/node_activation_runner.py",
+                        "--rollback-request",
+                        str(smartconnect_activation["rollback_request_path_obj"]),
+                        "--json",
+                    ],
+                }
+            )
+            smartconnect_validation = _execute_json(
+                journal,
+                action="validate_smartconnect_customer",
+                target=str(smartconnect_target.get("name") or "smartconnect-gateway"),
+                command=[
+                    sys.executable,
+                    "scripts/deployment/validate_smartconnect_customer.py",
+                    "--bundle-dir",
+                    str(bundle_dir),
+                    "--smartconnect-root",
+                    str(smartconnect_root),
+                    "--json",
+                ],
+            )
         cgnat_apply = None
         cgnat_validation = None
         if cgnat_activation is not None and cgnat_root is not None:
@@ -881,9 +962,11 @@ def execute_staged_live_apply(
             "roots": {
                 "artifacts": repo_relative(staged_artifact_root),
                 "datastores": repo_relative(staged_datastore_root),
+                "seeded_backup_roots": seeded_backup_roots,
                 "muxer": repo_relative(muxer_root),
                 "headend_active": repo_relative(headend_active_root),
                 "headend_standby": repo_relative(headend_standby_root),
+                "smartconnect_gateway": repo_relative(smartconnect_root) if smartconnect_root is not None else None,
                 "cgnat_headend": repo_relative(cgnat_root) if cgnat_root is not None else None,
             },
             "activation_bundles": {
@@ -917,6 +1000,16 @@ def execute_staged_live_apply(
                     "rollback_journal": repo_relative(standby_activation["bundle_root_path"] / "rollback-journal.json"),
                     "rollback_result": repo_relative(standby_activation["bundle_root_path"] / "rollback-result.json"),
                 },
+                "smartconnect_gateway": {
+                    "bundle_root": smartconnect_activation["bundle_root"],
+                    "request_path": smartconnect_activation["request_path"],
+                    "rollback_request_path": smartconnect_activation["rollback_request_path"],
+                    "payload_root": smartconnect_activation["payload_root"],
+                    "activation_journal": repo_relative(smartconnect_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(smartconnect_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(smartconnect_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(smartconnect_activation["bundle_root_path"] / "rollback-result.json"),
+                } if smartconnect_activation is not None else None,
                 "cgnat_headend": {
                     "bundle_root": cgnat_activation["bundle_root"],
                     "request_path": cgnat_activation["request_path"],
@@ -939,6 +1032,8 @@ def execute_staged_live_apply(
                 "muxer": muxer_validation,
                 "headend_active": active_validation,
                 "headend_standby": standby_validation,
+                "prepared_smartconnect_gateway": smartconnect_prepared["validate"] if smartconnect_prepared is not None else None,
+                "smartconnect_gateway": smartconnect_validation,
                 "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
                 "cgnat_headend": cgnat_validation,
             },
@@ -947,6 +1042,7 @@ def execute_staged_live_apply(
                 "muxer": muxer_apply,
                 "headend_active": active_apply,
                 "headend_standby": standby_apply,
+                "smartconnect_gateway": smartconnect_apply,
                 "cgnat_headend": cgnat_apply,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
@@ -1207,6 +1303,49 @@ def _prepare_headend_root(
     return {"root": headend_root, "apply": apply_report, "validate": validate_report}
 
 
+def _prepare_smartconnect_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    bundle_dir: Path,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    smartconnect_root = apply_dir / "ps"
+    if smartconnect_root.exists():
+        shutil.rmtree(smartconnect_root)
+    smartconnect_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_smartconnect_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_smartconnect_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--smartconnect-root",
+            str(smartconnect_root),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_smartconnect_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_smartconnect_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--smartconnect-root",
+            str(smartconnect_root),
+            "--json",
+        ],
+    )
+    return {"root": smartconnect_root, "apply": apply_report, "validate": validate_report}
+
+
 def _prepare_cgnat_headend_root(
     journal: list[dict[str, Any]],
     *,
@@ -1365,7 +1504,7 @@ def _verify_backup_reference(
     is_s3 = value.startswith("s3://")
     local_exists = None
     if not is_s3 and require_exists_for_local:
-        local_exists = Path(value).resolve().exists()
+        local_exists = resolve_repo_path(value).exists()
         if not local_exists:
             raise RuntimeError(f"required backup path for {label} does not exist: {value}")
     payload = {
@@ -1384,6 +1523,45 @@ def _verify_backup_reference(
     return payload
 
 
+def _ensure_staged_backup_roots(
+    journal: list[dict[str, Any]],
+    *,
+    target_selection: dict[str, Any],
+) -> dict[str, str]:
+    backups = dict(target_selection.get("backups") or {})
+    selected_family = str(target_selection.get("headend_family") or "").strip()
+    selected_headend_backup_key = "nat_headend" if selected_family == "nat" else "non_nat_headend"
+    refs = {
+        "baseline_root": str(backups.get("baseline_root") or "").strip(),
+        "muxer": str(backups.get("muxer") or "").strip(),
+        "backend_headend": str(backups.get(selected_headend_backup_key) or "").strip(),
+    }
+    if target_selection.get("smartconnect_gateway"):
+        refs["smartconnect_gateway"] = str(backups.get("smartconnect_gateway") or "").strip()
+    if bool(target_selection.get("cgnat_required")):
+        refs["cgnat_headend"] = str(backups.get("cgnat_headend") or "").strip()
+        if str(target_selection.get("cgnat_outer_topology") or "").strip() == "shared_isp_gateway":
+            gateway_ref = str(target_selection.get("cgnat_outer_gateway_ref") or "").strip()
+            refs["cgnat_isp_gateway"] = str(((backups.get("cgnat_isp_gateways") or {}).get(gateway_ref)) or "").strip()
+
+    seeded: dict[str, str] = {}
+    for label, ref in refs.items():
+        if not ref or ref.startswith("s3://"):
+            continue
+        path = resolve_repo_path(ref)
+        if path.exists() and not path.is_dir():
+            raise RuntimeError(f"staged backup path for {label} is not a directory: {ref}")
+        path.mkdir(parents=True, exist_ok=True)
+        seeded[label] = repo_relative(path)
+        _record_structured(
+            journal,
+            action="seed_staged_backup_path",
+            target=label,
+            payload={"reference": ref, "path": repo_relative(path)},
+        )
+    return seeded
+
+
 def _verify_backup_gate(
     journal: list[dict[str, Any]],
     *,
@@ -1397,8 +1575,13 @@ def _verify_backup_gate(
         "muxer": str(backups.get("muxer") or "").strip(),
         "backend_headend": str(backups.get(selected_headend_backup_key) or "").strip(),
     }
+    if target_selection.get("smartconnect_gateway"):
+        refs["smartconnect_gateway"] = str(backups.get("smartconnect_gateway") or "").strip()
     if bool(target_selection.get("cgnat_required")):
         refs["cgnat_headend"] = str(backups.get("cgnat_headend") or "").strip()
+        if str(target_selection.get("cgnat_outer_topology") or "").strip() == "shared_isp_gateway":
+            gateway_ref = str(target_selection.get("cgnat_outer_gateway_ref") or "").strip()
+            refs["cgnat_isp_gateway"] = str(((backups.get("cgnat_isp_gateways") or {}).get(gateway_ref)) or "").strip()
 
     if any(not ref for ref in refs.values()):
         missing = [label for label, ref in refs.items() if not ref]
@@ -1741,6 +1924,16 @@ def execute_ssh_live_apply(
             bundle_dir=bundle_dir,
             apply_dir=apply_dir,
         )
+        smartconnect_prepared = (
+            _prepare_smartconnect_root(
+                journal,
+                customer_name=customer_name,
+                bundle_dir=bundle_dir,
+                apply_dir=apply_dir,
+            )
+            if target_selection.get("smartconnect_gateway")
+            else None
+        )
         cgnat_prepared = (
             _prepare_cgnat_headend_root(
                 journal,
@@ -1836,11 +2029,15 @@ def execute_ssh_live_apply(
 
         headend_active = target_selection.get("headend_active") or {}
         headend_standby = target_selection.get("headend_standby") or {}
+        smartconnect_gateway = target_selection.get("smartconnect_gateway") or {}
         cgnat_headend = target_selection.get("cgnat_headend_active") or {}
         active_instance_id = str(((headend_active.get("selector") or {}).get("value")) or "").strip()
         standby_instance_id = str(((headend_standby.get("selector") or {}).get("value")) or "").strip()
         if not active_instance_id or not standby_instance_id:
             raise RuntimeError("selected head-end targets are missing instance_id selectors")
+        smartconnect_instance_id = str(((smartconnect_gateway.get("selector") or {}).get("value")) or "").strip()
+        if smartconnect_prepared is not None and not smartconnect_instance_id:
+            raise RuntimeError("selected SmartConnect gateway target is missing an instance_id selector")
         cgnat_instance_id = str(((cgnat_headend.get("selector") or {}).get("value")) or "").strip()
         if cgnat_prepared is not None and not cgnat_instance_id:
             raise RuntimeError("selected CGNAT head-end target is missing an instance_id selector")
@@ -1853,12 +2050,14 @@ def execute_ssh_live_apply(
                 muxer_instance_id,
                 active_instance_id,
                 standby_instance_id,
+                *([smartconnect_instance_id] if smartconnect_instance_id else []),
                 *([cgnat_instance_id] if cgnat_instance_id else []),
             ],
         )
 
         muxer_root = Path(muxer_prepared["root"]).resolve()
         headend_root = Path(headend_prepared["root"]).resolve()
+        smartconnect_root = Path(smartconnect_prepared["root"]).resolve() if smartconnect_prepared is not None else None
         cgnat_root = Path(cgnat_prepared["root"]).resolve() if cgnat_prepared is not None else None
 
         muxer_runtime_remote = _sync_muxer_runtime(
@@ -1954,6 +2153,33 @@ def execute_ssh_live_apply(
         if not rollback_preexisting_remote_customer:
             rollback_steps.append(standby_remote["rollback"])
 
+        smartconnect_remote = None
+        if smartconnect_prepared is not None and smartconnect_root is not None and smartconnect_instance_id:
+            smartconnect_customer_root = Path(smartconnect_prepared["apply"]["state_json"]).resolve().parent
+            smartconnect_remote = _apply_remote_component(
+                journal,
+                context=context,
+                component_name="smartconnect",
+                target_name=str(smartconnect_gateway.get("name") or "smartconnect-gateway"),
+                target_instance_id=smartconnect_instance_id,
+                via_bastion=True,
+                prepared_root=smartconnect_root,
+                relative_paths=[
+                    smartconnect_customer_root.relative_to(smartconnect_root),
+                ],
+                remote_apply_script=_remote_path(smartconnect_root, smartconnect_prepared["apply"]["master_apply_script"]),
+                remote_remove_script=_remote_path(smartconnect_root, smartconnect_prepared["apply"]["master_remove_script"]),
+                remote_checks=[
+                    _remote_path(smartconnect_root, smartconnect_prepared["apply"]["state_json"]),
+                    _remote_path(smartconnect_root, smartconnect_prepared["apply"]["master_apply_script"]),
+                ],
+                remote_cleanup_paths=[_remote_path(smartconnect_root, smartconnect_customer_root)],
+                remote_cleanup_files=[],
+                remote_name=f"{customer_name}-smartconnect",
+            )
+            if not rollback_preexisting_remote_customer:
+                rollback_steps.append(smartconnect_remote["rollback"])
+
         cgnat_remote = None
         if cgnat_prepared is not None and cgnat_root is not None and cgnat_instance_id:
             cgnat_customer_root = Path(cgnat_prepared["apply"]["state_json"]).resolve().parent
@@ -1984,6 +2210,18 @@ def execute_ssh_live_apply(
             if not rollback_preexisting_remote_customer:
                 rollback_steps.append(cgnat_remote["rollback"])
 
+        dynamic_peer_ip_registry = ensure_dynamic_peer_ip_registry_state(
+            package_dir=package_dir,
+            environment_doc=environment_doc,
+            apply_dir=apply_dir,
+        )
+        _record_structured(
+            journal,
+            action="ensure_dynamic_peer_ip_registry_state",
+            target="dynamic-peer-ip-registry",
+            payload=dynamic_peer_ip_registry,
+        )
+
         rollback_plan = {
             "schema_version": 1,
             "customer_name": customer_name,
@@ -2007,6 +2245,7 @@ def execute_ssh_live_apply(
                 "prepared_backend": repo_relative(Path(backend_prepared["root"])),
                 "prepared_muxer": repo_relative(Path(muxer_prepared["root"])),
                 "prepared_headend": repo_relative(Path(headend_prepared["root"])),
+                "prepared_smartconnect_gateway": repo_relative(Path(smartconnect_prepared["root"])) if smartconnect_prepared is not None else None,
                 "prepared_cgnat_headend": repo_relative(Path(cgnat_prepared["root"])) if cgnat_prepared is not None else None,
             },
             "published_artifacts": published_artifacts,
@@ -2017,11 +2256,14 @@ def execute_ssh_live_apply(
                 "prepared_muxer": muxer_prepared["validate"],
                 "muxer_runtime": muxer_runtime_remote["validate"],
                 "prepared_headend": headend_prepared["validate"],
+                "prepared_smartconnect_gateway": smartconnect_prepared["validate"] if smartconnect_prepared is not None else None,
                 "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
                 "headend_secret": headend_secret,
+                "dynamic_peer_ip_registry": dynamic_peer_ip_registry,
                 "muxer": muxer_remote["validate"],
                 "headend_active": active_remote["validate"],
                 "headend_standby": standby_remote["validate"],
+                "smartconnect_gateway": smartconnect_remote["validate"] if smartconnect_remote is not None else None,
                 "cgnat_headend": cgnat_remote["validate"] if cgnat_remote is not None else None,
             },
             "applies": {
@@ -2030,6 +2272,7 @@ def execute_ssh_live_apply(
                 "muxer": muxer_remote["apply"],
                 "headend_active": active_remote["apply"],
                 "headend_standby": standby_remote["apply"],
+                "smartconnect_gateway": smartconnect_remote["apply"] if smartconnect_remote is not None else None,
                 "cgnat_headend": cgnat_remote["apply"] if cgnat_remote is not None else None,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),

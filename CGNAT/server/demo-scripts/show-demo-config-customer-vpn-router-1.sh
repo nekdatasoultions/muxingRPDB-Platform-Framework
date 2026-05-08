@@ -28,6 +28,20 @@ show_cmd() {
   "$@"
 }
 
+show_log_grep() {
+  local title="$1"
+  local pattern="$2"
+  section "$title"
+  if ! sudo journalctl --no-pager -o short-iso \
+    -u strongswan-starter \
+    -u strongswan \
+    -u charon-systemd 2>/dev/null |
+    egrep -i "$pattern" |
+    tail -n 80; then
+    echo "No matching log lines found."
+  fi
+}
+
 show_service() {
   sudo bash -lc '
     systemctl --no-pager --full status strongswan-starter 2>/dev/null ||
@@ -48,6 +62,12 @@ show_cmd "CERT FILES" sudo ls -l /etc/swanctl/x509 /etc/swanctl/private /etc/swa
 show_cmd "LOADED CERTS" sudo swanctl --list-certs
 show_cmd "CONFIGURED CONNECTIONS" sudo swanctl --list-conns
 show_cmd "ACTIVE SAS" sudo swanctl --list-sas
+show_log_grep \
+  "OUTER CERT NEGOTIATION LOGS" \
+  'cgnat-scenario1-rpdb-empty-live-customer_vpn_router_1-outer|cgnat-scenario1-rpdb-empty-live-outer|received end entity cert|sending cert request|RSA signature|certificate|pubkey'
+show_log_grep \
+  "INNER SECRET NEGOTIATION LOGS" \
+  'cgnat-scenario1-rpdb-empty-live-customer_vpn_router_1-inner|cgnat-s1-be-r1|pre-shared|shared key|psk'
 show_cmd "LOOPBACK" ip addr show lo
 show_cmd "INTERFACES" ip -brief addr
 show_cmd "XFRM LINK" ip -d link show cgxfrm-r1

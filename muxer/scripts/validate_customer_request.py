@@ -14,6 +14,7 @@ if str(SRC_DIR) not in sys.path:
 
 from muxerlib.allocation import effective_customer_class, normalize_pool_class
 from muxerlib.customer_merge import load_yaml_file
+from muxerlib.dynamic_peer_ip import validate_dynamic_peer_ip_request
 from muxerlib.dynamic_provisioning import validate_dynamic_initial_request
 
 
@@ -59,6 +60,7 @@ def main() -> int:
         str(backend_doc.get("cluster") or ""),
     )
     dynamic_validation = validate_dynamic_initial_request(request_doc)
+    dynamic_peer_ip_validation = validate_dynamic_peer_ip_request(request_doc)
 
     print(
         f"Validated request {customer_doc.get('name')} "
@@ -67,6 +69,11 @@ def main() -> int:
     print(f"Schema validation: {'jsonschema' if used_jsonschema else 'schema-package-missing'}")
     if dynamic_validation.get("enabled"):
         print("Dynamic provisioning: nat_t_auto_promote")
+    if dynamic_peer_ip_validation.get("enabled"):
+        print(
+            "Dynamic peer IP: "
+            f"device_registry_ddns serial={dynamic_peer_ip_validation['serial_number']}"
+        )
 
     if args.show_request:
         print(json.dumps(request_doc, indent=2, sort_keys=True))

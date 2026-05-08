@@ -99,6 +99,17 @@ targets:
           private_ip: 172.31.36.156
         access:
           method: staged
+  smartconnect:
+    gateway:
+      name: rpdb-staged-smartconnect-gateway
+      role: smartconnect-gateway
+      rpdb_managed: true
+      selector:
+        type: staged
+        value: build/staged-live/smartconnect-root
+        private_ip: 172.31.36.200
+      access:
+        method: staged
 
 datastores:
   mode: staged
@@ -118,6 +129,7 @@ backups:
   nat_headend: build/staged-live/backups/baseline/nat-headend
   non_nat_headend: build/staged-live/backups/baseline/non-nat-headend
   cgnat_headend: build/staged-live/backups/baseline/cgnat-headend
+  smartconnect_gateway: build/staged-live/backups/baseline/smartconnect-gateway
   cgnat_isp_gateways:
     isp-cgnat-router-1: build/staged-live/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1
     isp-cgnat-router-2: build/staged-live/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-2
@@ -142,6 +154,23 @@ nat_t_watcher:
   log_sync:
     mode: local_file
     local_copy: build/staged-live/nat-t-watcher/synced/muxer-events.jsonl
+
+dynamic_peer_ip_watcher:
+  source:
+    type: json_file
+    path: build/staged-live/dynamic-peer-ip-watcher/device-registry.json
+    serial_number_attribute: serialNumber
+    current_ip_attribute: currentIP
+    last_updated_attribute: lastUpdated
+  state_root: build/staged-live/dynamic-peer-ip-watcher/state
+  output_root: build/staged-live/dynamic-peer-ip-watcher/out
+  package_root: build/staged-live/dynamic-peer-ip-watcher/packages
+  automation:
+    enabled: false
+    requires_approval: true
+    run_provisioning: true
+    follow: true
+    poll_interval_seconds: 30
 
 customer_requests:
   allowed_roots:

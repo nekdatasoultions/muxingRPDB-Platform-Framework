@@ -27,6 +27,11 @@ Current helper:
   - stages one customer's customer SoT and allocation JSON payloads into a
     backend root
   - gives Phase 4 a customer-scoped backend write model without touching AWS
+- `apply_smartconnect_customer.py`
+  - installs one customer's SmartConnect route artifacts into a target
+    SmartConnect root
+  - stages customer-scoped route intent and apply/remove scripts under a stable
+    per-customer layout
 - `validate_headend_customer.py`
   - validates a bundle's head-end installability
   - optionally validates a staged install root after apply
@@ -36,12 +41,17 @@ Current helper:
 - `validate_backend_customer.py`
   - validates a package's backend installability
   - optionally validates a staged backend root after apply
+- `validate_smartconnect_customer.py`
+  - validates a bundle's SmartConnect installability
+  - optionally validates a staged SmartConnect root after apply
 - `remove_headend_customer.py`
   - removes one previously staged customer from a target head-end root
 - `remove_muxer_customer.py`
   - removes one previously staged customer from a target muxer root
 - `remove_backend_customer.py`
   - removes one previously staged customer from a target backend root
+- `remove_smartconnect_customer.py`
+  - removes one previously staged customer from a target SmartConnect root
 
 Example:
 
@@ -67,6 +77,9 @@ python scripts\deployment\apply_muxer_customer.py `
 python scripts\deployment\apply_backend_customer.py `
   --package-dir build\customer-package `
   --backend-root build\staged-backend-root
+python scripts\deployment\apply_smartconnect_customer.py `
+  --bundle-dir build\customer-bundle `
+  --smartconnect-root build\staged-smartconnect-root
 python scripts\deployment\validate_headend_customer.py `
   --bundle-dir build\customer-bundle `
   --headend-root build\staged-headend-root
@@ -76,6 +89,9 @@ python scripts\deployment\validate_muxer_customer.py `
 python scripts\deployment\validate_backend_customer.py `
   --package-dir build\customer-package `
   --backend-root build\staged-backend-root
+python scripts\deployment\validate_smartconnect_customer.py `
+  --bundle-dir build\customer-bundle `
+  --smartconnect-root build\staged-smartconnect-root
 python scripts\deployment\remove_headend_customer.py `
   --bundle-dir build\customer-bundle `
   --headend-root build\staged-headend-root
@@ -85,6 +101,9 @@ python scripts\deployment\remove_muxer_customer.py `
 python scripts\deployment\remove_backend_customer.py `
   --package-dir build\customer-package `
   --backend-root build\staged-backend-root
+python scripts\deployment\remove_smartconnect_customer.py `
+  --bundle-dir build\customer-bundle `
+  --smartconnect-root build\staged-smartconnect-root
 ```
 
 Reference:

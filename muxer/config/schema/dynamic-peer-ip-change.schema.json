@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://muxingrpdb.local/schema/dynamic-peer-ip-change.schema.json",
+  "title": "Dynamic Peer IP Change Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "customer_name",
+    "serial_number",
+    "observed_peer"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "customer_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "serial_number": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_peer": {
+      "type": "string",
+      "format": "ipv4"
+    },
+    "previous_peer": {
+      "type": "string",
+      "format": "ipv4"
+    },
+    "observed_at": {
+      "type": "string"
+    },
+    "registry_last_updated": {
+      "type": "string"
+    },
+    "registry_table": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  }
+}

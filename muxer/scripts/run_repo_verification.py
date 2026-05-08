@@ -267,11 +267,18 @@ def _build_staged_live_environment(environment_path: Path, *, name: str, root: P
     document["nat_t_watcher"]["state_root"] = str(root / "nat-t-watcher" / "state")
     document["nat_t_watcher"]["output_root"] = str(root / "nat-t-watcher" / "out")
     document["nat_t_watcher"]["package_root"] = str(root / "nat-t-watcher" / "packages")
+    document["dynamic_peer_ip_watcher"]["source"]["path"] = str(
+        root / "dynamic-peer-ip-watcher" / "device-registry.json"
+    )
+    document["dynamic_peer_ip_watcher"]["state_root"] = str(root / "dynamic-peer-ip-watcher" / "state")
+    document["dynamic_peer_ip_watcher"]["output_root"] = str(root / "dynamic-peer-ip-watcher" / "out")
+    document["dynamic_peer_ip_watcher"]["package_root"] = str(root / "dynamic-peer-ip-watcher" / "packages")
     for path in (
         root / "backups" / "baseline" / "muxer",
         root / "backups" / "baseline" / "nat-headend",
         root / "backups" / "baseline" / "non-nat-headend",
         root / "logs",
+        root / "dynamic-peer-ip-watcher",
     ):
         path.mkdir(parents=True, exist_ok=True)
     _write_yaml(environment_path, document)
@@ -345,13 +352,16 @@ def main() -> int:
         str(MUXER_DIR / "src" / "muxerlib" / "allocation.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "allocation_sot.py"),
         str(MUXER_DIR / "src" / "muxerlib" / "dynamic_provisioning.py"),
+        str(MUXER_DIR / "src" / "muxerlib" / "dynamic_peer_ip.py"),
         str(MUXER_DIR / "scripts" / "validate_customer_request.py"),
         str(MUXER_DIR / "scripts" / "validate_customer_allocations.py"),
         str(MUXER_DIR / "scripts" / "provision_customer_request.py"),
         str(MUXER_DIR / "scripts" / "plan_nat_t_promotion.py"),
         str(MUXER_DIR / "scripts" / "process_nat_t_observation.py"),
+        str(MUXER_DIR / "scripts" / "process_dynamic_peer_ip_change.py"),
         str(MUXER_DIR / "scripts" / "provision_customer_end_to_end.py"),
         str(MUXER_DIR / "scripts" / "watch_nat_t_logs.py"),
+        str(MUXER_DIR / "scripts" / "watch_dynamic_peer_ip_registry.py"),
         str(MUXER_DIR / "scripts" / "prepare_customer_pilot.py"),
         str(MUXER_DIR / "scripts" / "run_scale_baseline.py"),
         str(RUNTIME_ROOT / "src" / "muxerlib" / "cli.py"),
@@ -363,6 +373,7 @@ def main() -> int:
         str(REPO_ROOT / "scripts" / "customers" / "validate_deployment_environment.py"),
         str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
         str(REPO_ROOT / "scripts" / "customers" / "run_nat_t_watcher.py"),
+        str(REPO_ROOT / "scripts" / "customers" / "run_dynamic_peer_ip_watcher.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_access_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_backend_lib.py"),
         str(REPO_ROOT / "scripts" / "customers" / "live_apply_lib.py"),
@@ -1270,6 +1281,151 @@ def main() -> int:
         },
     )
 
+    # Step 3i: verify the device-registry driven dynamic peer IP watcher can
+    # reapply an already-deployed customer when the reported public IP changes.
+    dynamic_runner_root = BUILD_ROOT / "dp"
+    if dynamic_runner_root.exists():
+        shutil.rmtree(dynamic_runner_root)
+    dynamic_runner_root.mkdir(parents=True, exist_ok=True)
+    dynamic_env_path = dynamic_runner_root / "e.yaml"
+    dynamic_env_doc = _build_staged_live_environment(
+        dynamic_env_path,
+        name="repo-verification-phase8-dynamic-peer-ip",
+        root=dynamic_runner_root / "roots",
+    )
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["automation"]["enabled"] = True
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["automation"]["follow"] = False
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["source"]["path"] = str(dynamic_runner_root / "r.json")
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["state_root"] = str(dynamic_runner_root / "s")
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["output_root"] = str(dynamic_runner_root / "o")
+    dynamic_env_doc["dynamic_peer_ip_watcher"]["package_root"] = str(dynamic_runner_root / "p")
+    _write_yaml(dynamic_env_path, dynamic_env_doc)
+
+    dynamic_registry_path = Path(str(dynamic_env_doc["dynamic_peer_ip_watcher"]["source"]["path"]))
+    _write_json(
+        dynamic_registry_path,
+        [
+            {
+                "serialNumber": "example-router-77",
+                "currentIP": "198.51.100.77",
+                "lastUpdated": "2026-04-16T00:00:00Z",
+            }
+        ],
+    )
+    dynamic_customer_request = (
+        MUXER_DIR
+        / "config"
+        / "customer-requests"
+        / "examples"
+        / "example-dynamic-peer-ip-customer.yaml"
+    )
+    dynamic_base_deploy = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"),
+            "--customer-file",
+            str(dynamic_customer_request),
+            "--environment",
+            str(dynamic_env_path),
+            "--approve",
+            "--out-dir",
+            str(dynamic_runner_root / "base-deploy"),
+            "--json",
+        ]
+    )
+    if dynamic_base_deploy.get("status") != "applied":
+        raise SystemExit("dynamic peer IP base staged deploy did not apply")
+
+    dynamic_runner_report = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_dynamic_peer_ip_watcher.py"),
+            "--environment",
+            str(dynamic_env_path),
+            "--approve",
+            "--json",
+        ]
+    )
+    dynamic_runner_watcher = dynamic_runner_report.get("watcher") or {}
+    dynamic_runner_watcher_json = dynamic_runner_watcher.get("json") or {}
+    dynamic_runner_command = dynamic_runner_watcher.get("command") or []
+    if dynamic_runner_report.get("status") != "ok":
+        raise SystemExit("dynamic peer IP watcher runner did not complete successfully")
+    if "--customer-request" in dynamic_runner_command:
+        raise SystemExit("dynamic peer IP watcher runner must not require operator-selected customer files")
+    if dynamic_runner_watcher_json.get("detected_count") != 1:
+        raise SystemExit("dynamic peer IP watcher runner did not detect exactly one peer IP change")
+    dynamic_detected = dynamic_runner_watcher_json["detected"][0]
+    dynamic_provisioning = dynamic_detected.get("provisioning") or {}
+    dynamic_provisioning_json = dynamic_provisioning.get("json") or {}
+    dynamic_process_json = ((dynamic_provisioning.get("process") or {}).get("json") or {})
+    if dynamic_provisioning.get("mode") != "deploy_customer":
+        raise SystemExit("dynamic peer IP watcher did not call the customer deploy orchestrator")
+    if dynamic_provisioning_json.get("status") != "applied":
+        raise SystemExit("dynamic peer IP watcher orchestrator flow did not apply the staged customer")
+    if dynamic_detected.get("previous_peer") != "203.0.113.77":
+        raise SystemExit("dynamic peer IP watcher previous peer did not match the initial request")
+    if dynamic_detected.get("observed_peer") != "198.51.100.77":
+        raise SystemExit("dynamic peer IP watcher observed peer did not match the registry fixture")
+    if ((dynamic_process_json.get("change_summary") or {}).get("observed_peer")) != "198.51.100.77":
+        raise SystemExit("dynamic peer IP processing artifacts did not capture the updated public IP")
+
+    dynamic_post_reapply = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "remove_customer.py"),
+            "--customer-name",
+            "example-dynamic-peer-ip-customer",
+            "--environment",
+            str(dynamic_env_path),
+            "--json",
+        ]
+    )
+    dynamic_metadata = (((dynamic_post_reapply.get("backend") or {}).get("metadata")) or {})
+    if dynamic_metadata.get("peer_ip") != "198.51.100.77":
+        raise SystemExit("dynamic peer IP reapply did not update the staged customer SoT peer IP")
+
+    dynamic_second_pass = _run_json(
+        [
+            "python",
+            str(REPO_ROOT / "scripts" / "customers" / "run_dynamic_peer_ip_watcher.py"),
+            "--environment",
+            str(dynamic_env_path),
+            "--approve",
+            "--json",
+        ]
+    )
+    dynamic_second_watcher_json = ((dynamic_second_pass.get("watcher") or {}).get("json") or {})
+    if dynamic_second_watcher_json.get("detected_count") != 0:
+        raise SystemExit("dynamic peer IP watcher runner was not idempotent on second pass")
+
+    dynamic_service_path = REPO_ROOT / "scripts" / "customers" / "systemd" / "rpdb-dynamic-peer-ip-watcher.service"
+    dynamic_service_text = dynamic_service_path.read_text(encoding="utf-8")
+    for token in (
+        "scripts/customers/run_dynamic_peer_ip_watcher.py",
+        "--environment ${RPDB_ENVIRONMENT}",
+        "--follow",
+        "--approve",
+        "Restart=always",
+    ):
+        if token not in dynamic_service_text:
+            raise SystemExit(f"dynamic peer IP watcher service contract missing token: {token}")
+    record_step(
+        "automatic_dynamic_peer_ip_control_plane_runner",
+        {
+            "detected_customer": dynamic_detected["customer_name"],
+            "serial_number": dynamic_detected["serial_number"],
+            "previous_peer": dynamic_detected["previous_peer"],
+            "observed_peer": dynamic_detected["observed_peer"],
+            "environment_file": str(dynamic_env_path),
+            "environment_request_roots_used": True,
+            "operator_selected_customer_file": False,
+            "deploy_status": dynamic_provisioning_json.get("status"),
+            "second_pass_detected_count": dynamic_second_watcher_json.get("detected_count"),
+            "service_template": str(dynamic_service_path),
+        },
+    )
+
     # Step 4: verify the allocation DDB item view and the bootstrap plan now include resource allocations.
     allocation_item_counts = {
         name: len(result["allocation_ddb_items"])
@@ -1530,6 +1686,7 @@ report = live_apply_lib._inject_live_headend_secret(
     package_dir=package_dir,
     headend_prepared={"apply": {"swanctl_conf": str(swanctl_conf)}},
     region="us-east-1",
+    apply_dir=root / "apply",
 )
 rendered = swanctl_conf.read_text(encoding="utf-8")
 expected_hash = hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
@@ -3521,6 +3678,8 @@ print(
         activation_bundles = apply.get("activation_bundles") or {}
         activation_artifacts: dict[str, dict[str, str]] = {}
         for component_name, activation in activation_bundles.items():
+            if not isinstance(activation, dict):
+                continue
             request_path = _resolve_repo_path(str(activation.get("request_path") or ""))
             rollback_request_path = _resolve_repo_path(str(activation.get("rollback_request_path") or ""))
             activation_journal = _resolve_repo_path(str(activation.get("activation_journal") or ""))

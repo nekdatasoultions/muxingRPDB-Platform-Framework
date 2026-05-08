@@ -21,6 +21,7 @@ if str(SRC_DIR) not in sys.path:
 # - `parse_customer_source` validates and normalizes the raw customer source
 from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file
 from muxerlib.customer_model import parse_customer_source
+from muxerlib.dynamic_peer_ip import validate_dynamic_peer_ip_request
 from muxerlib.dynamic_provisioning import validate_dynamic_initial_request
 
 
@@ -74,6 +75,7 @@ def main() -> int:
     # the matching class defaults automatically when none are provided.
     source = parse_customer_source(source_doc)
     dynamic_validation = validate_dynamic_initial_request(source_doc)
+    dynamic_peer_ip_validation = validate_dynamic_peer_ip_request(source_doc)
     class_file = (
         Path(args.class_file).resolve()
         if args.class_file
@@ -118,6 +120,11 @@ def main() -> int:
     )
     if dynamic_validation.get("enabled"):
         print("Dynamic provisioning: nat_t_auto_promote")
+    if dynamic_peer_ip_validation.get("enabled"):
+        print(
+            "Dynamic peer IP: "
+            f"device_registry_ddns serial={dynamic_peer_ip_validation['serial_number']}"
+        )
 
     # Optionally print the full merged module for debugging or review.
     if args.show_merged:

@@ -36,6 +36,7 @@ from live_backend_lib import (
     delete_customer_backend_records,
     inspect_customer_backend_records,
 )
+from dynamic_peer_ip_registry_lib import remove_dynamic_peer_ip_registry_state
 
 
 PLACEHOLDER_VALUES = {
@@ -57,6 +58,10 @@ def utc_now() -> str:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def load_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def repo_relative(path: Path) -> str:
@@ -154,6 +159,8 @@ def customer_metadata(typed_item: dict[str, Any] | None) -> dict[str, Any]:
 
     backend = customer_json.get("backend") or {}
     customer = customer_json.get("customer") or {}
+    transport = customer_json.get("transport") or {}
+    cgnat_transport = transport.get("cgnat") or {}
     return {
         "customer_name": plain.get("customer_name"),
         "customer_class": plain.get("customer_class") or customer.get("customer_class"),
@@ -163,6 +170,10 @@ def customer_metadata(typed_item: dict[str, Any] | None) -> dict[str, Any]:
         "fwmark": plain.get("fwmark"),
         "route_table": plain.get("route_table"),
         "rpdb_priority": plain.get("rpdb_priority"),
+        "transport_mode": plain.get("transport_mode") or transport.get("mode"),
+        "cgnat_outer_topology": cgnat_transport.get("outer_topology"),
+        "cgnat_outer_gateway_ref": cgnat_transport.get("outer_gateway_ref"),
+        "customer_json": customer_json,
     }
 
 
@@ -177,6 +188,10 @@ def normalize_headend_family(value: str) -> str:
     if normalized == "auto":
         return "auto"
     return ""
+
+
+def normalize_transport_mode(value: str) -> str:
+    return value.strip().lower().replace("-", "_")
 
 
 def headend_family_from_metadata(metadata: dict[str, Any], override: str) -> str:
@@ -227,6 +242,10 @@ def selected_headends(environment_doc: dict[str, Any], headend_family: str) -> l
     ]
 
 
+def selected_smartconnect_gateway(environment_doc: dict[str, Any]) -> dict[str, Any]:
+    return (((environment_doc.get("targets") or {}).get("smartconnect") or {}).get("gateway") or {})
+
+
 def selector_instance_id(target: dict[str, Any]) -> str:
     selector = target.get("selector") or {}
     if str(selector.get("type") or "").strip() != "instance_id":
@@ -235,6 +254,57 @@ def selector_instance_id(target: dict[str, Any]) -> str:
     if not instance_id:
         raise ValueError(f"target {target.get('name')} is missing selector.value")
     return instance_id
+
+
+def selector_staged_root(target: dict[str, Any]) -> Path:
+    selector = target.get("selector") or {}
+    if str(selector.get("type") or "").strip() != "staged":
+        raise ValueError(f"target {target.get('name')} does not use a staged selector")
+    root = str(selector.get("value") or "").strip()
+    if not root:
+        raise ValueError(f"target {target.get('name')} is missing selector.value")
+    return configured_repo_path(root, root)
+
+
+def selected_cgnat_headend(environment_doc: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    if normalize_transport_mode(str(metadata.get("transport_mode") or "")) != "cgnat":
+        return {}
+    return ((((environment_doc.get("targets") or {}).get("cgnat") or {}).get("headend") or {}).get("active") or {})
+
+
+def inspect_staged_backend_records(
+    *,
+    backend_root: Path,
+    customer_name: str,
+) -> dict[str, Any]:
+    customer_root = backend_root / "var" / "lib" / "rpdb-backend" / "customers" / customer_name
+    allocation_root = backend_root / "var" / "lib" / "rpdb-backend" / "allocations" / customer_name
+    customer_item_path = customer_root / "customer-ddb-item.json"
+    customer_module_path = customer_root / "customer-module.json"
+    allocation_items_path = allocation_root / "allocation-ddb-items.json"
+
+    customer_item = load_json(customer_item_path) if customer_item_path.exists() else None
+    customer_module = load_json(customer_module_path) if customer_module_path.exists() else None
+    allocation_items = load_json(allocation_items_path) if allocation_items_path.exists() else []
+    if not isinstance(allocation_items, list):
+        allocation_items = []
+
+    return {
+        "mode": "staged",
+        "backend_root": str(backend_root),
+        "customer_present": bool(customer_item_path.exists() or customer_module_path.exists()),
+        "customer_item": customer_item,
+        "customer_module": customer_module,
+        "allocation_count": len(allocation_items),
+        "allocation_items": allocation_items,
+        "paths": {
+            "customer_root": str(customer_root),
+            "allocation_root": str(allocation_root),
+            "customer_ddb_item": str(customer_item_path),
+            "customer_module": str(customer_module_path),
+            "allocation_ddb_items": str(allocation_items_path),
+        },
+    }
 
 
 def sudo_shell(command_text: str, *, strict: bool = True) -> str:
@@ -353,6 +423,41 @@ def headend_remove_command(customer_name: str) -> str:
     )
 
 
+def smartconnect_remove_command(customer_name: str) -> str:
+    customer_q = shlex.quote(customer_name)
+    return "\n".join(
+        [
+            f"CUST={customer_q}",
+            'CUSTOMER_ROOT="/var/lib/rpdb-smartconnect/customers/${CUST}"',
+            'if [ -f "${CUSTOMER_ROOT}/remove-smartconnect-customer.sh" ]; then',
+            '  bash "${CUSTOMER_ROOT}/remove-smartconnect-customer.sh"',
+            "fi",
+            'rm -rf "${CUSTOMER_ROOT}"',
+            'test ! -e "${CUSTOMER_ROOT}"',
+            'echo "removed_smartconnect_customer=${CUST}"',
+        ]
+    )
+
+
+def cgnat_headend_remove_command(customer_name: str) -> str:
+    customer_q = shlex.quote(customer_name)
+    return "\n".join(
+        [
+            f"CUST={customer_q}",
+            'CUSTOMER_ROOT="/var/lib/rpdb-cgnat/customers/${CUST}"',
+            'CONFIG_JSON="/etc/rpdb-cgnat/customers/${CUST}.json"',
+            'if [ -f "${CUSTOMER_ROOT}/remove-cgnat-customer.sh" ]; then',
+            '  bash "${CUSTOMER_ROOT}/remove-cgnat-customer.sh"',
+            "fi",
+            'rm -f "${CONFIG_JSON}"',
+            'rm -rf "${CUSTOMER_ROOT}"',
+            'test ! -e "${CUSTOMER_ROOT}"',
+            'test ! -e "${CONFIG_JSON}"',
+            'echo "removed_cgnat_customer=${CUST}"',
+        ]
+    )
+
+
 def cleanup_nat_t_watcher_state(
     *,
     customer_name: str,
@@ -442,17 +547,161 @@ def cleanup_nat_t_watcher_state(
     return report
 
 
+def cleanup_dynamic_peer_ip_watcher_state(
+    *,
+    customer_name: str,
+    environment_doc: dict[str, Any],
+    out_dir: Path,
+) -> dict[str, Any]:
+    watcher = environment_doc.get("dynamic_peer_ip_watcher") or {}
+    if not watcher:
+        report = {
+            "schema_version": 1,
+            "action": "cleanup_dynamic_peer_ip_watcher_state",
+            "customer_name": customer_name,
+            "status": "not_configured",
+            "generated_at": utc_now(),
+            "errors": [],
+        }
+        write_json(out_dir / "dynamic-peer-ip-watcher-cleanup.json", report)
+        return report
+
+    state_file = configured_repo_path(
+        watcher.get("state_root"),
+        "build/dynamic-peer-ip-watcher/state",
+    ) / "state.json"
+    output_root = configured_repo_path(
+        watcher.get("output_root"),
+        "build/dynamic-peer-ip-watcher/out",
+    )
+    package_root = configured_repo_path(
+        watcher.get("package_root"),
+        "build/dynamic-peer-ip-watcher/packages",
+    )
+    observation_dir = output_root / "observations" / customer_name
+    package_dir = package_root / customer_name
+
+    removed_customer_state = False
+    removed_customer_keys: list[str] = []
+    removed_global_keys: list[str] = []
+    idempotency_prefixes: set[str] = set()
+    errors: list[str] = []
+
+    if observation_dir.exists():
+        for observation_file in observation_dir.glob("*.json"):
+            idempotency_prefixes.add(observation_file.stem)
+
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            customers = state.setdefault("customers", {})
+            customer_state = customers.pop(customer_name, None)
+            if isinstance(customer_state, dict):
+                removed_customer_state = True
+                removed_customer_keys = [
+                    str(key)
+                    for key in customer_state.get("planned_idempotency_keys") or []
+                    if str(key).strip()
+                ]
+
+            keys_to_remove = set(removed_customer_keys)
+            planned_keys = [str(key) for key in state.get("planned_idempotency_keys") or []]
+            retained_keys: list[str] = []
+            for key in planned_keys:
+                if key in keys_to_remove or any(key.startswith(prefix) for prefix in idempotency_prefixes):
+                    removed_global_keys.append(key)
+                else:
+                    retained_keys.append(key)
+            state["planned_idempotency_keys"] = sorted(retained_keys)
+            write_json(state_file, state)
+        except Exception as exc:
+            errors.append(
+                f"failed to update dynamic peer IP watcher state {repo_relative(state_file)}: {exc}"
+            )
+
+    removed_artifacts: list[str] = []
+    for artifact_dir in (observation_dir, package_dir):
+        if not artifact_dir.exists():
+            continue
+        try:
+            shutil.rmtree(artifact_dir)
+            removed_artifacts.append(repo_relative(artifact_dir))
+        except Exception as exc:
+            errors.append(
+                f"failed to remove dynamic peer IP watcher artifact {repo_relative(artifact_dir)}: {exc}"
+            )
+
+    report = {
+        "schema_version": 1,
+        "action": "cleanup_dynamic_peer_ip_watcher_state",
+        "customer_name": customer_name,
+        "status": "blocked" if errors else "cleaned",
+        "generated_at": utc_now(),
+        "state_file": repo_relative(state_file),
+        "state_file_present": state_file.exists(),
+        "removed_customer_state": removed_customer_state,
+        "removed_customer_idempotency_keys": sorted(set(removed_customer_keys)),
+        "removed_global_idempotency_keys": sorted(set(removed_global_keys)),
+        "removed_artifacts": removed_artifacts,
+        "errors": errors,
+    }
+    write_json(out_dir / "dynamic-peer-ip-watcher-cleanup.json", report)
+    return report
+
+
+def cleanup_dynamic_peer_ip_registry_state(
+    *,
+    metadata: dict[str, Any],
+    environment_doc: dict[str, Any],
+    out_dir: Path,
+) -> dict[str, Any]:
+    module = metadata.get("customer_json")
+    if not isinstance(module, dict) or not module:
+        report = {
+            "schema_version": 1,
+            "action": "cleanup_dynamic_peer_ip_registry_state",
+            "customer_name": metadata.get("customer_name"),
+            "status": "not_configured",
+            "generated_at": utc_now(),
+            "reason": "customer_json_missing_from_sot_metadata",
+            "errors": [],
+        }
+        write_json(out_dir / "dynamic-peer-ip-registry-cleanup.json", report)
+        return report
+
+    try:
+        report = remove_dynamic_peer_ip_registry_state(
+            customer_module=module,
+            environment_doc=environment_doc,
+        )
+        report.setdefault("errors", [])
+    except Exception as exc:
+        report = {
+            "schema_version": 1,
+            "action": "cleanup_dynamic_peer_ip_registry_state",
+            "customer_name": metadata.get("customer_name"),
+            "status": "blocked",
+            "generated_at": utc_now(),
+            "errors": [str(exc)],
+        }
+    write_json(out_dir / "dynamic-peer-ip-registry-cleanup.json", report)
+    return report
+
+
 def build_touch_plan(
     *,
     environment_doc: dict[str, Any],
     customer_name: str,
     headend_family: str,
     backend: dict[str, Any],
+    metadata: dict[str, Any],
 ) -> dict[str, Any]:
     datastores = environment_doc.get("datastores") or {}
     targets = environment_doc.get("targets") or {}
     muxer = targets.get("muxer") or {}
     headends = selected_headends(environment_doc, headend_family)
+    smartconnect_gateway = selected_smartconnect_gateway(environment_doc)
+    cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
     return {
         "customer_name": customer_name,
         "customer_sot_table": datastores.get("customer_sot_table"),
@@ -464,10 +713,20 @@ def build_touch_plan(
             )
             / "state.json"
         ),
+        "dynamic_peer_ip_watcher_state": repo_relative(
+            configured_repo_path(
+                ((environment_doc.get("dynamic_peer_ip_watcher") or {}).get("state_root")),
+                "build/dynamic-peer-ip-watcher/state",
+            )
+            / "state.json"
+        ),
         "customer_present": backend.get("customer_present"),
         "allocation_count": backend.get("allocation_count"),
         "headend_family": headend_family,
+        "transport_mode": metadata.get("transport_mode"),
         "muxer": muxer.get("name"),
+        "smartconnect_gateway": smartconnect_gateway.get("name"),
+        "cgnat_headend_active": cgnat_headend.get("name"),
         "headends": [
             {
                 "family": headend.get("family"),
@@ -481,13 +740,272 @@ def build_touch_plan(
     }
 
 
+def execute_staged_remove(
+    *,
+    customer_name: str,
+    environment_doc: dict[str, Any],
+    metadata: dict[str, Any],
+    headend_family: str,
+    out_dir: Path,
+    cleanup_nat_t_watcher: bool = True,
+    cleanup_dynamic_peer_ip_watcher: bool = True,
+) -> dict[str, Any]:
+    datastores = environment_doc.get("datastores") or {}
+    backend_root = configured_repo_path(datastores.get("staged_root"), "build/staged-live/datastores")
+
+    targets = environment_doc.get("targets") or {}
+    muxer = targets.get("muxer") or {}
+    muxer_root = selector_staged_root(muxer)
+    headends = selected_headends(environment_doc, headend_family)
+    smartconnect_gateway = selected_smartconnect_gateway(environment_doc)
+    smartconnect_root = selector_staged_root(smartconnect_gateway) if smartconnect_gateway else None
+    cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
+    cgnat_root = selector_staged_root(cgnat_headend) if cgnat_headend else None
+
+    journal: list[dict[str, Any]] = []
+    try:
+        if cgnat_root is not None:
+            returncode, payload, stdout, stderr = run_json(
+                [
+                    sys.executable,
+                    "scripts/deployment/remove_cgnat_headend_customer.py",
+                    "--customer-name",
+                    customer_name,
+                    "--cgnat-root",
+                    str(cgnat_root),
+                    "--json",
+                ]
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_cgnat_headend_customer",
+                    "target": cgnat_headend.get("name"),
+                    "target_role": cgnat_headend.get("role"),
+                    "success": returncode == 0,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "payload": payload,
+                }
+            )
+            if returncode != 0:
+                raise RuntimeError(
+                    f"CGNAT head-end remove failed for {cgnat_headend.get('name')}: {stderr or stdout}"
+                )
+
+        if smartconnect_root is not None:
+            returncode, payload, stdout, stderr = run_json(
+                [
+                    sys.executable,
+                    "scripts/deployment/remove_smartconnect_customer.py",
+                    "--customer-name",
+                    customer_name,
+                    "--smartconnect-root",
+                    str(smartconnect_root),
+                    "--json",
+                ]
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_smartconnect_customer",
+                    "target": smartconnect_gateway.get("name"),
+                    "target_role": smartconnect_gateway.get("role"),
+                    "success": returncode == 0,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "payload": payload,
+                }
+            )
+            if returncode != 0:
+                raise RuntimeError(
+                    f"SmartConnect remove failed for {smartconnect_gateway.get('name')}: {stderr or stdout}"
+                )
+
+        for headend in reversed(headends):
+            headend_root = selector_staged_root(headend)
+            returncode, payload, stdout, stderr = run_json(
+                [
+                    sys.executable,
+                    "scripts/deployment/remove_headend_customer.py",
+                    "--customer-name",
+                    customer_name,
+                    "--headend-root",
+                    str(headend_root),
+                    "--json",
+                ]
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_headend_customer",
+                    "target": headend.get("name"),
+                    "family": headend.get("family"),
+                    "ha_role": headend.get("ha_role"),
+                    "target_role": headend.get("role"),
+                    "success": returncode == 0,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "payload": payload,
+                }
+            )
+            if returncode != 0:
+                raise RuntimeError(f"head-end remove failed for {headend.get('name')}: {stderr or stdout}")
+
+        muxer_returncode, muxer_payload, muxer_stdout, muxer_stderr = run_json(
+            [
+                sys.executable,
+                "scripts/deployment/remove_muxer_customer.py",
+                "--customer-name",
+                customer_name,
+                "--muxer-root",
+                str(muxer_root),
+                "--json",
+            ]
+        )
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "remove_muxer_customer",
+                "target": muxer.get("name"),
+                "target_role": muxer.get("role"),
+                "success": muxer_returncode == 0,
+                "stdout": muxer_stdout,
+                "stderr": muxer_stderr,
+                "payload": muxer_payload,
+            }
+        )
+        if muxer_returncode != 0:
+            raise RuntimeError(f"muxer remove failed for {muxer.get('name')}: {muxer_stderr or muxer_stdout}")
+
+        backend_returncode, backend_payload, backend_stdout, backend_stderr = run_json(
+            [
+                sys.executable,
+                "scripts/deployment/remove_backend_customer.py",
+                "--customer-name",
+                customer_name,
+                "--backend-root",
+                str(backend_root),
+                "--json",
+            ]
+        )
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "remove_backend_customer",
+                "target": "staged-backend",
+                "success": backend_returncode == 0,
+                "stdout": backend_stdout,
+                "stderr": backend_stderr,
+                "payload": backend_payload,
+            }
+        )
+        if backend_returncode != 0:
+            raise RuntimeError(f"backend removal failed: {backend_stderr or backend_stdout}")
+
+        if cleanup_nat_t_watcher:
+            nat_t_cleanup = cleanup_nat_t_watcher_state(
+                customer_name=customer_name,
+                environment_doc=environment_doc,
+                out_dir=out_dir,
+            )
+        else:
+            nat_t_cleanup = {
+                "schema_version": 1,
+                "action": "cleanup_nat_t_watcher_state",
+                "customer_name": customer_name,
+                "status": "skipped",
+                "generated_at": utc_now(),
+                "reason": "skip_nat_t_watcher_cleanup_requested",
+                "errors": [],
+            }
+            write_json(out_dir / "nat-t-watcher-cleanup.json", nat_t_cleanup)
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "cleanup_nat_t_watcher_state",
+                "target": nat_t_cleanup.get("state_file"),
+                "success": nat_t_cleanup.get("status") in {"cleaned", "not_configured", "skipped"},
+                "payload": nat_t_cleanup,
+            }
+        )
+        if nat_t_cleanup.get("status") == "blocked":
+            raise RuntimeError("NAT-T watcher cleanup failed: " + "; ".join(nat_t_cleanup.get("errors") or []))
+
+        if cleanup_dynamic_peer_ip_watcher:
+            dynamic_peer_ip_cleanup = cleanup_dynamic_peer_ip_watcher_state(
+                customer_name=customer_name,
+                environment_doc=environment_doc,
+                out_dir=out_dir,
+            )
+        else:
+            dynamic_peer_ip_cleanup = {
+                "schema_version": 1,
+                "action": "cleanup_dynamic_peer_ip_watcher_state",
+                "customer_name": customer_name,
+                "status": "skipped",
+                "generated_at": utc_now(),
+                "reason": "skip_dynamic_peer_ip_watcher_cleanup_requested",
+                "errors": [],
+            }
+            write_json(out_dir / "dynamic-peer-ip-watcher-cleanup.json", dynamic_peer_ip_cleanup)
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "cleanup_dynamic_peer_ip_watcher_state",
+                "target": dynamic_peer_ip_cleanup.get("state_file"),
+                "success": dynamic_peer_ip_cleanup.get("status") in {"cleaned", "not_configured", "skipped"},
+                "payload": dynamic_peer_ip_cleanup,
+            }
+        )
+        if dynamic_peer_ip_cleanup.get("status") == "blocked":
+            raise RuntimeError(
+                "dynamic peer IP watcher cleanup failed: "
+                + "; ".join(dynamic_peer_ip_cleanup.get("errors") or [])
+            )
+
+        result = {
+            "schema_version": 1,
+            "action": "remove_customer",
+            "customer_name": customer_name,
+            "status": "removed",
+            "generated_at": utc_now(),
+            "mode": "staged_remove",
+            "headend_family": headend_family,
+            "backend": backend_payload,
+            "nat_t_watcher_cleanup": nat_t_cleanup,
+            "dynamic_peer_ip_watcher_cleanup": dynamic_peer_ip_cleanup,
+            "journal": repo_relative(out_dir / "remove-journal.json"),
+        }
+        write_json(out_dir / "remove-journal.json", {"schema_version": 1, "customer_name": customer_name, "steps": journal})
+        write_json(out_dir / "remove-result.json", result)
+        return result
+    except Exception as exc:
+        result = {
+            "schema_version": 1,
+            "action": "remove_customer",
+            "customer_name": customer_name,
+            "status": "blocked",
+            "generated_at": utc_now(),
+            "mode": "staged_remove",
+            "headend_family": headend_family,
+            "error": str(exc),
+            "journal": repo_relative(out_dir / "remove-journal.json"),
+        }
+        write_json(out_dir / "remove-journal.json", {"schema_version": 1, "customer_name": customer_name, "steps": journal})
+        write_json(out_dir / "remove-result.json", result)
+        return result
+
+
 def execute_live_remove(
     *,
     customer_name: str,
     environment_doc: dict[str, Any],
+    metadata: dict[str, Any],
     headend_family: str,
     out_dir: Path,
     cleanup_nat_t_watcher: bool = True,
+    cleanup_dynamic_peer_ip_watcher: bool = True,
 ) -> dict[str, Any]:
     environment = environment_doc.get("environment") or {}
     region = str((environment.get("aws") or {}).get("region") or "").strip()
@@ -508,15 +1026,76 @@ def execute_live_remove(
     muxer_instance_id = selector_instance_id(muxer)
     headends = selected_headends(environment_doc, headend_family)
     headend_instance_ids = [selector_instance_id(headend) for headend in headends]
+    smartconnect_gateway = selected_smartconnect_gateway(environment_doc)
+    smartconnect_instance_id = selector_instance_id(smartconnect_gateway) if smartconnect_gateway else ""
+    cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
+    cgnat_instance_id = selector_instance_id(cgnat_headend) if cgnat_headend else ""
 
     journal: list[dict[str, Any]] = []
     context = build_ssh_access_context(
         region=region,
         ssh_user=ssh_user,
         bastion_instance_id=muxer_instance_id,
-        target_instance_ids=[muxer_instance_id, *headend_instance_ids],
+        target_instance_ids=[
+            muxer_instance_id,
+            *headend_instance_ids,
+            *([smartconnect_instance_id] if smartconnect_instance_id else []),
+            *([cgnat_instance_id] if cgnat_instance_id else []),
+        ],
     )
     try:
+        if cgnat_instance_id:
+            cgnat_result = run_remote_command(
+                context=context,
+                target_instance_id=cgnat_instance_id,
+                via_bastion=True,
+                remote_command=sudo_shell(cgnat_headend_remove_command(customer_name), strict=True),
+                timeout_seconds=300,
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_cgnat_headend_customer",
+                    "target": cgnat_headend.get("name"),
+                    "instance_id": cgnat_instance_id,
+                    "target_role": cgnat_headend.get("role"),
+                    "success": cgnat_result.get("success"),
+                    "stdout": cgnat_result.get("stdout"),
+                    "stderr": cgnat_result.get("stderr"),
+                }
+            )
+            if not cgnat_result.get("success"):
+                raise RuntimeError(
+                    f"CGNAT head-end remove failed for {cgnat_headend.get('name')}: "
+                    f"{cgnat_result.get('stderr') or cgnat_result.get('stdout')}"
+                )
+
+        if smartconnect_instance_id:
+            smartconnect_result = run_remote_command(
+                context=context,
+                target_instance_id=smartconnect_instance_id,
+                via_bastion=True,
+                remote_command=sudo_shell(smartconnect_remove_command(customer_name), strict=True),
+                timeout_seconds=300,
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_smartconnect_customer",
+                    "target": smartconnect_gateway.get("name"),
+                    "instance_id": smartconnect_instance_id,
+                    "target_role": smartconnect_gateway.get("role"),
+                    "success": smartconnect_result.get("success"),
+                    "stdout": smartconnect_result.get("stdout"),
+                    "stderr": smartconnect_result.get("stderr"),
+                }
+            )
+            if not smartconnect_result.get("success"):
+                raise RuntimeError(
+                    f"SmartConnect remove failed for {smartconnect_gateway.get('name')}: "
+                    f"{smartconnect_result.get('stderr') or smartconnect_result.get('stdout')}"
+                )
+
         for headend in reversed(headends):
             instance_id = selector_instance_id(headend)
             result = run_remote_command(
@@ -563,6 +1142,26 @@ def execute_live_remove(
         )
         if not muxer_result.get("success"):
             raise RuntimeError(f"muxer remove failed for {muxer.get('name')}: {muxer_result.get('stderr') or muxer_result.get('stdout')}")
+
+        dynamic_peer_ip_registry_cleanup = cleanup_dynamic_peer_ip_registry_state(
+            metadata=metadata,
+            environment_doc=environment_doc,
+            out_dir=out_dir,
+        )
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "cleanup_dynamic_peer_ip_registry_state",
+                "target": dynamic_peer_ip_registry_cleanup.get("table_name"),
+                "success": dynamic_peer_ip_registry_cleanup.get("status") in {"removed", "not_present", "not_configured"},
+                "payload": dynamic_peer_ip_registry_cleanup,
+            }
+        )
+        if dynamic_peer_ip_registry_cleanup.get("status") == "blocked":
+            raise RuntimeError(
+                "dynamic peer IP registry cleanup failed: "
+                + "; ".join(dynamic_peer_ip_registry_cleanup.get("errors") or [])
+            )
 
         backend_result = delete_customer_backend_records(
             region=region,
@@ -611,6 +1210,38 @@ def execute_live_remove(
         if nat_t_cleanup.get("status") == "blocked":
             raise RuntimeError("NAT-T watcher cleanup failed: " + "; ".join(nat_t_cleanup.get("errors") or []))
 
+        if cleanup_dynamic_peer_ip_watcher:
+            dynamic_peer_ip_cleanup = cleanup_dynamic_peer_ip_watcher_state(
+                customer_name=customer_name,
+                environment_doc=environment_doc,
+                out_dir=out_dir,
+            )
+        else:
+            dynamic_peer_ip_cleanup = {
+                "schema_version": 1,
+                "action": "cleanup_dynamic_peer_ip_watcher_state",
+                "customer_name": customer_name,
+                "status": "skipped",
+                "generated_at": utc_now(),
+                "reason": "skip_dynamic_peer_ip_watcher_cleanup_requested",
+                "errors": [],
+            }
+            write_json(out_dir / "dynamic-peer-ip-watcher-cleanup.json", dynamic_peer_ip_cleanup)
+        journal.append(
+            {
+                "recorded_at": utc_now(),
+                "action": "cleanup_dynamic_peer_ip_watcher_state",
+                "target": dynamic_peer_ip_cleanup.get("state_file"),
+                "success": dynamic_peer_ip_cleanup.get("status") in {"cleaned", "not_configured", "skipped"},
+                "payload": dynamic_peer_ip_cleanup,
+            }
+        )
+        if dynamic_peer_ip_cleanup.get("status") == "blocked":
+            raise RuntimeError(
+                "dynamic peer IP watcher cleanup failed: "
+                + "; ".join(dynamic_peer_ip_cleanup.get("errors") or [])
+            )
+
         result = {
             "schema_version": 1,
             "action": "remove_customer",
@@ -619,7 +1250,9 @@ def execute_live_remove(
             "generated_at": utc_now(),
             "headend_family": headend_family,
             "backend": backend_result,
+            "dynamic_peer_ip_registry_cleanup": dynamic_peer_ip_registry_cleanup,
             "nat_t_watcher_cleanup": nat_t_cleanup,
+            "dynamic_peer_ip_watcher_cleanup": dynamic_peer_ip_cleanup,
             "journal": repo_relative(out_dir / "remove-journal.json"),
         }
         write_json(out_dir / "remove-journal.json", {"schema_version": 1, "customer_name": customer_name, "steps": journal})
@@ -661,6 +1294,11 @@ def main() -> int:
         action="store_true",
         help="Do not clear local NAT-T watcher state/artifacts. Used by watcher-internal promotion flows.",
     )
+    parser.add_argument(
+        "--skip-dynamic-peer-ip-watcher-cleanup",
+        action="store_true",
+        help="Do not clear local dynamic peer IP watcher state/artifacts. Used by watcher-internal reapply flows.",
+    )
     parser.add_argument("--json", action="store_true", help="Print the execution plan or removal result as JSON")
     args = parser.parse_args()
 
@@ -687,6 +1325,7 @@ def main() -> int:
                     "out_dir": repo_relative(out_dir),
                     "headend_family": args.headend_family,
                     "skip_nat_t_watcher_cleanup": bool(args.skip_nat_t_watcher_cleanup),
+                    "skip_dynamic_peer_ip_watcher_cleanup": bool(args.skip_dynamic_peer_ip_watcher_cleanup),
                 },
             )
             atexit.register(release_lock, operation_lock)
@@ -715,18 +1354,41 @@ def main() -> int:
         region = str((environment.get("aws") or {}).get("region") or "").strip()
         customer_table = str(datastores.get("customer_sot_table") or "").strip()
         allocation_table = str(datastores.get("allocation_table") or "").strip()
-        if str(datastores.get("mode") or "").strip() != "dynamodb":
-            errors.append("remove_customer currently supports datastores.mode=dynamodb only")
-        elif not region or not customer_table or not allocation_table:
-            errors.append("deployment environment AWS/datastore settings are incomplete")
-        else:
-            backend = inspect_customer_backend_records(
-                region=region,
-                customer_table=customer_table,
-                allocation_table=allocation_table,
+        datastores_mode = str(datastores.get("mode") or "").strip()
+        if datastores_mode == "dynamodb":
+            if not region or not customer_table or not allocation_table:
+                errors.append("deployment environment AWS/datastore settings are incomplete")
+            else:
+                backend = inspect_customer_backend_records(
+                    region=region,
+                    customer_table=customer_table,
+                    allocation_table=allocation_table,
+                    customer_name=customer_name,
+                )
+        elif datastores_mode == "staged":
+            backend = inspect_staged_backend_records(
+                backend_root=configured_repo_path(datastores.get("staged_root"), "build/staged-live/datastores"),
                 customer_name=customer_name,
             )
-            metadata = customer_metadata(backend.get("customer_item"))
+        else:
+            errors.append("remove_customer supports datastores.mode=dynamodb or staged only")
+
+        if backend:
+            raw_metadata_item = backend.get("customer_item")
+            if raw_metadata_item is None and isinstance(backend.get("customer_module"), dict):
+                module_doc = dict(backend.get("customer_module") or {})
+                raw_metadata_item = {
+                    "customer_name": customer_name,
+                    "customer_class": ((module_doc.get("customer") or {}).get("customer_class")),
+                    "backend_cluster": ((module_doc.get("backend") or {}).get("cluster")),
+                    "backend_assignment": ((module_doc.get("backend") or {}).get("assignment")),
+                    "peer_ip": ((module_doc.get("peer") or {}).get("public_ip")),
+                    "fwmark": ((module_doc.get("transport") or {}).get("mark")),
+                    "route_table": ((module_doc.get("transport") or {}).get("table")),
+                    "rpdb_priority": ((module_doc.get("transport") or {}).get("rpdb_priority")),
+                    "customer_json": json.dumps(module_doc, separators=(",", ":")),
+                }
+            metadata = customer_metadata(raw_metadata_item)
             if not backend.get("customer_present"):
                 errors.append(f"customer {customer_name} is not present in the customer SoT")
             headend_family = headend_family_from_metadata(metadata, args.headend_family)
@@ -748,6 +1410,10 @@ def main() -> int:
         if headend_family in {"nat", "non_nat"}
         else reference_is_concrete(backup_refs.get("nat_headend")) and reference_is_concrete(backup_refs.get("non_nat_headend")),
     }
+    if selected_smartconnect_gateway(environment_doc or {}):
+        backup_status["smartconnect_gateway"] = reference_is_concrete(backup_refs.get("smartconnect_gateway"))
+    if selected_cgnat_headend(environment_doc or {}, metadata):
+        backup_status["cgnat_headend"] = reference_is_concrete(backup_refs.get("cgnat_headend"))
     for key, present in owner_status.items():
         if not present:
             errors.append(f"owner reference missing for {key}")
@@ -759,19 +1425,53 @@ def main() -> int:
     environment_access_method = str(
         (((environment_doc or {}).get("environment") or {}).get("access") or {}).get("method") or ""
     ).strip()
+    datastores_mode = str((((environment_doc or {}).get("datastores") or {}).get("mode") or "")).strip()
+    approve_supported = (
+        (environment_access_method == "ssh" and datastores_mode == "dynamodb")
+        or (environment_access_method == "staged" and datastores_mode == "staged")
+    )
     if args.approve:
-        if environment_access_method != "ssh":
-            errors.append("approved remove currently supports environment.access.method=ssh only")
+        if not approve_supported:
+            errors.append(
+                "approved remove requires environment.access.method/datastores.mode of ssh+dynamodb or staged+staged"
+            )
         if not bool(environment_live_apply.get("enabled")):
             errors.append("environment live_apply.enabled is false")
 
     status = "ready_to_remove" if not errors else "blocked"
+    execution_order = [
+        "validate_deployment_environment",
+        "enforce_blocked_customers",
+        "inspect_customer_sot",
+        "resolve_headend_family",
+        "validate_backup_and_owner_references",
+        "write_execution_plan",
+    ]
+    if selected_cgnat_headend(environment_doc or {}, metadata):
+        execution_order.append("remove_cgnat_headend_customer")
+    execution_order.extend(
+        [
+            "remove_smartconnect_customer",
+            "remove_headend_customer_standby",
+            "remove_headend_customer_active",
+            "remove_muxer_customer",
+            "remove_backend_customer",
+            "cleanup_nat_t_watcher_state" if not args.skip_nat_t_watcher_cleanup else "skip_nat_t_watcher_cleanup",
+            "cleanup_dynamic_peer_ip_watcher_state"
+            if not args.skip_dynamic_peer_ip_watcher_cleanup
+            else "skip_dynamic_peer_ip_watcher_cleanup",
+            "write_remove_journal",
+        ]
+    )
+    if environment_access_method == "ssh" and datastores_mode == "dynamodb":
+        execution_order.insert(execution_order.index("remove_backend_customer"), "cleanup_dynamic_peer_ip_registry_state")
     touch_plan = (
         build_touch_plan(
             environment_doc=environment_doc or {},
             customer_name=customer_name,
             headend_family=headend_family,
             backend=backend,
+            metadata=metadata,
         )
         if environment_doc and headend_family
         else {}
@@ -800,23 +1500,10 @@ def main() -> int:
         "owner_status": owner_status,
         "backup_status": backup_status,
         "touch_plan": touch_plan,
-        "execution_order": [
-            "validate_deployment_environment",
-            "enforce_blocked_customers",
-            "inspect_customer_sot",
-            "resolve_headend_family",
-            "validate_backup_and_owner_references",
-            "write_execution_plan",
-            "remove_headend_customer_standby",
-            "remove_headend_customer_active",
-            "remove_muxer_customer",
-            "remove_backend_customer",
-            "cleanup_nat_t_watcher_state" if not args.skip_nat_t_watcher_cleanup else "skip_nat_t_watcher_cleanup",
-            "write_remove_journal",
-        ],
+        "execution_order": execution_order,
         "live_gate": {
             "status": status,
-            "approve_supported": environment_access_method == "ssh",
+            "approve_supported": approve_supported,
             "allow_live_remove_now": status == "ready_to_remove",
             "no_live_nodes_touched": not bool(args.approve),
             "no_dynamodb_writes": not bool(args.approve),
@@ -826,27 +1513,46 @@ def main() -> int:
             "execution_plan": repo_relative(out_dir / "execution-plan.json"),
             "remove_journal": repo_relative(out_dir / "remove-journal.json"),
             "remove_result": repo_relative(out_dir / "remove-result.json"),
+            "dynamic_peer_ip_registry_cleanup": repo_relative(
+                out_dir / "dynamic-peer-ip-registry-cleanup.json"
+            ),
             "nat_t_watcher_cleanup": repo_relative(out_dir / "nat-t-watcher-cleanup.json"),
+            "dynamic_peer_ip_watcher_cleanup": repo_relative(
+                out_dir / "dynamic-peer-ip-watcher-cleanup.json"
+            ),
         },
     }
     write_json(out_dir / "execution-plan.json", execution_plan)
 
     if args.approve and not errors:
-        remove_result = execute_live_remove(
-            customer_name=customer_name,
-            environment_doc=environment_doc or {},
-            headend_family=headend_family,
-            out_dir=out_dir,
-            cleanup_nat_t_watcher=not bool(args.skip_nat_t_watcher_cleanup),
-        )
+        if environment_access_method == "staged":
+            remove_result = execute_staged_remove(
+                customer_name=customer_name,
+                environment_doc=environment_doc or {},
+                metadata=metadata,
+                headend_family=headend_family,
+                out_dir=out_dir,
+                cleanup_nat_t_watcher=not bool(args.skip_nat_t_watcher_cleanup),
+                cleanup_dynamic_peer_ip_watcher=not bool(args.skip_dynamic_peer_ip_watcher_cleanup),
+            )
+        else:
+            remove_result = execute_live_remove(
+                customer_name=customer_name,
+                environment_doc=environment_doc or {},
+                metadata=metadata,
+                headend_family=headend_family,
+                out_dir=out_dir,
+                cleanup_nat_t_watcher=not bool(args.skip_nat_t_watcher_cleanup),
+                cleanup_dynamic_peer_ip_watcher=not bool(args.skip_dynamic_peer_ip_watcher_cleanup),
+            )
         execution_plan["status"] = remove_result.get("status")
         execution_plan["live_remove"] = remove_result.get("status") == "removed"
         execution_plan["live_gate"] = {
             "status": remove_result.get("status"),
-            "approve_supported": True,
+            "approve_supported": approve_supported,
             "allow_live_remove_now": remove_result.get("status") == "removed",
-            "no_live_nodes_touched": False,
-            "no_dynamodb_writes": False,
+            "no_live_nodes_touched": environment_access_method == "staged",
+            "no_dynamodb_writes": datastores_mode == "staged",
         }
         execution_plan["remove"] = remove_result
         if remove_result.get("status") != "removed":

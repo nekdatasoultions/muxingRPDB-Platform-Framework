@@ -74,6 +74,18 @@ targets:
           private_ip: 172.31.141.223
         access:
           method: ssm
+  smartconnect:
+    gateway:
+      name: rpdb-empty-smartconnect-gateway
+      role: smartconnect-gateway
+      rpdb_managed: true
+      selector:
+        type: tag
+        key: Name
+        value: rpdb-empty-smartconnect-gateway
+        private_ip: 172.31.36.200
+      access:
+        method: ssm
 
 datastores:
   customer_sot_table: muxingplus-customer-sot-rpdb-empty
@@ -88,6 +100,7 @@ backups:
   muxer: s3://baines-networking/RPDB/example-rpdb/backups/baseline/muxer
   nat_headend: s3://baines-networking/RPDB/example-rpdb/backups/baseline/nat-headend
   non_nat_headend: s3://baines-networking/RPDB/example-rpdb/backups/baseline/non-nat-headend
+  smartconnect_gateway: s3://baines-networking/RPDB/example-rpdb/backups/baseline/smartconnect-gateway
 
 nat_t_watcher:
   log_source:
@@ -109,6 +122,23 @@ nat_t_watcher:
   log_sync:
     mode: auto
     local_copy: build/nat-t-watcher/synced/muxer-events.jsonl
+
+dynamic_peer_ip_watcher:
+  source:
+    type: json_file
+    path: build/dynamic-peer-ip-watcher/device-registry.json
+    serial_number_attribute: serialNumber
+    current_ip_attribute: currentIP
+    last_updated_attribute: lastUpdated
+  state_root: build/dynamic-peer-ip-watcher/state
+  output_root: build/dynamic-peer-ip-watcher/out
+  package_root: build/dynamic-peer-ip-watcher/packages
+  automation:
+    enabled: false
+    requires_approval: true
+    run_provisioning: true
+    follow: true
+    poll_interval_seconds: 30
 
 customer_requests:
   allowed_roots:

@@ -18,6 +18,7 @@ REQUIRED_DIRECTORIES = [
     "customer",
     "muxer",
     "headend",
+    "smartconnect",
 ]
 
 RECOMMENDED_FILES = [
@@ -27,6 +28,14 @@ RECOMMENDED_FILES = [
 REQUIRED_CUSTOMER_FILES = [
     "customer/customer-module.json",
     "customer/customer-ddb-item.json",
+]
+
+REQUIRED_DYNAMIC_PEER_IP_FILES = [
+    "customer/dynamic-peer-ip/ddns-config.json",
+    "customer/dynamic-peer-ip/update-ddns.sh",
+    "customer/dynamic-peer-ip/install-systemd.sh",
+    "customer/dynamic-peer-ip/rpdb-dynamic-peer-ip-update.service",
+    "customer/dynamic-peer-ip/rpdb-dynamic-peer-ip-update.timer",
 ]
 
 REQUIRED_MUXER_FILES = [
@@ -68,6 +77,11 @@ REQUIRED_HEADEND_FILES = [
     "headend/outside-nat/activation-manifest.json",
 ]
 
+REQUIRED_SMARTCONNECT_FILES = [
+    "smartconnect/routing/route-intent.json",
+    "smartconnect/routing/ip-route.commands.txt",
+]
+
 HEADEND_TEXT_FILES = [
     "headend/ipsec/swanctl-connection.conf",
     "headend/ipsec/initiate-tunnel.sh",
@@ -80,6 +94,14 @@ HEADEND_TEXT_FILES = [
     "headend/post-ipsec-nat/nftables.remove.nft",
     "headend/outside-nat/nftables.apply.nft",
     "headend/outside-nat/nftables.remove.nft",
+]
+
+SMARTCONNECT_TEXT_FILES = [
+    "smartconnect/routing/ip-route.commands.txt",
+]
+
+CUSTOMER_TEXT_FILES = [
+    "customer/dynamic-peer-ip/ddns-config.json",
 ]
 
 MUXER_TEXT_FILES = [
@@ -96,6 +118,10 @@ BANNED_GENERATED_RUNTIME_TOKENS = [
 ]
 
 PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -130,6 +156,14 @@ def main() -> int:
             if not (bundle_dir / name).exists():
                 report["errors"].append(f"missing required file: {name}")
 
+        module_path = bundle_dir / "customer" / "customer-module.json"
+        module = _load_json(module_path) if module_path.exists() else {}
+        dynamic_peer_ip = (module.get("dynamic_peer_ip") or {}) if isinstance(module, dict) else {}
+        if bool(dynamic_peer_ip.get("enabled")):
+            for name in REQUIRED_DYNAMIC_PEER_IP_FILES:
+                if not (bundle_dir / name).exists():
+                    report["errors"].append(f"missing required file: {name}")
+
         for name in REQUIRED_MUXER_FILES:
             path = bundle_dir / name
             if not path.exists():
@@ -140,7 +174,12 @@ def main() -> int:
             if not path.exists():
                 report["errors"].append(f"missing required file: {name}")
 
-        for name in MUXER_TEXT_FILES + HEADEND_TEXT_FILES:
+        for name in REQUIRED_SMARTCONNECT_FILES:
+            path = bundle_dir / name
+            if not path.exists():
+                report["errors"].append(f"missing required file: {name}")
+
+        for name in CUSTOMER_TEXT_FILES + MUXER_TEXT_FILES + HEADEND_TEXT_FILES + SMARTCONNECT_TEXT_FILES:
             path = bundle_dir / name
             if not path.exists():
                 continue

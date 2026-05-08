@@ -102,6 +102,7 @@ def _module_to_customer_source(module: dict[str, Any]) -> dict[str, Any]:
         "protocols",
         "natd_rewrite",
         "dynamic_provisioning",
+        "dynamic_peer_ip",
         "ipsec",
         "post_ipsec_nat",
         "outside_nat",
@@ -314,6 +315,7 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
     headend_key = "nat" if use_nat else "non_nat"
     targets = environment_doc.get("targets") or {}
     headends = targets.get("headends") or {}
+    smartconnect_targets = targets.get("smartconnect") or {}
     cgnat_targets = targets.get("cgnat") or {}
     selected_pair = headends.get(headend_key) or {}
     cgnat_required = transport_mode == "cgnat"
@@ -331,6 +333,7 @@ def _target_selection(*, environment_doc: dict[str, Any], readiness: dict[str, A
         "headend_family": headend_key,
         "headend_active": selected_pair.get("active"),
         "headend_standby": selected_pair.get("standby"),
+        "smartconnect_gateway": smartconnect_targets.get("gateway"),
         "transport_mode": transport_mode,
         "cgnat_required": cgnat_required,
         "cgnat_outer_topology": cgnat_outer_topology,
@@ -388,6 +391,8 @@ def _evaluate_dry_run_gate(
         "selected_headend": backups.get(selected_headend_backup_key),
         "selected_headend_key": selected_headend_backup_key,
     }
+    if (target_selection or {}).get("smartconnect_gateway"):
+        backup_refs["smartconnect_gateway"] = backups.get("smartconnect_gateway")
     if bool((target_selection or {}).get("cgnat_required")):
         backup_refs["cgnat_headend"] = backups.get("cgnat_headend")
         if str((target_selection or {}).get("cgnat_outer_topology") or "").strip() == "shared_isp_gateway":
@@ -515,6 +520,7 @@ def _build_execution_plan(
             "headend_family": (target_selection or {}).get("headend_family"),
             "headend_active": ((target_selection or {}).get("headend_active") or {}).get("name"),
             "headend_standby": ((target_selection or {}).get("headend_standby") or {}).get("name"),
+            "smartconnect_gateway": ((target_selection or {}).get("smartconnect_gateway") or {}).get("name"),
             "cgnat_headend_active": ((target_selection or {}).get("cgnat_headend_active") or {}).get("name"),
             "cgnat_outer_topology": (target_selection or {}).get("cgnat_outer_topology"),
             "cgnat_outer_gateway_ref": (target_selection or {}).get("cgnat_outer_gateway_ref"),
@@ -729,6 +735,13 @@ def main() -> int:
             "apply_headend_customer_standby",
             "validate_headend_customer_standby",
         ]
+        if (target_selection or {}).get("smartconnect_gateway"):
+            execution_order.extend(
+                [
+                    "apply_smartconnect_customer",
+                    "validate_smartconnect_customer",
+                ]
+            )
         if bool((target_selection or {}).get("cgnat_required")):
             execution_order.extend(
                 [

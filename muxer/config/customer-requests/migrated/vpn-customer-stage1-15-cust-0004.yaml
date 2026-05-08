@@ -15,6 +15,15 @@ customer:
       - 10.129.3.0/24
     remote_host_cidrs:
       - 10.129.3.154/32
+  dynamic_peer_ip:
+    enabled: true
+    source: device_registry_ddns
+    device_registry:
+      serial_number: vpn-customer-stage1-15-cust-0004
+      password_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0004/dynamic-peer-ip-password
+    reapply:
+      mode: remove_reapply
+      update_remote_id_when_equal_to_peer_ip: false
   ipsec:
     auto: start
     remote_id: 3.237.201.84

@@ -1608,8 +1608,236 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     }
 
 
+def _smartconnect_route_cidrs(selectors: Dict[str, Any]) -> List[str]:
+    routed = selectors.get("remote_host_cidrs") or selectors.get("remote_subnets") or []
+    values: List[str] = []
+    for value in routed:
+        _append_unique(values, value)
+    return values
+
+
+def build_smartconnect_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    customer = module.get("customer") or {}
+    selectors = module.get("selectors") or {}
+    backend = module.get("backend") or {}
+    customer_name = str(customer.get("name") or "").strip()
+    route_cidrs = _smartconnect_route_cidrs(selectors)
+    cidr_source = "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
+    route_table = _placeholder("SMARTCONNECT_ROUTE_TABLE")
+    route_device = _placeholder("SMARTCONNECT_ROUTE_DEV")
+    next_hop = _placeholder("HEADEND_CORE_IP")
+    route_commands = [
+        "# Customer-scoped SmartConnect return routes",
+        *[
+            f"ip route replace table {route_table} {cidr} via {next_hop} dev {route_device}"
+            for cidr in route_cidrs
+        ],
+    ]
+    return {
+        "routing/route-intent.json": {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "enabled": bool(route_cidrs),
+            "route_table": route_table,
+            "route_device": route_device,
+            "next_hop": next_hop,
+            "customer_route_cidrs": route_cidrs,
+            "customer_route_cidrs_source": cidr_source,
+            "headend_binding": {
+                "backend_cluster": backend.get("cluster"),
+                "backend_assignment": backend.get("assignment"),
+                "backend_role": backend.get("role"),
+                "headend_core_ip_placeholder": "HEADEND_CORE_IP",
+            },
+            "purpose": "route customer-side prefixes from the SmartConnect gateway toward the selected VPN head-end core-side IP",
+        },
+        "routing/ip-route.commands.txt": "\n".join(route_commands) + "\n",
+    }
+
+
+def _dynamic_peer_ip_doc(module: Dict[str, Any]) -> Dict[str, Any]:
+    dynamic = module.get("dynamic_peer_ip") or {}
+    return dynamic if isinstance(dynamic, dict) else {}
+
+
+def build_customer_device_registry_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    customer = module.get("customer") or {}
+    peer = module.get("peer") or {}
+    dynamic = _dynamic_peer_ip_doc(module)
+    if not bool(dynamic.get("enabled")):
+        return {}
+
+    registry = dynamic.get("device_registry") or {}
+    reapply = dynamic.get("reapply") or {}
+    customer_name = str(customer.get("name") or "").strip() or "customer"
+    serial_number = str(registry.get("serial_number") or "").strip()
+    password_secret_ref = str(registry.get("password_secret_ref") or "").strip()
+    if not serial_number:
+        raise ValueError("dynamic peer IP customer artifacts require device_registry.serial_number")
+    if not password_secret_ref:
+        raise ValueError("dynamic peer IP customer artifacts require device_registry.password_secret_ref")
+
+    config = {
+        "schema_version": 1,
+        "enabled": True,
+        "customer_name": customer_name,
+        "serial_number": serial_number,
+        "ddns_endpoint": _placeholder("DYNAMIC_PEER_IP_DDNS_ENDPOINT"),
+        "aws_region": _placeholder("DYNAMIC_PEER_IP_AWS_REGION"),
+        "password_secret_ref": password_secret_ref,
+        "password_file": "/etc/rpdb/dynamic-peer-ip/ddns-password.txt",
+        "public_ip_lookup_url": "https://checkip.amazonaws.com",
+        "public_ip_command": "",
+        "initial_peer_public_ip": str(peer.get("public_ip") or "").strip(),
+        "reapply_mode": str(reapply.get("mode") or "deploy_only").strip(),
+    }
+
+    update_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'CONFIG="${RPDB_DYNAMIC_PEER_IP_CONFIG:-$SCRIPT_DIR/ddns-config.json}"',
+            'if [ ! -f "$CONFIG" ] && [ -f /etc/rpdb/dynamic-peer-ip/ddns-config.json ]; then',
+            '  CONFIG=/etc/rpdb/dynamic-peer-ip/ddns-config.json',
+            "fi",
+            'json_get() {',
+            '  python3 -c \'import json,sys; value=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if value is None else value)\' "$CONFIG" "$1"',
+            "}",
+            'ENDPOINT="$(json_get ddns_endpoint)"',
+            'SERIAL="$(json_get serial_number)"',
+            'REGION="$(json_get aws_region)"',
+            'SECRET_REF="$(json_get password_secret_ref)"',
+            'PASSWORD_FILE_DEFAULT="$(json_get password_file)"',
+            'PASSWORD_FILE="${RPDB_DYNAMIC_PEER_IP_PASSWORD_FILE:-$PASSWORD_FILE_DEFAULT}"',
+            'LOOKUP_URL_DEFAULT="$(json_get public_ip_lookup_url)"',
+            'LOOKUP_URL="${RPDB_DYNAMIC_PEER_IP_LOOKUP_URL:-$LOOKUP_URL_DEFAULT}"',
+            'PUBLIC_IP_COMMAND="$(json_get public_ip_command)"',
+            'if [ -z "$ENDPOINT" ] || [ -z "$SERIAL" ]; then',
+            '  echo "dynamic peer IP DDNS config is incomplete" >&2',
+            "  exit 1",
+            "fi",
+            'if [ -n "${DDNS_PASSWORD:-}" ]; then',
+            '  PASSWORD="$DDNS_PASSWORD"',
+            'elif [ -n "$PASSWORD_FILE" ] && [ -f "$PASSWORD_FILE" ]; then',
+            '  PASSWORD="$(head -n 1 "$PASSWORD_FILE" | tr -d \'\\r\\n\')"',
+            'elif [ -n "$SECRET_REF" ] && [ -n "$REGION" ] && command -v aws >/dev/null 2>&1; then',
+            '  PASSWORD="$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRET_REF" --query SecretString --output text | tr -d \'\\r\\n\')"',
+            "else",
+            '  echo "unable to resolve DDNS password; set DDNS_PASSWORD, install ddns-password.txt, or enable AWS CLI access to the secret" >&2',
+            "  exit 1",
+            "fi",
+            'if [ -z "$PASSWORD" ] || [ "$PASSWORD" = "None" ]; then',
+            '  echo "resolved DDNS password is empty" >&2',
+            "  exit 1",
+            "fi",
+            'if [ -n "${DDNS_MYIP:-}" ]; then',
+            '  MYIP="$DDNS_MYIP"',
+            'elif [ -n "$PUBLIC_IP_COMMAND" ]; then',
+            '  MYIP="$(sh -c "$PUBLIC_IP_COMMAND" | tr -d \'[:space:]\')"',
+            "else",
+            '  MYIP="$(curl -fsS "$LOOKUP_URL" | tr -d \'[:space:]\')"',
+            "fi",
+            'if [ -z "$MYIP" ]; then',
+            '  echo "unable to determine current public IP for DDNS update" >&2',
+            "  exit 1",
+            "fi",
+            'curl -fsS --get --data-urlencode "user=$SERIAL" --data-urlencode "password=$PASSWORD" --data-urlencode "myip=$MYIP" "$ENDPOINT"',
+            "echo",
+            "",
+        ]
+    )
+
+    install_script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -eu",
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'CONFIG_DIR="/etc/rpdb/dynamic-peer-ip"',
+            'SCRIPT_PATH="/usr/local/sbin/rpdb-dynamic-peer-ip-update.sh"',
+            'SERVICE_PATH="/etc/systemd/system/rpdb-dynamic-peer-ip-update.service"',
+            'TIMER_PATH="/etc/systemd/system/rpdb-dynamic-peer-ip-update.timer"',
+            'install -d -m 700 "$CONFIG_DIR"',
+            'install -m 600 "$SCRIPT_DIR/ddns-config.json" "$CONFIG_DIR/ddns-config.json"',
+            'if [ -f "$SCRIPT_DIR/ddns-password.txt" ]; then',
+            '  install -m 600 "$SCRIPT_DIR/ddns-password.txt" "$CONFIG_DIR/ddns-password.txt"',
+            "fi",
+            'install -m 755 "$SCRIPT_DIR/update-ddns.sh" "$SCRIPT_PATH"',
+            'install -m 644 "$SCRIPT_DIR/rpdb-dynamic-peer-ip-update.service" "$SERVICE_PATH"',
+            'install -m 644 "$SCRIPT_DIR/rpdb-dynamic-peer-ip-update.timer" "$TIMER_PATH"',
+            'systemctl daemon-reload',
+            'systemctl enable --now rpdb-dynamic-peer-ip-update.timer',
+            'systemctl start rpdb-dynamic-peer-ip-update.service || true',
+            "",
+        ]
+    )
+
+    service_text = "\n".join(
+        [
+            "[Unit]",
+            f"Description=RPDB dynamic peer IP DDNS update for {customer_name}",
+            "After=network-online.target",
+            "Wants=network-online.target",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            'ExecStart=/usr/local/sbin/rpdb-dynamic-peer-ip-update.sh',
+            "",
+            "[Install]",
+            "WantedBy=multi-user.target",
+            "",
+        ]
+    )
+
+    timer_text = "\n".join(
+        [
+            "[Unit]",
+            f"Description=RPDB dynamic peer IP DDNS timer for {customer_name}",
+            "",
+            "[Timer]",
+            "OnBootSec=1min",
+            "OnUnitActiveSec=2min",
+            "RandomizedDelaySec=15s",
+            "Persistent=true",
+            "Unit=rpdb-dynamic-peer-ip-update.service",
+            "",
+            "[Install]",
+            "WantedBy=timers.target",
+            "",
+        ]
+    )
+
+    readme = "\n".join(
+        [
+            "# Dynamic Peer IP Handoff",
+            "",
+            "Install these files on the customer-side router or demo node so it can report a changed",
+            "public IP to the AWS dynamic-ip-solution DDNS endpoint after boot and on a timer.",
+            "",
+            "The updater resolves the DDNS password in this order:",
+            "1. `DDNS_PASSWORD` environment variable",
+            "2. `/etc/rpdb/dynamic-peer-ip/ddns-password.txt`",
+            "3. AWS Secrets Manager using `password_secret_ref` and the configured AWS region",
+            "",
+            "Run `install-systemd.sh` on the customer node to install the updater and timer.",
+            "",
+        ]
+    )
+
+    return {
+        "dynamic-peer-ip/ddns-config.json": config,
+        "dynamic-peer-ip/update-ddns.sh": update_script,
+        "dynamic-peer-ip/install-systemd.sh": install_script,
+        "dynamic-peer-ip/rpdb-dynamic-peer-ip-update.service": service_text,
+        "dynamic-peer-ip/rpdb-dynamic-peer-ip-update.timer": timer_text,
+        "dynamic-peer-ip/README.md": readme,
+    }
+
+
 def build_customer_artifact_tree(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
     return {
+        "customer": build_customer_device_registry_artifacts(module),
         "muxer": build_muxer_artifacts(module, item),
         "headend": build_headend_artifacts(module),
+        "smartconnect": build_smartconnect_artifacts(module),
     }

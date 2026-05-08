@@ -539,6 +539,103 @@
         }
       }
     },
+    "dynamic_peer_ip_device_registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serial_number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "password_secret_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "table_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serial_number_attribute": {
+          "type": "string",
+          "minLength": 1
+        },
+        "current_ip_attribute": {
+          "type": "string",
+          "minLength": 1
+        },
+        "last_updated_attribute": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "dynamic_peer_ip_reapply": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "deploy_only",
+            "remove_reapply"
+          ]
+        },
+        "update_remote_id_when_equal_to_peer_ip": {
+          "type": "boolean"
+        }
+      }
+    },
+    "dynamic_peer_ip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "device_registry_ddns"
+          ]
+        },
+        "device_registry": {
+          "$ref": "#/$defs/dynamic_peer_ip_device_registry"
+        },
+        "reapply": {
+          "$ref": "#/$defs/dynamic_peer_ip_reapply"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "device_registry"
+            ],
+            "properties": {
+              "device_registry": {
+                "required": [
+                  "serial_number",
+                  "password_secret_ref"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
     "ipsec": {
       "type": "object",
       "additionalProperties": false,
@@ -866,6 +963,9 @@
         },
         "dynamic_provisioning": {
           "$ref": "#/$defs/dynamic_provisioning"
+        },
+        "dynamic_peer_ip": {
+          "$ref": "#/$defs/dynamic_peer_ip"
         },
         "ipsec": {
           "$ref": "#/$defs/ipsec"

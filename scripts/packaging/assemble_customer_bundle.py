@@ -45,8 +45,10 @@ def _resolve_export_inputs(export_dir: Path) -> dict:
     module_path = export_dir / "customer-module.json"
     item_path = export_dir / "customer-ddb-item.json"
     source_path = export_dir / "customer-source.yaml"
+    customer_artifacts_dir = export_dir / "customer-artifacts"
     muxer_dir = export_dir / "muxer"
     headend_dir = export_dir / "headend"
+    smartconnect_dir = export_dir / "smartconnect"
 
     errors = []
     if not export_dir.exists():
@@ -66,8 +68,10 @@ def _resolve_export_inputs(export_dir: Path) -> dict:
         "customer_module": module_path,
         "customer_ddb_item": item_path,
         "customer_source": source_path if source_path.exists() else None,
+        "customer_artifacts_dir": customer_artifacts_dir if customer_artifacts_dir.exists() else None,
         "muxer_dir": muxer_dir if muxer_dir.exists() else None,
         "headend_dir": headend_dir if headend_dir.exists() else None,
+        "smartconnect_dir": smartconnect_dir if smartconnect_dir.exists() else None,
         "export_metadata": metadata_path if metadata_path.exists() else None,
         "export_dir": export_dir,
     }
@@ -84,8 +88,10 @@ def main() -> int:
     parser.add_argument("--customer-module", help="Path to the merged customer module JSON")
     parser.add_argument("--customer-ddb-item", help="Path to the DynamoDB item JSON")
     parser.add_argument("--customer-source", help="Optional path to the source YAML for this customer")
+    parser.add_argument("--customer-artifacts-dir", help="Optional directory containing customer-side DDNS/check-in artifacts")
     parser.add_argument("--muxer-dir", help="Optional directory containing muxer customer artifacts")
     parser.add_argument("--headend-dir", help="Optional directory containing head-end customer artifacts")
+    parser.add_argument("--smartconnect-dir", help="Optional directory containing SmartConnect customer artifacts")
     args = parser.parse_args()
 
     export_inputs = None
@@ -107,6 +113,11 @@ def main() -> int:
         if export_inputs and args.customer_source is None
         else (Path(args.customer_source).resolve() if args.customer_source else None)
     )
+    customer_artifacts_input_dir = (
+        export_inputs["customer_artifacts_dir"]
+        if export_inputs and args.customer_artifacts_dir is None
+        else (Path(args.customer_artifacts_dir).resolve() if args.customer_artifacts_dir else None)
+    )
     muxer_input_dir = (
         export_inputs["muxer_dir"]
         if export_inputs and args.muxer_dir is None
@@ -116,6 +127,11 @@ def main() -> int:
         export_inputs["headend_dir"]
         if export_inputs and args.headend_dir is None
         else (Path(args.headend_dir).resolve() if args.headend_dir else None)
+    )
+    smartconnect_input_dir = (
+        export_inputs["smartconnect_dir"]
+        if export_inputs and args.smartconnect_dir is None
+        else (Path(args.smartconnect_dir).resolve() if args.smartconnect_dir else None)
     )
     customer_name = args.customer_name or (export_inputs["customer_name"] if export_inputs else None)
 
@@ -133,21 +149,26 @@ def main() -> int:
     customer_dir = bundle_dir / "customer"
     muxer_dir = bundle_dir / "muxer"
     headend_dir = bundle_dir / "headend"
+    smartconnect_dir = bundle_dir / "smartconnect"
 
     if bundle_dir.exists():
         shutil.rmtree(bundle_dir)
     customer_dir.mkdir(parents=True, exist_ok=True)
     muxer_dir.mkdir(parents=True, exist_ok=True)
     headend_dir.mkdir(parents=True, exist_ok=True)
+    smartconnect_dir.mkdir(parents=True, exist_ok=True)
 
     _copy_file(customer_module_path, customer_dir / "customer-module.json")
     _copy_file(customer_ddb_item_path, customer_dir / "customer-ddb-item.json")
 
     if customer_source_path:
         _copy_file(customer_source_path, customer_dir / "customer-source.yaml")
+    if customer_artifacts_input_dir:
+        _copy_tree_contents(customer_artifacts_input_dir, customer_dir)
 
     muxer_copied = _copy_tree_contents(muxer_input_dir, muxer_dir) if muxer_input_dir else 0
     headend_copied = _copy_tree_contents(headend_input_dir, headend_dir) if headend_input_dir else 0
+    smartconnect_copied = _copy_tree_contents(smartconnect_input_dir, smartconnect_dir) if smartconnect_input_dir else 0
 
     if muxer_copied == 0:
         _write_placeholder(
@@ -161,6 +182,12 @@ def main() -> int:
             "Headend Artifacts",
             "No head-end artifacts were supplied when this bundle was assembled.",
         )
+    if smartconnect_copied == 0:
+        _write_placeholder(
+            smartconnect_dir / "README.md",
+            "SmartConnect Artifacts",
+            "No SmartConnect artifacts were supplied when this bundle was assembled.",
+        )
 
     metadata = {
         "customer_name": customer_name,
@@ -171,8 +198,10 @@ def main() -> int:
             "customer_module": str(customer_module_path),
             "customer_ddb_item": str(customer_ddb_item_path),
             "customer_source": str(customer_source_path) if customer_source_path else None,
+            "customer_artifacts_dir": str(customer_artifacts_input_dir) if customer_artifacts_input_dir else None,
             "muxer_dir": str(muxer_input_dir) if muxer_input_dir else None,
             "headend_dir": str(headend_input_dir) if headend_input_dir else None,
+            "smartconnect_dir": str(smartconnect_input_dir) if smartconnect_input_dir else None,
         },
     }
     with (bundle_dir / "bundle-metadata.json").open("w", encoding="utf-8", newline="\n") as handle:

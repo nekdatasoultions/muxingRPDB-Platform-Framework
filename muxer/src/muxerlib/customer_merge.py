@@ -70,6 +70,7 @@ def _source_to_module_overrides(source) -> Dict[str, Any]:
             "protocols": customer_raw.get("protocols") or {},
             "natd_rewrite": customer_raw.get("natd_rewrite") or {},
             "dynamic_provisioning": customer_raw.get("dynamic_provisioning") or {},
+            "dynamic_peer_ip": customer_raw.get("dynamic_peer_ip") or {},
             "ipsec": customer_raw.get("ipsec") or {},
             "post_ipsec_nat": customer_raw.get("post_ipsec_nat") or {},
             "outside_nat": customer_raw.get("outside_nat") or {},

@@ -1,0 +1,12 @@
+{
+  "customer_name": "vpn-customer-stage1-15-cust-0007",
+  "event_id": "vpn-customer-stage1-15-cust-0007-udp4500-demo",
+  "initial_udp500_observed": true,
+  "observed_at": "2026-04-21T14:10:00Z",
+  "observed_dport": 4500,
+  "observed_peer": "35.171.133.225",
+  "observed_protocol": "udp",
+  "packet_count": 1,
+  "schema_version": 1,
+  "source": "repo-demo-customer7"
+}

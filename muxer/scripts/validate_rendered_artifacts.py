@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-REQUIRED_ROOTS = ["muxer", "headend"]
+REQUIRED_ROOTS = ["muxer", "headend", "smartconnect"]
 PROTOCOL_FIELD_MAP = {
     "udp500": ("udp500",),
     "udp4500": ("udp4500",),

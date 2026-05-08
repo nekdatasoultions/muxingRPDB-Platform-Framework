@@ -137,6 +137,30 @@ class DynamicProvisioning:
 
 
 @dataclass(frozen=True)
+class DynamicPeerIpDeviceRegistry:
+    serial_number: str = ""
+    password_secret_ref: str = ""
+    table_name: str = ""
+    serial_number_attribute: str = "serialNumber"
+    current_ip_attribute: str = "currentIP"
+    last_updated_attribute: str = "lastUpdated"
+
+
+@dataclass(frozen=True)
+class DynamicPeerIpReapply:
+    mode: str = "deploy_only"
+    update_remote_id_when_equal_to_peer_ip: bool = True
+
+
+@dataclass(frozen=True)
+class DynamicPeerIp:
+    enabled: bool
+    source: str = "device_registry_ddns"
+    device_registry: Optional[DynamicPeerIpDeviceRegistry] = None
+    reapply: Optional[DynamicPeerIpReapply] = None
+
+
+@dataclass(frozen=True)
 class IpsecInitiation:
     mode: str = "bidirectional"
     headend_can_initiate: bool = True
@@ -228,6 +252,7 @@ class Customer:
     protocols: Optional[Protocols] = None
     natd_rewrite: Optional[NatdRewrite] = None
     dynamic_provisioning: Optional[DynamicProvisioning] = None
+    dynamic_peer_ip: Optional[DynamicPeerIp] = None
     ipsec: Optional[Ipsec] = None
     post_ipsec_nat: Optional[PostIpsecNat] = None
     outside_nat: Optional[OutsideNat] = None
@@ -795,6 +820,71 @@ def _normalize_dynamic_provisioning(doc: Dict[str, Any]) -> DynamicProvisioning:
     )
 
 
+def _normalize_dynamic_peer_ip(doc: Dict[str, Any]) -> DynamicPeerIp:
+    source = str(doc.get("source") or "device_registry_ddns").strip()
+    if source != "device_registry_ddns":
+        raise ValueError("customer.dynamic_peer_ip.source must be device_registry_ddns")
+
+    device_registry_doc = doc.get("device_registry") or {}
+    if not isinstance(device_registry_doc, dict):
+        raise ValueError("customer.dynamic_peer_ip.device_registry must be a mapping")
+    enabled = bool(doc.get("enabled"))
+    serial_number = str(device_registry_doc.get("serial_number") or "").strip()
+    password_secret_ref = str(device_registry_doc.get("password_secret_ref") or "").strip()
+    if enabled and not serial_number:
+        raise ValueError(
+            "customer.dynamic_peer_ip.device_registry.serial_number is required when enabled"
+        )
+    if enabled and not password_secret_ref:
+        raise ValueError(
+            "customer.dynamic_peer_ip.device_registry.password_secret_ref is required when enabled"
+        )
+
+    serial_number_attribute = str(
+        device_registry_doc.get("serial_number_attribute") or "serialNumber"
+    ).strip()
+    current_ip_attribute = str(device_registry_doc.get("current_ip_attribute") or "currentIP").strip()
+    last_updated_attribute = str(
+        device_registry_doc.get("last_updated_attribute") or "lastUpdated"
+    ).strip()
+    if not serial_number_attribute:
+        raise ValueError("customer.dynamic_peer_ip.device_registry.serial_number_attribute is required")
+    if not current_ip_attribute:
+        raise ValueError("customer.dynamic_peer_ip.device_registry.current_ip_attribute is required")
+    if not last_updated_attribute:
+        raise ValueError("customer.dynamic_peer_ip.device_registry.last_updated_attribute is required")
+
+    reapply_doc = doc.get("reapply") or {}
+    if not isinstance(reapply_doc, dict):
+        raise ValueError("customer.dynamic_peer_ip.reapply must be a mapping")
+    reapply_mode = str(reapply_doc.get("mode") or "deploy_only").strip()
+    if reapply_mode not in {"deploy_only", "remove_reapply"}:
+        raise ValueError("customer.dynamic_peer_ip.reapply.mode must be deploy_only or remove_reapply")
+
+    return DynamicPeerIp(
+        enabled=enabled,
+        source=source,
+        device_registry=(
+            DynamicPeerIpDeviceRegistry(
+                serial_number=serial_number,
+                password_secret_ref=password_secret_ref,
+                table_name=str(device_registry_doc.get("table_name") or "").strip(),
+                serial_number_attribute=serial_number_attribute,
+                current_ip_attribute=current_ip_attribute,
+                last_updated_attribute=last_updated_attribute,
+            )
+            if device_registry_doc or enabled
+            else None
+        ),
+        reapply=DynamicPeerIpReapply(
+            mode=reapply_mode,
+            update_remote_id_when_equal_to_peer_ip=bool(
+                reapply_doc.get("update_remote_id_when_equal_to_peer_ip", True)
+            ),
+        ),
+    )
+
+
 # Parse a raw customer source document into the typed RPDB customer model.
 # This is the main normalization step before defaults/class merge happens.
 def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
@@ -813,6 +903,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     protocols = customer.get("protocols") or {}
     natd_rewrite = customer.get("natd_rewrite") or {}
     dynamic_provisioning = customer.get("dynamic_provisioning")
+    dynamic_peer_ip = customer.get("dynamic_peer_ip")
     ipsec = customer.get("ipsec") or {}
     post_ipsec_nat = customer.get("post_ipsec_nat")
     outside_nat = customer.get("outside_nat")
@@ -906,6 +997,11 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
             dynamic_provisioning=(
                 _normalize_dynamic_provisioning(dynamic_provisioning)
                 if isinstance(dynamic_provisioning, dict)
+                else None
+            ),
+            dynamic_peer_ip=(
+                _normalize_dynamic_peer_ip(dynamic_peer_ip)
+                if isinstance(dynamic_peer_ip, dict)
                 else None
             ),
             ipsec=(

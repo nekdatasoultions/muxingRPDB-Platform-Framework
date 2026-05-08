@@ -12,6 +12,7 @@
     "artifacts",
     "backups",
     "nat_t_watcher",
+    "dynamic_peer_ip_watcher",
     "customer_requests",
     "owners"
   ],
@@ -136,6 +137,15 @@
             }
           }
         },
+        "smartconnect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gateway": {
+              "$ref": "#/$defs/target"
+            }
+          }
+        },
         "cgnat": {
           "type": "object",
           "additionalProperties": false,
@@ -236,6 +246,9 @@
           "$ref": "#/$defs/non_empty_string"
         },
         "cgnat_headend": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "smartconnect_gateway": {
           "$ref": "#/$defs/non_empty_string"
         },
         "cgnat_isp_gateways": {
@@ -343,6 +356,82 @@
         }
       }
     },
+    "dynamic_peer_ip_watcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "state_root",
+        "output_root",
+        "package_root"
+      ],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "dynamodb_table",
+                "json_file"
+              ]
+            },
+            "region": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "table_name": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "path": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "serial_number_attribute": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "current_ip_attribute": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "last_updated_attribute": {
+              "$ref": "#/$defs/non_empty_string"
+            }
+          }
+        },
+        "state_root": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "output_root": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "package_root": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requires_approval": {
+              "type": "boolean"
+            },
+            "run_provisioning": {
+              "type": "boolean"
+            },
+            "follow": {
+              "type": "boolean"
+            },
+            "poll_interval_seconds": {
+              "type": "number",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
     "customer_requests": {
       "type": "object",
       "additionalProperties": false,
@@ -410,6 +499,7 @@
             "muxer",
             "nat-headend",
             "non-nat-headend",
+            "smartconnect-gateway",
             "cgnat-headend",
             "cgnat-isp-gateway"
           ]

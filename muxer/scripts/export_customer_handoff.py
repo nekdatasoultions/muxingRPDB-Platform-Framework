@@ -86,8 +86,16 @@ def main() -> int:
         help="Optional directory containing customer-scoped muxer artifacts",
     )
     parser.add_argument(
+        "--customer-dir",
+        help="Optional directory containing customer-side DDNS/check-in artifacts",
+    )
+    parser.add_argument(
         "--headend-dir",
         help="Optional directory containing customer-scoped head-end artifacts",
+    )
+    parser.add_argument(
+        "--smartconnect-dir",
+        help="Optional directory containing customer-scoped SmartConnect routing artifacts",
     )
     args = parser.parse_args()
 
@@ -124,13 +132,17 @@ def main() -> int:
 
     # Create the export directory fresh so repeated runs stay deterministic.
     export_dir = Path(args.export_dir).resolve()
+    customer_artifacts_dir = export_dir / "customer-artifacts"
     muxer_dir = export_dir / "muxer"
     headend_dir = export_dir / "headend"
+    smartconnect_dir = export_dir / "smartconnect"
     if export_dir.exists():
         shutil.rmtree(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
+    customer_artifacts_dir.mkdir(parents=True, exist_ok=True)
     muxer_dir.mkdir(parents=True, exist_ok=True)
     headend_dir.mkdir(parents=True, exist_ok=True)
+    smartconnect_dir.mkdir(parents=True, exist_ok=True)
 
     # Write the required export files.
     (export_dir / "customer-module.json").write_text(
@@ -144,13 +156,26 @@ def main() -> int:
     shutil.copy2(source_path, export_dir / "customer-source.yaml")
 
     # Copy optional muxer/head-end artifact directories when available.
+    customer_copied = (
+        _copy_tree_contents(Path(args.customer_dir).resolve(), customer_artifacts_dir)
+        if args.customer_dir
+        else 0
+    )
     muxer_copied = _copy_tree_contents(Path(args.muxer_dir).resolve(), muxer_dir) if args.muxer_dir else 0
     headend_copied = _copy_tree_contents(Path(args.headend_dir).resolve(), headend_dir) if args.headend_dir else 0
+    smartconnect_copied = (
+        _copy_tree_contents(Path(args.smartconnect_dir).resolve(), smartconnect_dir)
+        if args.smartconnect_dir
+        else 0
+    )
 
     # When explicit artifact directories are not supplied, generate concrete
     # customer-scoped intent files so the handoff export carries real content.
     artifact_tree = build_customer_artifact_tree(module, item)
 
+    if customer_copied == 0:
+        for name, payload in artifact_tree["customer"].items():
+            _write_artifact(customer_artifacts_dir / name, payload)
     if muxer_copied == 0:
         for name, payload in artifact_tree["muxer"].items():
             _write_artifact(muxer_dir / name, payload)
@@ -167,6 +192,14 @@ def main() -> int:
             "Headend Artifacts",
             "This directory contains framework-generated head-end intent artifacts for deployment review.",
         )
+    if smartconnect_copied == 0:
+        for name, payload in artifact_tree["smartconnect"].items():
+            _write_artifact(smartconnect_dir / name, payload)
+        _write_placeholder(
+            smartconnect_dir / "README.md",
+            "SmartConnect Artifacts",
+            "This directory contains framework-generated SmartConnect route intent artifacts for deployment review.",
+        )
 
     metadata = {
         "customer_name": source.customer.name,
@@ -179,12 +212,24 @@ def main() -> int:
             "source_ref": source_ref,
         },
         "artifact_inputs": {
+            "customer_dir": str(Path(args.customer_dir).resolve()) if args.customer_dir else None,
             "muxer_dir": str(Path(args.muxer_dir).resolve()) if args.muxer_dir else None,
             "headend_dir": str(Path(args.headend_dir).resolve()) if args.headend_dir else None,
+            "smartconnect_dir": str(Path(args.smartconnect_dir).resolve()) if args.smartconnect_dir else None,
         },
         "generated_artifacts": {
+            "customer": sorted(
+                str(path.relative_to(customer_artifacts_dir))
+                for path in customer_artifacts_dir.rglob("*")
+                if path.is_file()
+            ),
             "muxer": sorted(str(path.relative_to(muxer_dir)) for path in muxer_dir.rglob("*") if path.is_file()),
             "headend": sorted(str(path.relative_to(headend_dir)) for path in headend_dir.rglob("*") if path.is_file()),
+            "smartconnect": sorted(
+                str(path.relative_to(smartconnect_dir))
+                for path in smartconnect_dir.rglob("*")
+                if path.is_file()
+            ),
         },
     }
     (export_dir / "export-metadata.json").write_text(

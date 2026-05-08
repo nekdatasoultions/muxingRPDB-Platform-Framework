@@ -152,6 +152,24 @@ nat_t_watcher:
     mode: ssh_muxer
     local_copy: build/nat-t-watcher/synced/muxer-events.jsonl
 
+dynamic_peer_ip_watcher:
+  source:
+    type: dynamodb_table
+    region: us-east-1
+    table_name: prod-device-registry
+    serial_number_attribute: serialNumber
+    current_ip_attribute: currentIP
+    last_updated_attribute: lastUpdated
+  state_root: build/dynamic-peer-ip-watcher/state
+  output_root: build/dynamic-peer-ip-watcher/out
+  package_root: build/dynamic-peer-ip-watcher/packages
+  automation:
+    enabled: true
+    requires_approval: true
+    run_provisioning: true
+    follow: true
+    poll_interval_seconds: 30
+
 customer_requests:
   allowed_roots:
     - muxer/config/customer-requests/migrated

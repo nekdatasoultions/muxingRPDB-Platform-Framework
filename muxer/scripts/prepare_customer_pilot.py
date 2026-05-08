@@ -176,6 +176,11 @@ def _staged_headend_root(repo_root: Path, package_dir: Path) -> Path:
     return repo_root / "build" / "pilot-he" / digest
 
 
+def _staged_smartconnect_root(repo_root: Path, package_dir: Path) -> Path:
+    digest = hashlib.sha1(str(package_dir.resolve()).encode("utf-8")).hexdigest()[:12]
+    return repo_root / "build" / "pilot-sc" / digest
+
+
 def _run_step(
     name: str,
     command: list[str],
@@ -223,8 +228,11 @@ def _run_double_verification(
     steps: list[dict[str, Any]] = []
     python = sys.executable
     headend_root = _staged_headend_root(repo_root, bundle_dir.parent)
+    smartconnect_root = _staged_smartconnect_root(repo_root, bundle_dir.parent)
     if headend_root.exists():
         shutil.rmtree(headend_root)
+    if smartconnect_root.exists():
+        shutil.rmtree(smartconnect_root)
 
     _run_step(
         "validate_customer_source",
@@ -271,6 +279,8 @@ def _run_double_verification(
             str(render_dir / "muxer"),
             "--headend-dir",
             str(render_dir / "headend"),
+            "--smartconnect-dir",
+            str(render_dir / "smartconnect"),
             "--source-ref",
             str(source_path),
         ],
@@ -327,6 +337,13 @@ def _run_double_verification(
         steps=steps,
         expect_json=True,
     )
+    smartconnect_bundle_validation = _run_step(
+        "validate_smartconnect_bundle",
+        [python, "scripts/deployment/validate_smartconnect_customer.py", "--bundle-dir", str(bundle_dir), "--json"],
+        cwd=repo_root,
+        steps=steps,
+        expect_json=True,
+    )
     _run_step(
         "apply_headend_customer_staged",
         [
@@ -355,6 +372,34 @@ def _run_double_verification(
         steps=steps,
         expect_json=True,
     )
+    _run_step(
+        "apply_smartconnect_customer_staged",
+        [
+            python,
+            "scripts/deployment/apply_smartconnect_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--smartconnect-root",
+            str(smartconnect_root),
+        ],
+        cwd=repo_root,
+        steps=steps,
+    )
+    installed_smartconnect_validation = _run_step(
+        "validate_installed_smartconnect_staged",
+        [
+            python,
+            "scripts/deployment/validate_smartconnect_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--smartconnect-root",
+            str(smartconnect_root),
+            "--json",
+        ],
+        cwd=repo_root,
+        steps=steps,
+        expect_json=True,
+    )
     removal_report = _run_step(
         "remove_headend_customer_staged",
         [
@@ -364,6 +409,21 @@ def _run_double_verification(
             str(bundle_dir),
             "--headend-root",
             str(headend_root),
+            "--json",
+        ],
+        cwd=repo_root,
+        steps=steps,
+        expect_json=True,
+    )
+    smartconnect_removal_report = _run_step(
+        "remove_smartconnect_customer_staged",
+        [
+            python,
+            "scripts/deployment/remove_smartconnect_customer.py",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--smartconnect-root",
+            str(smartconnect_root),
             "--json",
         ],
         cwd=repo_root,
@@ -384,14 +444,18 @@ def _run_double_verification(
             "bound": str(bound_dir),
             "bundle": str(bundle_dir),
             "staged_headend_root": str(headend_root),
+            "staged_smartconnect_root": str(smartconnect_root),
         },
         "reports": {
             "render_validation": render_validation,
             "bound_validation": bound_validation,
             "bundle_validation": bundle_validation,
             "headend_bundle_validation": headend_bundle_validation,
+            "smartconnect_bundle_validation": smartconnect_bundle_validation,
             "installed_headend_validation": installed_headend_validation,
+            "installed_smartconnect_validation": installed_smartconnect_validation,
             "headend_removal": removal_report,
+            "smartconnect_removal": smartconnect_removal_report,
         },
         "steps": steps,
     }

@@ -17,6 +17,15 @@ customer:
       - 10.129.3.133/32
   transport:
     tunnel_mtu: 1436
+  dynamic_peer_ip:
+    enabled: true
+    source: device_registry_ddns
+    device_registry:
+      serial_number: vpn-customer-stage1-15-cust-0007
+      password_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0007/dynamic-peer-ip-password
+    reapply:
+      mode: remove_reapply
+      update_remote_id_when_equal_to_peer_ip: false
   ipsec:
     auto: start
     remote_id: 35.171.133.225
