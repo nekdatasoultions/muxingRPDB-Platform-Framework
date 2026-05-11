@@ -1,31 +1,21 @@
 schema_version: 1
-
 customer:
   name: vpn-customer-stage1-15-cust-0003
-  customer_class: nat
   peer:
     public_ip: 3.215.115.178
     remote_id: 3.215.115.178
     psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0003/psk
   selectors:
     local_subnets:
-      - 172.31.54.39/32
-      - 194.138.36.80/28
+    - 172.31.54.39/32
+    - 172.31.34.79/32
+    - 194.138.36.80/28
     remote_subnets:
-      - 10.129.3.154/32
+    - 10.129.3.129/32
     remote_host_cidrs:
-      - 10.129.3.154/32
-  backend:
-    cluster: nat
-    assignment: active-a
-    role: nat-active
-  protocols:
-    udp500: true
-    udp4500: true
-    esp50: true
-    force_rewrite_4500_to_500: false
-  natd_rewrite:
-    enabled: false
+    - 10.129.3.129/32
+  transport:
+    tunnel_mtu: 1436
   dynamic_peer_ip:
     enabled: true
     source: device_registry_ddns
@@ -37,21 +27,37 @@ customer:
       update_remote_id_when_equal_to_peer_ip: false
   ipsec:
     auto: start
-    local_id: 54.204.221.89
     remote_id: 3.215.115.178
-    ike: aes256-sha2_256;modp4096,aes256-sha2_256;modp2048
-    esp: aes256-sha2_256
+    ike_version: ikev2
+    ike_policies:
+    - aes256-sha256-modp2048
+    - aes256-sha256-modp4096
+    esp_policies:
+    - aes256-sha256-modp2048
+    - aes256-sha256-modp4096
     dpddelay: 10s
     dpdtimeout: 120s
     dpdaction: restart
+    replay_protection: true
+    pfs_required: false
+    pfs_groups:
+    - modp2048
+    - modp4096
+    mobike: false
+    fragmentation: true
+    clear_df_bit: true
+    path_mtu: 1400
   post_ipsec_nat:
     enabled: true
     mode: netmap
     translated_subnets:
-      - 172.30.0.64/27
+    - 172.30.0.64/27
     real_subnets:
-      - 10.129.3.154/32
+    - 10.129.3.129/32
     core_subnets:
-      - 172.31.54.39/32
-      - 194.138.36.80/28
+    - 172.31.54.39/32
+    - 194.138.36.80/28
     tcp_mss_clamp: 1360
+  outside_nat:
+    enabled: false
+    mode: disabled

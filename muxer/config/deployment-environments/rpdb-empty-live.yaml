@@ -72,6 +72,18 @@ targets:
           private_ip: 172.31.141.223
         access:
           method: ssh
+  smartconnect:
+    gateway:
+      name: SmartConnectGateway3
+      role: smartconnect-gateway
+      rpdb_managed: true
+      selector:
+        type: instance_id
+        value: i-0c1d3acaa37070ed0
+        private_ip: 172.31.34.106
+        public_ip: 52.21.112.55
+      access:
+        method: ssh
   cgnat:
     headend:
       active:
@@ -126,6 +138,7 @@ backups:
   muxer: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/muxer
   nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/nat-headend
   non_nat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/non-nat-headend
+  smartconnect_gateway: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/smartconnect-gateway
   cgnat_headend: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-headend
   cgnat_isp_gateways:
     isp-cgnat-router-1: s3://baines-networking/Code/muxingRPDB-Platform-Framework/empty-platform/rpdb-empty/backups/baseline/cgnat-isp-gateways/isp-cgnat-router-1
@@ -174,8 +187,6 @@ customer_requests:
   allowed_roots:
     - muxer/config/customer-requests/migrated
     - muxer/config/customer-requests/examples
-  blocked_customers:
-    - vpn-customer-stage1-15-cust-0003
 
 owners:
   validation: rpdb-platform-validation

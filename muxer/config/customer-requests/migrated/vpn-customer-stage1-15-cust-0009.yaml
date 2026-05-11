@@ -1,33 +1,33 @@
 schema_version: 1
 customer:
-  name: vpn-customer-stage1-15-cust-0007
+  name: vpn-customer-stage1-15-cust-0009
   peer:
-    public_ip: 35.171.133.225
-    remote_id: 35.171.133.225
-    psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0007/psk
+    public_ip: 98.91.185.196
+    remote_id: 98.91.185.196
+    psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0009/psk
   selectors:
     local_subnets:
     - 172.31.54.39/32
     - 172.31.34.79/32
     - 194.138.36.80/28
     remote_subnets:
-    - 10.129.3.133/32
+    - 10.129.3.135/32
     remote_host_cidrs:
-    - 10.129.3.133/32
+    - 10.129.3.135/32
   transport:
     tunnel_mtu: 1436
   dynamic_peer_ip:
     enabled: true
     source: device_registry_ddns
     device_registry:
-      serial_number: vpn-customer-stage1-15-cust-0007
-      password_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0007/dynamic-peer-ip-password
+      serial_number: vpn-customer-stage1-15-cust-0009
+      password_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0009/dynamic-peer-ip-password
     reapply:
       mode: remove_reapply
       update_remote_id_when_equal_to_peer_ip: false
   ipsec:
     auto: start
-    remote_id: 35.171.133.225
+    remote_id: 98.91.185.196
     ike_version: ikev2
     ike_policies:
     - aes256-sha256-modp2048
@@ -51,9 +51,9 @@ customer:
     enabled: true
     mode: netmap
     translated_subnets:
-    - 172.30.0.192/27
+    - 172.30.1.0/27
     real_subnets:
-    - 10.129.3.133/32
+    - 10.129.3.135/32
     core_subnets:
     - 172.31.54.39/32
     - 194.138.36.80/28

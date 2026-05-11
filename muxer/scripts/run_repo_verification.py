@@ -862,7 +862,9 @@ def main() -> int:
             encoding="utf-8"
         )
     )
-    blocked_environment["customer_requests"]["blocked_customers"].append("phase2-blocked-smoke")
+    blocked_environment.setdefault("customer_requests", {}).setdefault("blocked_customers", []).append(
+        "phase2-blocked-smoke"
+    )
     blocked_environment_path = deploy_root / "phase2-blocked-environment.yaml"
     _write_yaml(blocked_environment_path, blocked_environment)
     blocked_request = yaml.safe_load(

@@ -258,14 +258,11 @@ customer_requests:
   allowed_roots:
     - muxer/config/customer-requests/migrated
     - muxer/config/customer-requests/examples
-  blocked_customers:
-    - legacy-cust0003
-    - vpn-customer-stage1-15-cust-0003
 ```
 
-Demo point: the environment contract is the safety boundary. It blocks
-disallowed customers, requires RPDB-managed targets, and requires explicit
-approval before live apply.
+Demo point: the environment contract is the safety boundary. It can optionally
+block disallowed customers, requires RPDB-managed targets, and requires
+explicit approval before live apply.
 
 ## One-Command Deploy Orchestrator
 

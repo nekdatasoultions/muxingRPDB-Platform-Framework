@@ -1,5 +1,5 @@
 [Unit]
-Description=RPDB Dynamic Peer IP Watcher
+Description=RPDB Jump Host Customer Route Sync
 After=network-online.target
 Wants=network-online.target
 
@@ -9,9 +9,9 @@ User=ec2-user
 Group=ec2-user
 WorkingDirectory=/home/ec2-user/rpdb
 Environment=RPDB_ENVIRONMENT=rpdb-empty-live
-ExecStart=/usr/bin/python3 scripts/customers/run_dynamic_peer_ip_watcher.py --environment ${RPDB_ENVIRONMENT} --follow --approve
+ExecStart=/usr/bin/python3 scripts/customers/sync_jump_host_customer_routes.py --environment ${RPDB_ENVIRONMENT} --follow
 Restart=always
-RestartSec=10
+RestartSec=15
 
 [Install]
 WantedBy=multi-user.target

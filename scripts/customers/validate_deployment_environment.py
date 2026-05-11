@@ -19,9 +19,7 @@ from muxerlib.customer_merge import load_yaml_file
 
 ENVIRONMENT_ROOT = REPO_ROOT / "muxer" / "config" / "deployment-environments"
 DEFAULT_SCHEMA = REPO_ROOT / "muxer" / "config" / "schema" / "deployment-environment.schema.json"
-REQUIRED_BLOCKED_CUSTOMERS = {
-    "vpn-customer-stage1-15-cust-0003",
-}
+REQUIRED_BLOCKED_CUSTOMERS: set[str] = set()
 FORBIDDEN_TARGET_MARKERS = (
     "muxer3",
     "e:\\code1\\muxer3",
@@ -139,12 +137,13 @@ def _validate_guardrails(report: dict[str, Any], document: dict[str, Any], *, al
         for customer in customer_requests.get("blocked_customers") or []
         if str(customer).strip()
     }
-    missing_blocked = sorted(REQUIRED_BLOCKED_CUSTOMERS - blocked_customers)
-    if missing_blocked:
-        report["errors"].append(
-            "blocked_customers missing required blocked customer(s): "
-            + ", ".join(missing_blocked)
-        )
+    if REQUIRED_BLOCKED_CUSTOMERS:
+        missing_blocked = sorted(REQUIRED_BLOCKED_CUSTOMERS - blocked_customers)
+        if missing_blocked:
+            report["errors"].append(
+                "blocked_customers missing required blocked customer(s): "
+                + ", ".join(missing_blocked)
+            )
 
     for idx, root in enumerate(customer_requests.get("allowed_roots") or []):
         normalized_root = str(root).strip().lower()

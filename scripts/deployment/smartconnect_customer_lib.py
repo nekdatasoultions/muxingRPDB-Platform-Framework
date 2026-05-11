@@ -73,7 +73,11 @@ def _executable_lines(text: str) -> list[str]:
 
 def _expected_route_cidrs(customer_module: dict[str, Any]) -> list[str]:
     selectors = customer_module.get("selectors") or {}
-    route_cidrs = selectors.get("remote_host_cidrs") or selectors.get("remote_subnets") or []
+    post_ipsec_nat = customer_module.get("post_ipsec_nat") or {}
+    if bool(post_ipsec_nat.get("enabled")):
+        route_cidrs = post_ipsec_nat.get("translated_subnets") or []
+    else:
+        route_cidrs = selectors.get("remote_host_cidrs") or []
     return [str(value).strip() for value in route_cidrs if str(value).strip()]
 
 

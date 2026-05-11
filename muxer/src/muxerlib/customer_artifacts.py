@@ -1608,21 +1608,26 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     }
 
 
-def _smartconnect_route_cidrs(selectors: Dict[str, Any]) -> List[str]:
-    routed = selectors.get("remote_host_cidrs") or selectors.get("remote_subnets") or []
+def _smartconnect_route_scope(module: Dict[str, Any]) -> Tuple[List[str], str]:
+    selectors = module.get("selectors") or {}
+    post_ipsec_nat = module.get("post_ipsec_nat") or {}
     values: List[str] = []
-    for value in routed:
+
+    if bool(post_ipsec_nat.get("enabled")):
+        for value in post_ipsec_nat.get("translated_subnets") or []:
+            _append_unique(values, value)
+        return values, "post_ipsec_nat.translated_subnets"
+
+    for value in selectors.get("remote_host_cidrs") or []:
         _append_unique(values, value)
-    return values
+    return values, "remote_host_cidrs"
 
 
 def build_smartconnect_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     customer = module.get("customer") or {}
-    selectors = module.get("selectors") or {}
     backend = module.get("backend") or {}
     customer_name = str(customer.get("name") or "").strip()
-    route_cidrs = _smartconnect_route_cidrs(selectors)
-    cidr_source = "remote_host_cidrs" if selectors.get("remote_host_cidrs") else "remote_subnets"
+    route_cidrs, cidr_source = _smartconnect_route_scope(module)
     route_table = _placeholder("SMARTCONNECT_ROUTE_TABLE")
     route_device = _placeholder("SMARTCONNECT_ROUTE_DEV")
     next_hop = _placeholder("HEADEND_CORE_IP")

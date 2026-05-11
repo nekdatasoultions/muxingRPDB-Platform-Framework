@@ -436,8 +436,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "allowed_roots",
-        "blocked_customers"
+        "allowed_roots"
       ],
       "properties": {
         "allowed_roots": {
@@ -450,7 +449,6 @@
         },
         "blocked_customers": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/non_empty_string"
           },

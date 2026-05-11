@@ -9,6 +9,7 @@ customer:
   selectors:
     local_subnets:
       - 172.31.54.39/32
+      - 172.31.34.79/32
       - 194.138.36.80/28
       - 172.30.0.90/32
     remote_subnets:
