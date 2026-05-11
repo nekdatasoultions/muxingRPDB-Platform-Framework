@@ -645,6 +645,7 @@ def main() -> int:
             ]
             if observation:
                 command.extend(["--observation", str(observation)])
+            command.extend(["--replace-customer", customer_name])
             for root in _default_existing_source_roots():
                 command.extend(["--existing-source-root", str(root)])
             if live_existing_root is not None:
