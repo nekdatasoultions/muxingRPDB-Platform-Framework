@@ -1633,6 +1633,88 @@ def _record_remote_result(
     )
 
 
+def _smartconnect_remote_validate_command(
+    *,
+    remote_state_json: str,
+    remote_route_intent: str,
+    remote_master_apply_script: str,
+) -> str:
+    python_program = f"""python3 - <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+state_path = {remote_state_json!r}
+intent_path = {remote_route_intent!r}
+apply_script = {remote_master_apply_script!r}
+
+errors = []
+details = {{}}
+
+for path in (state_path, intent_path, apply_script):
+    proc = subprocess.run(["test", "-f", path], capture_output=True, text=True)
+    if proc.returncode != 0:
+        errors.append(f"missing required SmartConnect path: {{path}}")
+
+if not errors:
+    with open(state_path, encoding="utf-8") as handle:
+        state = json.load(handle)
+    with open(intent_path, encoding="utf-8") as handle:
+        intent = json.load(handle)
+
+    route_table = str(intent.get("route_table") or "").strip()
+    route_device = str(intent.get("route_device") or "").strip()
+    next_hop = str(intent.get("next_hop") or "").strip()
+    route_cidrs = [str(value).strip() for value in (intent.get("customer_route_cidrs") or []) if str(value).strip()]
+    details.update({{
+        "route_table": route_table,
+        "route_device": route_device,
+        "next_hop": next_hop,
+        "customer_route_cidrs": route_cidrs,
+        "customer_route_cidrs_source": intent.get("customer_route_cidrs_source"),
+        "headend_binding": intent.get("headend_binding"),
+        "state": state,
+    }})
+
+    if not route_table:
+        errors.append("route_intent missing route_table")
+    if not route_device:
+        errors.append("route_intent missing route_device")
+    if not next_hop:
+        errors.append("route_intent missing next_hop")
+
+    for cidr in route_cidrs:
+        network = ipaddress.ip_network(cidr, strict=False)
+        expected_dst = str(network.network_address) if network.prefixlen == network.max_prefixlen else network.with_prefixlen
+        proc = subprocess.run(
+            ["ip", "route", "show", "table", route_table, cidr],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        details.setdefault("kernel_routes", {{}})[cidr] = lines
+        if proc.returncode != 0 or not lines:
+            errors.append(f"missing kernel route for {{cidr}} in table {{route_table}}")
+            continue
+        expected_tokens = [expected_dst, "via", next_hop, "dev", route_device]
+        if not any(all(token in line for token in expected_tokens) for line in lines):
+            errors.append(
+                f"kernel route for {{cidr}} does not point to via {{next_hop}} dev {{route_device}}: {{lines}}"
+            )
+
+payload = {{
+    "valid": not errors,
+    "errors": errors,
+    "details": details,
+}}
+print(json.dumps(payload, indent=2, sort_keys=True))
+sys.exit(1 if errors else 0)
+PY"""
+    return _sudo_shell(python_program)
+
+
 def _apply_remote_component(
     journal: list[dict[str, Any]],
     *,
@@ -1649,6 +1731,7 @@ def _apply_remote_component(
     remote_cleanup_paths: list[str],
     remote_cleanup_files: list[str],
     remote_name: str,
+    remote_validate_command: str | None = None,
 ) -> dict[str, Any]:
     copy_result = copy_paths_to_remote_root(
         context=context,
@@ -1707,7 +1790,8 @@ def _apply_remote_component(
         context=context,
         target_instance_id=target_instance_id,
         via_bastion=via_bastion,
-        remote_command=_sudo_shell("; ".join(f"test -f {shlex.quote(path)}" for path in remote_checks)),
+        remote_command=remote_validate_command
+        or _sudo_shell("; ".join(f"test -f {shlex.quote(path)}" for path in remote_checks)),
     )
     _record_remote_result(
         journal,
@@ -2172,6 +2256,7 @@ def execute_ssh_live_apply(
         smartconnect_remote = None
         if smartconnect_prepared is not None and smartconnect_root is not None and smartconnect_instance_id:
             smartconnect_customer_root = Path(smartconnect_prepared["apply"]["state_json"]).resolve().parent
+            smartconnect_remote_root = _remote_path(smartconnect_root, smartconnect_customer_root)
             smartconnect_remote = _apply_remote_component(
                 journal,
                 context=context,
@@ -2192,6 +2277,13 @@ def execute_ssh_live_apply(
                 remote_cleanup_paths=[_remote_path(smartconnect_root, smartconnect_customer_root)],
                 remote_cleanup_files=[],
                 remote_name=f"{customer_name}-smartconnect",
+                remote_validate_command=_smartconnect_remote_validate_command(
+                    remote_state_json=_remote_path(smartconnect_root, smartconnect_prepared["apply"]["state_json"]),
+                    remote_route_intent=f"{smartconnect_remote_root}/routing/route-intent.json",
+                    remote_master_apply_script=_remote_path(
+                        smartconnect_root, smartconnect_prepared["apply"]["master_apply_script"]
+                    ),
+                ),
             )
             if not rollback_preexisting_remote_customer:
                 rollback_steps.append(smartconnect_remote["rollback"])

@@ -7,6 +7,7 @@ import argparse
 import ipaddress
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -143,6 +144,44 @@ def _environment_watcher_policy(repo_root: Path, environment: str | None) -> dic
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _run_token(observed_at: str, idempotency_key: str) -> str:
+    parsed = _parse_event_time(observed_at) or datetime.now(timezone.utc)
+    return f"{parsed.strftime('%Y%m%dT%H%M%SZ')}-{idempotency_key[:12]}"
+
+
+def _write_latest_run_manifest(
+    *,
+    customer_root: Path,
+    run_dir: Path,
+    observation_path: Path,
+    idempotency_key: str,
+    provisioning: dict[str, Any] | None,
+) -> Path:
+    execution_plan = run_dir / "execution-plan.json"
+    latest = {
+        "schema_version": 1,
+        "customer_root": str(customer_root),
+        "run_dir": str(run_dir),
+        "execution_plan": str(execution_plan) if execution_plan.exists() else None,
+        "observation": str(observation_path),
+        "idempotency_key": idempotency_key,
+        "generated_at": _utc_now(),
+        "provisioning": {
+            "mode": (provisioning or {}).get("mode"),
+            "returncode": (provisioning or {}).get("returncode"),
+            "execution_plan": (provisioning or {}).get("execution_plan"),
+            "status": (((provisioning or {}).get("json") or {}).get("status")),
+            "approved": (((provisioning or {}).get("json") or {}).get("approved")),
+            "live_apply": (((provisioning or {}).get("json") or {}).get("live_apply")),
+        },
+    }
+    latest_path = customer_root / "latest-run.json"
+    _write_json(latest_path, latest)
+    if execution_plan.exists():
+        shutil.copy2(execution_plan, customer_root / "execution-plan.json")
+    return latest_path
 
 
 def _discover_request_paths(paths: Iterable[Path], roots: Iterable[Path]) -> list[Path]:
@@ -355,14 +394,13 @@ def _run_customer_flow(
     repo_root: Path,
     watch: CustomerWatch,
     observation_path: Path,
-    package_root: Path,
+    output_dir: Path,
     deployment_environment: str | None,
     approve: bool,
     promotion_mode: str,
     skip_if_already_nat: bool,
     allow_direct_nat_apply_if_missing: bool,
 ) -> dict[str, Any]:
-    output_dir = package_root / watch.name
     pre_promotion_remove: dict[str, Any] | None = None
     if deployment_environment:
         if promotion_mode == "remove_reapply":
@@ -434,6 +472,8 @@ def _run_customer_flow(
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "json": parsed,
+        "output_dir": str(output_dir),
+        "execution_plan": str(output_dir / "execution-plan.json"),
         "mode": "deploy_customer" if deployment_environment else "provision_customer_end_to_end",
         "pre_promotion_remove": pre_promotion_remove,
     }
@@ -710,17 +750,26 @@ def _process_events(
             planned_keys.add(idempotency_key)
             cstate.setdefault("planned_idempotency_keys", []).append(idempotency_key)
             provisioning: dict[str, Any] | None = None
+            customer_package_root = package_root / watch.name
+            run_dir = customer_package_root / "runs" / _run_token(observed_at, idempotency_key)
             if run_provisioning:
                 provisioning = _run_customer_flow(
                     repo_root=repo_root,
                     watch=watch,
                     observation_path=observation_path,
-                    package_root=package_root,
+                    output_dir=run_dir,
                     deployment_environment=deployment_environment,
                     approve=approve,
                     promotion_mode=promotion_mode,
                     skip_if_already_nat=skip_if_already_nat,
                     allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
+                )
+                latest_run_manifest = _write_latest_run_manifest(
+                    customer_root=customer_package_root,
+                    run_dir=run_dir,
+                    observation_path=observation_path,
+                    idempotency_key=idempotency_key,
+                    provisioning=provisioning,
                 )
                 if _provisioning_failed(provisioning):
                     _remove_planned_idempotency_key(
@@ -735,6 +784,8 @@ def _process_events(
                     "idempotency_key": idempotency_key,
                     "observation": str(observation_path),
                     "run_provisioning": run_provisioning,
+                    "run_dir": str(run_dir),
+                    "latest_run_manifest": str(latest_run_manifest) if run_provisioning else None,
                     "provisioning": provisioning,
                 }
             )
