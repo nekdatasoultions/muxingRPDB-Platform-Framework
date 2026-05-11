@@ -184,6 +184,34 @@ def _write_latest_run_manifest(
     return latest_path
 
 
+def _load_previous_latest_run(customer_root: Path) -> dict[str, Any]:
+    latest_path = customer_root / "latest-run.json"
+    if not latest_path.exists():
+        return {}
+    try:
+        return json.loads(latest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _planned_observation_needs_approved_retry(
+    *,
+    customer_root: Path,
+    idempotency_key: str,
+    approve: bool,
+    run_provisioning: bool,
+) -> bool:
+    if not approve or not run_provisioning:
+        return False
+    latest = _load_previous_latest_run(customer_root)
+    if str(latest.get("idempotency_key") or "") != idempotency_key:
+        return False
+    provisioning = latest.get("provisioning") or {}
+    status = str(provisioning.get("status") or "").strip().lower()
+    live_apply = bool(provisioning.get("live_apply"))
+    return status == "planned" and not live_apply
+
+
 def _discover_request_paths(paths: Iterable[Path], roots: Iterable[Path]) -> list[Path]:
     discovered: dict[str, Path] = {}
     for path in paths:
@@ -716,6 +744,8 @@ def _process_events(
             )
             idempotency_key = build_nat_t_observation_idempotency_key(observation)
             observation_path = observations_dir / watch.name / f"{idempotency_key[:12]}.json"
+            customer_package_root = package_root / watch.name
+            retry_planned_observation = False
             if idempotency_key in planned_keys:
                 if not observation_path.exists():
                     _remove_planned_idempotency_key(
@@ -723,6 +753,13 @@ def _process_events(
                         customer_state=cstate,
                         idempotency_key=idempotency_key,
                     )
+                elif _planned_observation_needs_approved_retry(
+                    customer_root=customer_package_root,
+                    idempotency_key=idempotency_key,
+                    approve=approve,
+                    run_provisioning=run_provisioning,
+                ):
+                    retry_planned_observation = True
                 else:
                     ignored.append(
                         {
@@ -734,7 +771,7 @@ def _process_events(
                     )
                     continue
 
-            if idempotency_key in planned_keys:
+            if idempotency_key in planned_keys and not retry_planned_observation:
                 ignored.append(
                     {
                         "reason": "already_detected",
@@ -745,12 +782,12 @@ def _process_events(
                 )
                 continue
 
-            observation["event_id"] = f"{watch.name}-{idempotency_key[:12]}"
-            _write_json(observation_path, observation)
-            planned_keys.add(idempotency_key)
-            cstate.setdefault("planned_idempotency_keys", []).append(idempotency_key)
+            if not retry_planned_observation:
+                observation["event_id"] = f"{watch.name}-{idempotency_key[:12]}"
+                _write_json(observation_path, observation)
+                planned_keys.add(idempotency_key)
+                cstate.setdefault("planned_idempotency_keys", []).append(idempotency_key)
             provisioning: dict[str, Any] | None = None
-            customer_package_root = package_root / watch.name
             run_dir = customer_package_root / "runs" / _run_token(observed_at, idempotency_key)
             if run_provisioning:
                 provisioning = _run_customer_flow(
@@ -784,6 +821,7 @@ def _process_events(
                     "idempotency_key": idempotency_key,
                     "observation": str(observation_path),
                     "run_provisioning": run_provisioning,
+                    "retried_planned_observation": retry_planned_observation,
                     "run_dir": str(run_dir),
                     "latest_run_manifest": str(latest_run_manifest) if run_provisioning else None,
                     "provisioning": provisioning,

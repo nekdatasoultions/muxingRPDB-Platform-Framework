@@ -264,7 +264,7 @@ def main() -> int:
             print("NAT-T watcher automation is disabled")
         return 0
 
-    follow = bool(args.follow or automation.get("follow"))
+    follow = bool(args.follow)
     poll_interval = float(args.poll_interval_seconds or automation.get("poll_interval_seconds") or 15)
     final_report: dict[str, Any] | None = None
     while True:
