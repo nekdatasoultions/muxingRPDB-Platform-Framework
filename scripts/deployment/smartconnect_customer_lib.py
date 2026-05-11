@@ -81,6 +81,21 @@ def _expected_route_cidrs(customer_module: dict[str, Any]) -> list[str]:
     return [str(value).strip() for value in route_cidrs if str(value).strip()]
 
 
+def _customer_cleanup_route_cidrs(customer_module: dict[str, Any]) -> list[str]:
+    selectors = customer_module.get("selectors") or {}
+    post_ipsec_nat = customer_module.get("post_ipsec_nat") or {}
+    cidrs: list[str] = []
+    for value in selectors.get("remote_host_cidrs") or []:
+        cidr = str(value).strip()
+        if cidr and cidr not in cidrs:
+            cidrs.append(cidr)
+    for value in post_ipsec_nat.get("translated_subnets") or []:
+        cidr = str(value).strip()
+        if cidr and cidr not in cidrs:
+            cidrs.append(cidr)
+    return cidrs
+
+
 def load_smartconnect_bundle(bundle_dir: Path) -> SmartconnectBundle:
     resolved_bundle = bundle_dir.resolve()
     customer_module_path = resolved_bundle / "customer" / "customer-module.json"
@@ -216,6 +231,13 @@ def build_install_layout(smartconnect_root: Path, customer_name: str) -> dict[st
     }
 
 
+def _route_cleanup_lines(route_table: str, cleanup_cidrs: list[str]) -> list[str]:
+    return [
+        f"ip route del table {route_table} {cidr} 2>/dev/null || true"
+        for cidr in cleanup_cidrs
+    ]
+
+
 def _derive_route_remove_lines(route_text: str) -> list[str]:
     removals: list[str] = []
     for line in _executable_lines(route_text):
@@ -279,13 +301,27 @@ def install_smartconnect_bundle(bundle_dir: Path, smartconnect_root: Path) -> di
 
     _write_json(layout["route_intent"], bundle.json_payloads["routing/route-intent.json"])
     _write_text(layout["route_commands"], bundle.text_payloads["routing/ip-route.commands.txt"])
+    route_intent = bundle.json_payloads["routing/route-intent.json"]
+    route_table = str(route_intent.get("route_table") or "main").strip() or "main"
+    cleanup_lines = _route_cleanup_lines(
+        route_table,
+        _customer_cleanup_route_cidrs(bundle.customer_module),
+    )
+    apply_lines = [
+        *cleanup_lines,
+        *_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"]),
+    ]
+    remove_lines = [
+        *cleanup_lines,
+        *_derive_route_remove_lines(bundle.text_payloads["routing/ip-route.commands.txt"]),
+    ]
     _write_text(
         layout["route_apply_script"],
-        _render_shell_script(_executable_lines(bundle.text_payloads["routing/ip-route.commands.txt"]) or ["true"]),
+        _render_shell_script(apply_lines or ["true"]),
     )
     _write_text(
         layout["route_remove_script"],
-        _render_shell_script(_derive_route_remove_lines(bundle.text_payloads["routing/ip-route.commands.txt"]) or ["true"]),
+        _render_shell_script(remove_lines or ["true"]),
     )
     _write_text(layout["master_apply_script"], _render_master_apply_script(bundle.customer_name))
     _write_text(layout["master_remove_script"], _render_master_remove_script(bundle.customer_name))
