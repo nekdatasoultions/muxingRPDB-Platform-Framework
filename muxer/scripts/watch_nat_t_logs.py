@@ -212,6 +212,19 @@ def _planned_observation_needs_approved_retry(
     return status == "planned" and not live_apply
 
 
+def _planned_observation_path(
+    *,
+    latest_run: dict[str, Any],
+    observations_dir: Path,
+    customer_name: str,
+    idempotency_key: str,
+) -> Path:
+    recorded = str(latest_run.get("observation") or "").strip()
+    if recorded:
+        return Path(recorded)
+    return observations_dir / customer_name / f"{idempotency_key[:12]}.json"
+
+
 def _discover_request_paths(paths: Iterable[Path], roots: Iterable[Path]) -> list[Path]:
     discovered: dict[str, Path] = {}
     for path in paths:
@@ -534,6 +547,126 @@ def _provisioning_failed(provisioning: dict[str, Any] | None) -> bool:
     return apply_status in {"blocked", "rolled_back", "failed"}
 
 
+def _retry_planned_observations(
+    *,
+    repo_root: Path,
+    watches: dict[str, CustomerWatch],
+    state: dict[str, Any],
+    observations_dir: Path,
+    package_root: Path,
+    planned_keys: set[str],
+    deployment_environment: str | None,
+    approve: bool,
+    run_provisioning: bool,
+    promotion_mode: str,
+    skip_if_already_nat: bool,
+    allow_direct_nat_apply_if_missing: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    detected: list[dict[str, Any]] = []
+    ignored: list[dict[str, Any]] = []
+    if not approve or not run_provisioning:
+        return detected, ignored
+
+    for watch in watches.values():
+        cstate = _customer_state(state, watch)
+        customer_package_root = package_root / watch.name
+        latest_run = _load_previous_latest_run(customer_package_root)
+        idempotency_key = str(latest_run.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            continue
+        customer_keys = {str(key) for key in (cstate.get("planned_idempotency_keys") or [])}
+        if idempotency_key not in planned_keys and idempotency_key not in customer_keys:
+            continue
+        if not _planned_observation_needs_approved_retry(
+            customer_root=customer_package_root,
+            idempotency_key=idempotency_key,
+            approve=approve,
+            run_provisioning=run_provisioning,
+        ):
+            continue
+
+        observation_path = _planned_observation_path(
+            latest_run=latest_run,
+            observations_dir=observations_dir,
+            customer_name=watch.name,
+            idempotency_key=idempotency_key,
+        )
+        if not observation_path.exists():
+            _remove_planned_idempotency_key(
+                state_keys=planned_keys,
+                customer_state=cstate,
+                idempotency_key=idempotency_key,
+            )
+            ignored.append(
+                {
+                    "reason": "planned_observation_missing",
+                    "customer_name": watch.name,
+                    "idempotency_key": idempotency_key,
+                    "observation": str(observation_path),
+                }
+            )
+            continue
+
+        active_lock = read_lock(repo_root, watch.name)
+        if is_lock_active(active_lock):
+            ignored.append(
+                {
+                    "reason": "customer_operation_lock_active",
+                    "customer_name": watch.name,
+                    "lock": active_lock,
+                    "idempotency_key": idempotency_key,
+                    "observation": str(observation_path),
+                }
+            )
+            continue
+
+        try:
+            observation = _load_json(observation_path)
+        except Exception:
+            observation = {}
+        observed_at = str(observation.get("observed_at") or cstate.get("last_udp4500_observed_at") or "").strip()
+        run_dir = customer_package_root / "runs" / _run_token(observed_at, idempotency_key)
+        provisioning = _run_customer_flow(
+            repo_root=repo_root,
+            watch=watch,
+            observation_path=observation_path,
+            output_dir=run_dir,
+            deployment_environment=deployment_environment,
+            approve=approve,
+            promotion_mode=promotion_mode,
+            skip_if_already_nat=skip_if_already_nat,
+            allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
+        )
+        latest_run_manifest = _write_latest_run_manifest(
+            customer_root=customer_package_root,
+            run_dir=run_dir,
+            observation_path=observation_path,
+            idempotency_key=idempotency_key,
+            provisioning=provisioning,
+        )
+        if _provisioning_failed(provisioning):
+            _remove_planned_idempotency_key(
+                state_keys=planned_keys,
+                customer_state=cstate,
+                idempotency_key=idempotency_key,
+            )
+        detected.append(
+            {
+                "customer_name": watch.name,
+                "peer_ip": watch.peer_ip,
+                "idempotency_key": idempotency_key,
+                "observation": str(observation_path),
+                "run_provisioning": run_provisioning,
+                "retried_planned_observation": True,
+                "retry_source": "planned_state",
+                "run_dir": str(run_dir),
+                "latest_run_manifest": str(latest_run_manifest),
+                "provisioning": provisioning,
+            }
+        )
+    return detected, ignored
+
+
 def _run_command_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
     completed = subprocess.run(
         command,
@@ -682,6 +815,22 @@ def _process_events(
     detected: list[dict[str, Any]] = []
     ignored: list[dict[str, Any]] = []
     planned_keys = set(state.setdefault("planned_idempotency_keys", []))
+    retried_detected, retried_ignored = _retry_planned_observations(
+        repo_root=repo_root,
+        watches=watches,
+        state=state,
+        observations_dir=observations_dir,
+        package_root=package_root,
+        planned_keys=planned_keys,
+        deployment_environment=deployment_environment,
+        approve=approve,
+        run_provisioning=run_provisioning,
+        promotion_mode=promotion_mode,
+        skip_if_already_nat=skip_if_already_nat,
+        allow_direct_nat_apply_if_missing=allow_direct_nat_apply_if_missing,
+    )
+    detected.extend(retried_detected)
+    ignored.extend(retried_ignored)
 
     for log_file in log_files:
         for line in _read_new_lines(log_file, state, reprocess=reprocess):
