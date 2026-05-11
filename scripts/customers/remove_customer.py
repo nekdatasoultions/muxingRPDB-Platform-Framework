@@ -246,6 +246,10 @@ def selected_smartconnect_gateway(environment_doc: dict[str, Any]) -> dict[str, 
     return (((environment_doc.get("targets") or {}).get("smartconnect") or {}).get("gateway") or {})
 
 
+def target_ssh_user(target: dict[str, Any]) -> str:
+    return str((((target.get("access") or {}).get("ssh") or {}).get("user")) or "").strip()
+
+
 def selector_instance_id(target: dict[str, Any]) -> str:
     selector = target.get("selector") or {}
     if str(selector.get("type") or "").strip() != "instance_id":
@@ -1030,6 +1034,19 @@ def execute_live_remove(
     smartconnect_instance_id = selector_instance_id(smartconnect_gateway) if smartconnect_gateway else ""
     cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
     cgnat_instance_id = selector_instance_id(cgnat_headend) if cgnat_headend else ""
+    ssh_user_overrides = {
+        instance_id: user
+        for instance_id, user in (
+            (muxer_instance_id, target_ssh_user(muxer)),
+            *[
+                (selector_instance_id(headend), target_ssh_user(headend))
+                for headend in headends
+            ],
+            (smartconnect_instance_id, target_ssh_user(smartconnect_gateway)),
+            (cgnat_instance_id, target_ssh_user(cgnat_headend)),
+        )
+        if instance_id and user
+    }
 
     journal: list[dict[str, Any]] = []
     context = build_ssh_access_context(
@@ -1042,6 +1059,7 @@ def execute_live_remove(
             *([smartconnect_instance_id] if smartconnect_instance_id else []),
             *([cgnat_instance_id] if cgnat_instance_id else []),
         ],
+        ssh_user_overrides=ssh_user_overrides,
     )
     try:
         if cgnat_instance_id:

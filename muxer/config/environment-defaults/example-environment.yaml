@@ -9,7 +9,7 @@ environment:
     MUXER_PUBLIC_PRIVATE_IP: 172.31.34.89
     HEADEND_PUBLIC_IFACE: ens34
     SMARTCONNECT_ROUTE_TABLE: main
-    SMARTCONNECT_ROUTE_DEV: ens36
+    SMARTCONNECT_ROUTE_DEV: ens6
     DYNAMIC_PEER_IP_DDNS_ENDPOINT: https://ddns-prod.demo.acusoncloud.com/nic/update
     DYNAMIC_PEER_IP_AWS_REGION: us-east-1
     PSK_FROM_SECRET_REF: resolved-from-secret-store
@@ -26,7 +26,7 @@ environment:
         HEADEND_ID: 54.204.221.89
         HEADEND_CLEAR_IFACE: ens36
         SMARTCONNECT_ROUTE_TABLE: main
-        SMARTCONNECT_ROUTE_DEV: ens36
+        SMARTCONNECT_ROUTE_DEV: ens6
       nonnat-active:
         BACKEND_CLUSTER: non-nat
         BACKEND_ASSIGNMENT: active-a
@@ -38,7 +38,7 @@ environment:
         HEADEND_ID: 54.204.221.89
         HEADEND_CLEAR_IFACE: ens36
         SMARTCONNECT_ROUTE_TABLE: main
-        SMARTCONNECT_ROUTE_DEV: ens36
+        SMARTCONNECT_ROUTE_DEV: ens6
     clusters:
       nat:
         active-a:
@@ -50,7 +50,7 @@ environment:
           HEADEND_ID: 54.204.221.89
           HEADEND_CLEAR_IFACE: ens36
           SMARTCONNECT_ROUTE_TABLE: main
-          SMARTCONNECT_ROUTE_DEV: ens36
+          SMARTCONNECT_ROUTE_DEV: ens6
       non-nat:
         active-a:
           BACKEND_UNDERLAY_IP: 172.31.40.220
@@ -61,4 +61,4 @@ environment:
           HEADEND_ID: 54.204.221.89
           HEADEND_CLEAR_IFACE: ens36
           SMARTCONNECT_ROUTE_TABLE: main
-          SMARTCONNECT_ROUTE_DEV: ens36
+          SMARTCONNECT_ROUTE_DEV: ens6

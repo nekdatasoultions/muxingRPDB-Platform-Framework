@@ -178,6 +178,10 @@ def _record_structured(
     )
 
 
+def _target_ssh_user(target: dict[str, Any]) -> str:
+    return str((((target.get("access") or {}).get("ssh") or {}).get("user")) or "").strip()
+
+
 def _backend_apply_created_records(payload: dict[str, Any]) -> bool:
     if payload.get("customer_action") == "created":
         return True
@@ -2041,6 +2045,17 @@ def execute_ssh_live_apply(
         cgnat_instance_id = str(((cgnat_headend.get("selector") or {}).get("value")) or "").strip()
         if cgnat_prepared is not None and not cgnat_instance_id:
             raise RuntimeError("selected CGNAT head-end target is missing an instance_id selector")
+        ssh_user_overrides = {
+            instance_id: user
+            for instance_id, user in (
+                (muxer_instance_id, _target_ssh_user(muxer_target)),
+                (active_instance_id, _target_ssh_user(headend_active)),
+                (standby_instance_id, _target_ssh_user(headend_standby)),
+                (smartconnect_instance_id, _target_ssh_user(smartconnect_gateway)),
+                (cgnat_instance_id, _target_ssh_user(cgnat_headend)),
+            )
+            if instance_id and user
+        }
 
         context = build_ssh_access_context(
             region=region,
@@ -2053,6 +2068,7 @@ def execute_ssh_live_apply(
                 *([smartconnect_instance_id] if smartconnect_instance_id else []),
                 *([cgnat_instance_id] if cgnat_instance_id else []),
             ],
+            ssh_user_overrides=ssh_user_overrides,
         )
 
         muxer_root = Path(muxer_prepared["root"]).resolve()

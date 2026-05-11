@@ -553,6 +553,18 @@
                 "ssh",
                 "staged"
               ]
+            },
+            "ssh": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key_ref": {
+                  "$ref": "#/$defs/non_empty_string"
+                },
+                "user": {
+                  "$ref": "#/$defs/non_empty_string"
+                }
+              }
             }
           }
         }

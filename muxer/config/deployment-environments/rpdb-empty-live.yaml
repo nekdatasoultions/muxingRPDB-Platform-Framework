@@ -84,6 +84,8 @@ targets:
         public_ip: 52.21.112.55
       access:
         method: ssh
+        ssh:
+          user: ubuntu
   cgnat:
     headend:
       active:

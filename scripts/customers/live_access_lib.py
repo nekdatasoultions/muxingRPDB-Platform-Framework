@@ -132,6 +132,7 @@ def ensure_ssh_tools() -> None:
 class SshAccessContext:
     region: str
     ssh_user: str
+    ssh_user_overrides: dict[str, str]
     bastion_instance_id: str
     key_dir: Path
     key_name: str
@@ -146,6 +147,7 @@ def build_ssh_access_context(
     ssh_user: str,
     bastion_instance_id: str,
     target_instance_ids: list[str],
+    ssh_user_overrides: dict[str, str] | None = None,
 ) -> SshAccessContext:
     ensure_ssh_tools()
     details = instance_details_map(region, [bastion_instance_id, *target_instance_ids])
@@ -160,6 +162,11 @@ def build_ssh_access_context(
     return SshAccessContext(
         region=region,
         ssh_user=ssh_user,
+        ssh_user_overrides={
+            str(instance_id): str(user).strip()
+            for instance_id, user in (ssh_user_overrides or {}).items()
+            if str(instance_id).strip() and str(user).strip()
+        },
         bastion_instance_id=bastion_instance_id,
         key_dir=key_dir,
         key_name=key["key_name"],
@@ -178,10 +185,11 @@ def _proxy_command(context: SshAccessContext) -> str:
     bastion_public_ip = str(bastion.get("public_ip") or "").strip()
     if not bastion_public_ip:
         raise RuntimeError(f"bastion {context.bastion_instance_id} is missing a public IP")
+    bastion_ssh_user = _ssh_user_for_target(context, context.bastion_instance_id)
     return (
         f"ssh -i {context.key_name} -o BatchMode=yes -o StrictHostKeyChecking=no "
         f"-o UserKnownHostsFile={context.known_hosts} -o ConnectTimeout=8 "
-        f"-W %h:%p {context.ssh_user}@{bastion_public_ip}"
+        f"-W %h:%p {bastion_ssh_user}@{bastion_public_ip}"
     )
 
 
@@ -194,12 +202,22 @@ def _target_host(context: SshAccessContext, target_instance_id: str, *, via_bast
     return host
 
 
+def _ssh_user_for_target(context: SshAccessContext, target_instance_id: str) -> str:
+    return str(context.ssh_user_overrides.get(target_instance_id) or context.ssh_user).strip()
+
+
 def _prime_eic_keys(context: SshAccessContext, target_instance_id: str, *, via_bastion: bool) -> None:
     target = context.details.get(target_instance_id) or {}
     target_az = str(target.get("availability_zone") or "").strip()
     if not target_az:
         raise RuntimeError(f"target {target_instance_id} is missing availability zone")
-    _send_eic_key(context.region, target_instance_id, target_az, context.ssh_user, context.public_key)
+    _send_eic_key(
+        context.region,
+        target_instance_id,
+        target_az,
+        _ssh_user_for_target(context, target_instance_id),
+        context.public_key,
+    )
     if via_bastion:
         bastion = context.details.get(context.bastion_instance_id) or {}
         bastion_az = str(bastion.get("availability_zone") or "").strip()
@@ -209,7 +227,7 @@ def _prime_eic_keys(context: SshAccessContext, target_instance_id: str, *, via_b
             context.region,
             context.bastion_instance_id,
             bastion_az,
-            context.ssh_user,
+            _ssh_user_for_target(context, context.bastion_instance_id),
             context.public_key,
         )
 
@@ -224,6 +242,7 @@ def run_remote_command(
 ) -> dict[str, Any]:
     _prime_eic_keys(context, target_instance_id, via_bastion=via_bastion)
     host = _target_host(context, target_instance_id, via_bastion=via_bastion)
+    ssh_user = _ssh_user_for_target(context, target_instance_id)
     command = [
         "ssh",
         "-i",
@@ -243,7 +262,7 @@ def run_remote_command(
     ]
     if via_bastion:
         command.extend(["-o", f"ProxyCommand={_proxy_command(context)}"])
-    command.extend([f"{context.ssh_user}@{host}", remote_command])
+    command.extend([f"{ssh_user}@{host}", remote_command])
     completed = run_local(command, cwd=context.key_dir, timeout=timeout_seconds)
     return {
         "command": command,
@@ -276,6 +295,7 @@ def copy_paths_to_remote_root(
 
     _prime_eic_keys(context, target_instance_id, via_bastion=via_bastion)
     host = _target_host(context, target_instance_id, via_bastion=via_bastion)
+    ssh_user = _ssh_user_for_target(context, target_instance_id)
     remote_tar = f"/tmp/{remote_name}.tar"
     scp_command = [
         "scp",
@@ -292,7 +312,7 @@ def copy_paths_to_remote_root(
     ]
     if via_bastion:
         scp_command.extend(["-o", f"ProxyCommand={_proxy_command(context)}"])
-    scp_command.extend([str(archive_path), f"{context.ssh_user}@{host}:{remote_tar}"])
+    scp_command.extend([str(archive_path), f"{ssh_user}@{host}:{remote_tar}"])
     scp_completed = run_local(scp_command, cwd=context.key_dir, timeout=timeout_seconds)
     if scp_completed.returncode != 0:
         return {
@@ -340,6 +360,7 @@ def copy_remote_file_to_local(
 ) -> dict[str, Any]:
     _prime_eic_keys(context, target_instance_id, via_bastion=via_bastion)
     host = _target_host(context, target_instance_id, via_bastion=via_bastion)
+    ssh_user = _ssh_user_for_target(context, target_instance_id)
     local_path.parent.mkdir(parents=True, exist_ok=True)
     scp_command = [
         "scp",
@@ -356,7 +377,7 @@ def copy_remote_file_to_local(
     ]
     if via_bastion:
         scp_command.extend(["-o", f"ProxyCommand={_proxy_command(context)}"])
-    scp_command.extend([f"{context.ssh_user}@{host}:{remote_path}", str(local_path)])
+    scp_command.extend([f"{ssh_user}@{host}:{remote_path}", str(local_path)])
     completed = run_local(scp_command, cwd=context.key_dir, timeout=timeout_seconds)
     return {
         "success": completed.returncode == 0,
