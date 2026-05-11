@@ -24,7 +24,7 @@ from muxerlib.allocation import (  # noqa: E402
     plan_customer_allocations,
     render_allocated_customer_source,
 )
-from muxerlib.customer_merge import build_customer_module, load_yaml_file  # noqa: E402
+from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file  # noqa: E402
 
 
 class CustomerProvisioningIntegrationTests(unittest.TestCase):
@@ -69,6 +69,30 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertNotIn("cgnat", transport)
         self.assertNotIn("mode", customer_module["transport"])
         self.assertNotIn("cgnat", customer_module["transport"])
+
+    def test_local_psk_request_is_explicit_and_redacted_from_customer_item(self) -> None:
+        request_doc = self._load_request("example-local-psk-nonnat.yaml")
+        jsonschema.validate(instance=request_doc, schema=self.schema)
+
+        customer_source = self._render_source(request_doc)
+        customer_module = build_customer_module(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-local-psk-nonnat.yaml",
+        )
+        customer_item = build_customer_item(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-local-psk-nonnat.yaml",
+        )
+        customer_json = json.loads(customer_item["customer_json"])
+
+        self.assertEqual(customer_module["peer"]["psk_source"], "local")
+        self.assertEqual(customer_module["peer"]["psk"], "replace-me-demo-only")
+        self.assertEqual(customer_json["peer"]["psk"], "<redacted-local-psk>")
+        self.assertTrue(customer_json["peer"]["psk_redacted"])
 
     def test_cgnat_request_survives_request_source_and_module_layers(self) -> None:
         request_doc = self._load_request("example-minimal-cgnat.yaml")

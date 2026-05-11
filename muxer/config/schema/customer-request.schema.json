@@ -103,8 +103,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "public_ip",
-        "psk_secret_ref"
+        "public_ip"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "psk_secret_ref"
+          ]
+        },
+        {
+          "required": [
+            "psk"
+          ]
+        }
       ],
       "properties": {
         "public_ip": {
@@ -114,11 +125,68 @@
           "type": "string",
           "minLength": 1
         },
+        "psk_source": {
+          "type": "string",
+          "enum": [
+            "secrets_manager",
+            "local"
+          ]
+        },
         "psk_secret_ref": {
           "type": "string",
           "minLength": 1
+        },
+        "psk": {
+          "type": "string",
+          "minLength": 1
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "psk_source": {
+                "const": "local"
+              }
+            },
+            "required": [
+              "psk_source"
+            ]
+          },
+          "then": {
+            "required": [
+              "psk"
+            ],
+            "not": {
+              "required": [
+                "psk_secret_ref"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "psk_source": {
+                "const": "secrets_manager"
+              }
+            },
+            "required": [
+              "psk_source"
+            ]
+          },
+          "then": {
+            "required": [
+              "psk_secret_ref"
+            ],
+            "not": {
+              "required": [
+                "psk"
+              ]
+            }
+          }
+        }
+      ]
     },
     "selectors": {
       "type": "object",

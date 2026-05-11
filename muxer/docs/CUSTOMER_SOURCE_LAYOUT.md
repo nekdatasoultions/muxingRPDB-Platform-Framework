@@ -37,13 +37,31 @@ Each rendered customer module should be built from:
 
 ## Secrets
 
-Customer source files should not store inline PSKs.
+Customer source files should not store inline PSKs for production workflows.
 
 Use a secret reference, for example:
 
 ```yaml
 psk_secret_ref: /muxingrpdb/customers/example/psk
 ```
+
+For lab and demo flows, a customer request can opt into a local inline PSK:
+
+```yaml
+psk_source: local
+psk: replace-me-demo-only
+```
+
+Live apply still rejects that request unless the deployment environment enables:
+
+```yaml
+secrets:
+  allow_local_psk: true
+```
+
+That switch is intentionally environment-scoped. It lets us prove customer
+provisioning without pre-seeding AWS Secrets Manager, while keeping the normal
+path anchored on secret references.
 
 ## Operational Intent
 

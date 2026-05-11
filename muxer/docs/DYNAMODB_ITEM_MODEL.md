@@ -94,6 +94,11 @@ source file should still reference secrets indirectly.
 `customer_json` may include the secret reference path. It should not include the
 resolved PSK value.
 
+If a demo request uses `peer.psk_source: local`, the deploy package must carry
+the inline PSK long enough to inject the head-end `swanctl` secret. Before the
+merged module is written to DynamoDB, `peer.psk` is replaced with
+`<redacted-local-psk>` and `peer.psk_redacted` is set to `true`.
+
 ## Validation Target
 
 The machine-readable schema for this item lives at:

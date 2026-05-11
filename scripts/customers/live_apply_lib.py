@@ -294,11 +294,33 @@ def _resolve_or_seed_customer_psk_secret(
     package_dir: Path,
     region: str,
     apply_dir: Path,
+    allow_local_psk: bool = False,
 ) -> dict[str, Any]:
     module = _load_customer_module(package_dir)
     customer = module.get("customer") or {}
     peer = module.get("peer") or {}
     customer_name = str(customer.get("name") or "").strip() or "customer"
+    psk_source = str(peer.get("psk_source") or "secrets_manager").strip().lower().replace("-", "_")
+    if psk_source == "local":
+        secret = str(peer.get("psk") or "")
+        if not secret:
+            raise RuntimeError("customer peer psk_source=local requires peer.psk")
+        if not allow_local_psk:
+            raise RuntimeError(
+                "customer peer psk_source=local requires deployment environment secrets.allow_local_psk=true"
+            )
+        return {
+            "secret": secret,
+            "secret_ref": "local:customer.peer.psk",
+            "created": False,
+            "secret_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+            "secret_length": len(secret),
+            "local_handoff_path": None,
+            "source": "local",
+        }
+    if psk_source not in {"", "secrets_manager", "aws_secrets_manager"}:
+        raise RuntimeError(f"unsupported customer peer psk_source: {psk_source}")
+
     secret_ref = str(peer.get("psk_secret_ref") or "").strip()
     if not secret_ref:
         raise RuntimeError("customer module is missing peer.psk_secret_ref for live head-end apply")
@@ -312,6 +334,7 @@ def _resolve_or_seed_customer_psk_secret(
             "secret_sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
             "secret_length": len(secret),
             "local_handoff_path": None,
+            "source": "secrets_manager",
         }
 
     if not _is_cgnat_local_generate(module):
@@ -353,6 +376,7 @@ def _resolve_or_seed_customer_psk_secret(
             "secret_sha256": hashlib.sha256(generated_secret.encode("utf-8")).hexdigest(),
             "secret_length": len(generated_secret),
             "local_handoff_path": None,
+            "source": "secrets_manager",
         }
 
     local_handoff_path = _write_generated_customer_psk(
@@ -368,6 +392,7 @@ def _resolve_or_seed_customer_psk_secret(
         "secret_sha256": hashlib.sha256(generated_secret.encode("utf-8")).hexdigest(),
         "secret_length": len(generated_secret),
         "local_handoff_path": repo_relative(local_handoff_path),
+        "source": "secrets_manager",
     }
 
 
@@ -383,11 +408,13 @@ def _inject_live_headend_secret(
     headend_prepared: dict[str, Any],
     region: str,
     apply_dir: Path,
+    allow_local_psk: bool = False,
 ) -> dict[str, Any]:
     secret_report = _resolve_or_seed_customer_psk_secret(
         package_dir=package_dir,
         region=region,
         apply_dir=apply_dir,
+        allow_local_psk=allow_local_psk,
     )
     secret_ref = str(secret_report["secret_ref"])
     secret = str(secret_report["secret"])
@@ -414,11 +441,12 @@ def _inject_live_headend_secret(
         "injected": True,
         "created": bool(secret_report["created"]),
         "local_handoff_path": secret_report["local_handoff_path"],
+        "source": secret_report.get("source") or "secrets_manager",
     }
     _record_structured(
         journal,
         action="resolve_headend_psk_secret",
-        target="aws-secretsmanager",
+        target="customer-yaml" if report["source"] == "local" else "aws-secretsmanager",
         payload=report,
     )
     return report
@@ -2038,6 +2066,7 @@ def execute_ssh_live_apply(
             headend_prepared=headend_prepared,
             region=region,
             apply_dir=apply_dir,
+            allow_local_psk=bool(((environment_doc.get("secrets") or {}).get("allow_local_psk"))),
         )
         headend_prepared["secret_resolution"] = headend_secret
 

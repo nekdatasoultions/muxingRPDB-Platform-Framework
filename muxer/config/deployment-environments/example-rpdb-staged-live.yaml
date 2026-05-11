@@ -172,6 +172,9 @@ dynamic_peer_ip_watcher:
     follow: true
     poll_interval_seconds: 30
 
+secrets:
+  allow_local_psk: false
+
 customer_requests:
   allowed_roots:
     - muxer/config/customer-requests/migrated

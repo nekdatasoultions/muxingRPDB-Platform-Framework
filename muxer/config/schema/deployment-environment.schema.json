@@ -456,6 +456,16 @@
         }
       }
     },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow_local_psk": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
     "owners": {
       "type": "object",
       "additionalProperties": false,

@@ -33,12 +33,19 @@ class LiveApplySecretSeedTests(unittest.TestCase):
         if self.test_root.exists():
             shutil.rmtree(self.test_root, ignore_errors=True)
 
-    def _write_module(self, *, transport_mode: str = "cgnat", pki_mode: str = "local_generate") -> None:
+    def _write_module(
+        self,
+        *,
+        transport_mode: str = "cgnat",
+        pki_mode: str = "local_generate",
+        peer: dict | None = None,
+    ) -> None:
         module = {
             "customer": {
                 "name": "test-cgnat-customer",
             },
-            "peer": {
+            "peer": peer
+            or {
                 "psk_secret_ref": "/muxingrpdb/customers/test-cgnat-customer/psk",
             },
             "transport": {
@@ -119,6 +126,33 @@ class LiveApplySecretSeedTests(unittest.TestCase):
                     region="us-east-1",
                     apply_dir=self.apply_dir,
                 )
+
+    def test_local_psk_requires_environment_opt_in(self) -> None:
+        self._write_module(peer={"psk_source": "local", "psk": "inline-test-psk"})
+
+        with self.assertRaisesRegex(RuntimeError, "secrets.allow_local_psk=true"):
+            live_apply_lib._resolve_or_seed_customer_psk_secret(
+                package_dir=self.package_dir,
+                region="us-east-1",
+                apply_dir=self.apply_dir,
+            )
+
+    def test_local_psk_allowed_without_aws_lookup(self) -> None:
+        self._write_module(peer={"psk_source": "local", "psk": "inline-test-psk"})
+
+        with mock.patch.object(live_apply_lib, "run_local") as run_local:
+            report = live_apply_lib._resolve_or_seed_customer_psk_secret(
+                package_dir=self.package_dir,
+                region="us-east-1",
+                apply_dir=self.apply_dir,
+                allow_local_psk=True,
+            )
+
+        run_local.assert_not_called()
+        self.assertFalse(report["created"])
+        self.assertEqual(report["source"], "local")
+        self.assertEqual(report["secret_ref"], "local:customer.peer.psk")
+        self.assertEqual(report["secret"], "inline-test-psk")
 
 
 if __name__ == "__main__":

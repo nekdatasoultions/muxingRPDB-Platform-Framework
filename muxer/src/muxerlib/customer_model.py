@@ -4,6 +4,7 @@ from __future__ import annotations
 
 # Standard library imports for JSON serialization, typed dataclasses, IP/CIDR
 # validation, and stable UTC timestamps used in the DynamoDB item.
+import copy
 import ipaddress
 import json
 from dataclasses import asdict, dataclass
@@ -59,8 +60,10 @@ class CgnatTransport:
 @dataclass(frozen=True)
 class Peer:
     public_ip: str
-    psk_secret_ref: str
+    psk_secret_ref: str = ""
     remote_id: str = ""
+    psk_source: str = ""
+    psk: str = ""
 
 
 @dataclass(frozen=True)
@@ -399,6 +402,35 @@ def _normalized_cgnat_pki_mode(value: Any) -> str:
     if normalized not in allowed:
         raise ValueError(f"unsupported customer.transport.cgnat.pki.mode {value!r}")
     return normalized
+
+
+def _normalize_peer_psk(peer: Dict[str, Any]) -> Dict[str, str]:
+    psk_secret_ref = str(peer.get("psk_secret_ref") or "").strip()
+    psk = str(peer.get("psk") or "")
+    raw_source = str(peer.get("psk_source") or "").strip().lower().replace("-", "_")
+    if raw_source in {"", "aws_secrets_manager"}:
+        psk_source = "local" if psk and not psk_secret_ref else "secrets_manager"
+    elif raw_source in {"secrets_manager", "local"}:
+        psk_source = raw_source
+    else:
+        raise ValueError(f"unsupported customer.peer.psk_source {raw_source!r}")
+
+    if psk_source == "local":
+        if not psk:
+            raise ValueError("customer.peer.psk_source=local requires customer.peer.psk")
+        if psk_secret_ref:
+            raise ValueError("customer.peer.psk_secret_ref must not be set when psk_source is local")
+    else:
+        if not psk_secret_ref:
+            raise ValueError("customer.peer.psk_secret_ref is required when psk_source is secrets_manager")
+        if psk:
+            raise ValueError("customer.peer.psk must not be set when psk_source is secrets_manager")
+
+    return {
+        "psk_source": "local" if psk_source == "local" else (raw_source if raw_source else ""),
+        "psk_secret_ref": psk_secret_ref,
+        "psk": psk,
+    }
 
 
 def _normalized_cgnat_outer_topology(value: Any) -> str:
@@ -918,6 +950,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
         "customer.selectors.remote_host_cidrs",
         selector_remote_subnets,
     )
+    peer_psk = _normalize_peer_psk(peer)
 
     return CustomerSource(
         schema_version=int(_require(raw.get("schema_version"), "schema_version")),
@@ -927,8 +960,10 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
             customer_class=str(_require(customer.get("customer_class"), "customer.customer_class")),
             peer=Peer(
                 public_ip=str(_require(peer.get("public_ip"), "customer.peer.public_ip")),
-                psk_secret_ref=str(_require(peer.get("psk_secret_ref"), "customer.peer.psk_secret_ref")),
+                psk_secret_ref=peer_psk["psk_secret_ref"],
                 remote_id=str(peer.get("remote_id") or peer.get("public_ip") or ""),
+                psk_source=peer_psk["psk_source"],
+                psk=peer_psk["psk"],
             ),
             transport=Transport(
                 mark=_as_hex_mark(transport.get("mark"), "customer.transport.mark"),
@@ -1063,6 +1098,16 @@ def compute_rpdb_priority(priority_base: int, customer_id: int, override: Option
     return int(priority_base) + int(customer_id)
 
 
+def _redact_inline_peer_psk(customer_module: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = copy.deepcopy(customer_module)
+    peer = sanitized.get("peer") or {}
+    psk_source = str(peer.get("psk_source") or "").strip().lower().replace("-", "_")
+    if psk_source == "local" and "psk" in peer:
+        peer["psk"] = "<redacted-local-psk>"
+        peer["psk_redacted"] = True
+    return sanitized
+
+
 # Convert the merged customer module into the compact DynamoDB item shape.
 # The top-level fields keep routing metadata easy to inspect, while
 # `customer_json` stores the canonical merged customer module.
@@ -1083,6 +1128,7 @@ def build_dynamodb_item(
         or compute_rpdb_priority(priority_base, source.customer.id, source.customer.transport.rpdb_priority)
     )
     timestamp = updated_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    customer_json = _redact_inline_peer_psk(merged_customer_module)
 
     return {
         "customer_name": customer["name"],
@@ -1099,7 +1145,7 @@ def build_dynamodb_item(
         "source_ref": source_ref,
         "schema_version": source.schema_version,
         "updated_at": timestamp,
-        "customer_json": json.dumps(merged_customer_module, sort_keys=True, separators=(",", ":")),
+        "customer_json": json.dumps(customer_json, sort_keys=True, separators=(",", ":")),
     }
 
 

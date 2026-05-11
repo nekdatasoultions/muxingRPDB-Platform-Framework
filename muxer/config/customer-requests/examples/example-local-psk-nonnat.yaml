@@ -1,0 +1,23 @@
+schema_version: 1
+
+customer:
+  name: example-local-psk-nonnat
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.60
+    psk_source: local
+    psk: replace-me-demo-only
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.200.60.60/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true

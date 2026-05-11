@@ -73,11 +73,42 @@ Supported values:
 Required fields:
 
 - `public_ip`
-- `psk_secret_ref`
+- either `psk_secret_ref` or local demo PSK fields
 
 Optional:
 
 - `remote_id`
+- `psk_source`
+- `psk`
+
+Default secret handling uses AWS Secrets Manager:
+
+```yaml
+peer:
+  public_ip: 203.0.113.41
+  psk_secret_ref: /muxingrpdb/customers/example/psk
+```
+
+For demo or lab-only workflows, the customer request may carry the PSK inline:
+
+```yaml
+peer:
+  public_ip: 203.0.113.60
+  psk_source: local
+  psk: replace-me-demo-only
+```
+
+Inline PSKs are disabled by default during live apply. The selected deployment
+environment must explicitly set:
+
+```yaml
+secrets:
+  allow_local_psk: true
+```
+
+Do not use local inline PSKs for production customer records. The deploy package
+must temporarily carry the value so it can inject `swanctl`, but the DynamoDB
+`customer_json` copy is redacted before write.
 
 ### `customer.transport`
 
