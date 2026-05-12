@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import ipaddress
 import json
 import re
@@ -11,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -31,6 +32,7 @@ from muxerlib.dynamic_provisioning import (
     normalize_nat_t_observation_event,
     validate_dynamic_initial_request,
 )
+from muxerlib.dynamic_peer_ip import build_dynamic_peer_ip_reapply_request
 
 
 KEY_VALUE_FIELD_RE = re.compile(r"\b(?P<key>[A-Z]+)=(?P<value>[^ ]+)")
@@ -139,6 +141,228 @@ def _environment_watcher_policy(repo_root: Path, environment: str | None) -> dic
         "promotion": watcher.get("promotion") or {},
         "log_sync": watcher.get("log_sync") or {},
     }
+
+
+def _environment_doc(repo_root: Path, environment: str | None) -> dict[str, Any]:
+    environment_path = _resolve_environment_path(repo_root, environment)
+    return _load_yaml(environment_path) if environment_path is not None else {}
+
+
+def _typed_value(attribute: Any) -> Any:
+    if not isinstance(attribute, dict):
+        return attribute
+    if "S" in attribute:
+        return attribute["S"]
+    if "N" in attribute:
+        raw = str(attribute["N"])
+        return int(raw) if raw.isdigit() else float(raw)
+    if "BOOL" in attribute:
+        return bool(attribute["BOOL"])
+    if "NULL" in attribute:
+        return None
+    if "L" in attribute:
+        return [_typed_value(item) for item in attribute["L"]]
+    if "M" in attribute:
+        return {str(key): _typed_value(value) for key, value in attribute["M"].items()}
+    return attribute
+
+
+def _plain_item(item: dict[str, Any] | None) -> dict[str, Any]:
+    if not item:
+        return {}
+    return {str(key): _typed_value(value) for key, value in item.items()}
+
+
+def _extract_peer_ip_from_backend_item(item: dict[str, Any] | None) -> str:
+    plain = _plain_item(item)
+    peer_ip = str(plain.get("peer_ip") or "").strip()
+    if peer_ip:
+        return str(ipaddress.ip_address(peer_ip))
+    raw_module = str(plain.get("customer_json") or "").strip()
+    if raw_module:
+        module = json.loads(raw_module)
+        peer_ip = str(((module.get("peer") or {}).get("public_ip")) or "").strip()
+        if peer_ip:
+            return str(ipaddress.ip_address(peer_ip))
+    return ""
+
+
+def _run_aws_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
+    completed = subprocess.run(
+        ["aws", *command],
+        cwd=str(repo_root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout).strip() or "AWS CLI command failed")
+    return json.loads(completed.stdout or "{}")
+
+
+def _current_peer_overrides(
+    repo_root: Path,
+    *,
+    environment: str | None,
+    watches: dict[str, "CustomerWatch"],
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    document = _environment_doc(repo_root, environment)
+    datastores = document.get("datastores") or {}
+    mode = str(datastores.get("mode") or "").strip()
+    if not document or mode not in {"dynamodb", "staged"}:
+        return {}, []
+
+    overrides: dict[str, str] = {}
+    errors: list[dict[str, str]] = []
+    if mode == "dynamodb":
+        environment_cfg = document.get("environment") or {}
+        region = str((environment_cfg.get("aws") or {}).get("region") or "").strip()
+        customer_table = str(datastores.get("customer_sot_table") or "").strip()
+        if not region or not customer_table:
+            return {}, [{"error": "environment datastores/customer table settings are incomplete"}]
+        for customer_name in watches:
+            try:
+                payload = _run_aws_json(
+                    repo_root,
+                    [
+                        "dynamodb",
+                        "get-item",
+                        "--region",
+                        region,
+                        "--table-name",
+                        customer_table,
+                        "--key",
+                        json.dumps({"customer_name": {"S": customer_name}}),
+                        "--consistent-read",
+                        "--output",
+                        "json",
+                    ],
+                )
+                peer_ip = _extract_peer_ip_from_backend_item(payload.get("Item"))
+                if peer_ip:
+                    overrides[customer_name] = peer_ip
+            except Exception as exc:
+                errors.append({"customer_name": customer_name, "error": str(exc)})
+        return overrides, errors
+
+    staged_root = Path(str(datastores.get("staged_root") or "build/staged-live/datastores"))
+    if not staged_root.is_absolute():
+        staged_root = (repo_root / staged_root).resolve()
+    for customer_name in watches:
+        item_path = (
+            staged_root
+            / "var"
+            / "lib"
+            / "rpdb-backend"
+            / "customers"
+            / customer_name
+            / "customer-ddb-item.json"
+        )
+        if not item_path.exists():
+            continue
+        try:
+            peer_ip = _extract_peer_ip_from_backend_item(json.loads(item_path.read_text(encoding="utf-8")))
+            if peer_ip:
+                overrides[customer_name] = peer_ip
+        except Exception as exc:
+            errors.append({"customer_name": customer_name, "error": str(exc)})
+    return overrides, errors
+
+
+def _update_remote_id_defaults(
+    request_doc: dict[str, Any],
+    *,
+    previous_peer: str,
+    updated_peer: str,
+) -> dict[str, Any]:
+    updated_doc = copy.deepcopy(request_doc)
+    customer = updated_doc.setdefault("customer", {})
+    peer = dict(customer.get("peer") or {})
+    ipsec = dict(customer.get("ipsec") or {})
+    dynamic_peer_ip = customer.get("dynamic_peer_ip") or {}
+    reapply = (dynamic_peer_ip.get("reapply") or {}) if isinstance(dynamic_peer_ip, dict) else {}
+    update_remote_id = bool(reapply.get("update_remote_id_when_equal_to_peer_ip", True))
+
+    existing_remote_id = str(peer.get("remote_id") or "").strip()
+    existing_ipsec_remote_id = str(ipsec.get("remote_id") or "").strip()
+    peer["public_ip"] = updated_peer
+    if update_remote_id and existing_remote_id in {"", previous_peer}:
+        peer["remote_id"] = updated_peer
+    customer["peer"] = peer
+    if ipsec:
+        if update_remote_id and existing_ipsec_remote_id in {"", previous_peer}:
+            ipsec["remote_id"] = updated_peer
+        customer["ipsec"] = ipsec
+    return updated_doc
+
+
+def _effective_request_for_current_peer(
+    *,
+    watch: "CustomerWatch",
+    current_peer_ip: str,
+    effective_request_root: Path,
+) -> tuple[Path, dict[str, Any] | None]:
+    source_doc = _load_yaml(watch.request_path)
+    source_peer = str(((source_doc.get("customer") or {}).get("peer") or {}).get("public_ip") or "").strip()
+    if not source_peer or str(ipaddress.ip_address(source_peer)) == current_peer_ip:
+        return watch.request_path, None
+    try:
+        updated_doc, summary = build_dynamic_peer_ip_reapply_request(
+            source_doc,
+            observed_peer=current_peer_ip,
+            observed_at=_utc_now(),
+            source="nat-t-watcher-current-sot-peer",
+        )
+    except Exception:
+        updated_doc = _update_remote_id_defaults(
+            source_doc,
+            previous_peer=str(ipaddress.ip_address(source_peer)),
+            updated_peer=current_peer_ip,
+        )
+        summary = {
+            "schema_version": 1,
+            "action": "nat_t_watcher_current_peer_request",
+            "status": "planned",
+            "customer_name": watch.name,
+            "previous_peer": str(ipaddress.ip_address(source_peer)),
+            "observed_peer": current_peer_ip,
+            "source": "nat-t-watcher-current-sot-peer",
+        }
+
+    request_path = effective_request_root / f"{watch.name}.yaml"
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    request_path.write_text(yaml.safe_dump(updated_doc, sort_keys=False), encoding="utf-8")
+    summary_path = effective_request_root / f"{watch.name}.json"
+    _write_json(summary_path, {**summary, "source_request": str(watch.request_path), "updated_request": str(request_path)})
+    return request_path, summary
+
+
+def _refresh_watches_from_current_peers(
+    *,
+    repo_root: Path,
+    environment: str | None,
+    watches: dict[str, "CustomerWatch"],
+    out_dir: Path,
+) -> tuple[dict[str, "CustomerWatch"], list[dict[str, str]]]:
+    peer_overrides, errors = _current_peer_overrides(repo_root, environment=environment, watches=watches)
+    if not peer_overrides:
+        return watches, errors
+    refreshed = dict(watches)
+    effective_request_root = out_dir / "effective-requests"
+    for customer_name, current_peer in peer_overrides.items():
+        watch = refreshed.get(customer_name)
+        if watch is None or current_peer == watch.peer_ip:
+            continue
+        try:
+            request_path, _summary = _effective_request_for_current_peer(
+                watch=watch,
+                current_peer_ip=current_peer,
+                effective_request_root=effective_request_root,
+            )
+            refreshed[customer_name] = replace(watch, peer_ip=current_peer, request_path=request_path)
+        except Exception as exc:
+            errors.append({"customer_name": customer_name, "error": str(exc)})
+    return refreshed, errors
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -380,7 +604,7 @@ def _read_new_lines(log_file: Path, state: dict[str, Any], *, reprocess: bool) -
 
 def _customer_state(state: dict[str, Any], watch: CustomerWatch) -> dict[str, Any]:
     customers = state.setdefault("customers", {})
-    return customers.setdefault(
+    customer_state = customers.setdefault(
         watch.name,
         {
             "peer_ip": watch.peer_ip,
@@ -393,6 +617,22 @@ def _customer_state(state: dict[str, Any], watch: CustomerWatch) -> dict[str, An
             "planned_idempotency_keys": [],
         },
     )
+    if str(customer_state.get("peer_ip") or "") != watch.peer_ip:
+        customer_state.update(
+            {
+                "peer_ip": watch.peer_ip,
+                "request": str(watch.request_path),
+                "udp500_observed": False,
+                "udp500_count": 0,
+                "udp4500_count": 0,
+                "last_udp500_observed_at": "",
+                "last_udp4500_observed_at": "",
+                "planned_idempotency_keys": [],
+            }
+        )
+    elif str(customer_state.get("request") or "") != str(watch.request_path):
+        customer_state["request"] = str(watch.request_path)
+    return customer_state
 
 
 def _match_watch(
@@ -1126,10 +1366,16 @@ def main() -> int:
         parser.error("--approve requires --environment")
 
     while True:
+        effective_watches, current_peer_errors = _refresh_watches_from_current_peers(
+            repo_root=repo_root,
+            environment=args.environment,
+            watches=watches,
+            out_dir=out_dir,
+        )
         state = _load_json(state_file)
         loop_result = _process_events(
             repo_root=repo_root,
-            watches=watches,
+            watches=effective_watches,
             log_files=log_files,
             state=state,
             out_dir=out_dir,
@@ -1145,8 +1391,8 @@ def main() -> int:
         _write_json(state_file, state)
         summary = _build_summary(
             repo_root=repo_root,
-            watches=watches,
-            request_errors=request_errors,
+            watches=effective_watches,
+            request_errors=[*request_errors, *current_peer_errors],
             state_file=state_file,
             out_dir=out_dir,
             package_root=package_root,
