@@ -19,6 +19,9 @@ removal scripts only.
   running or being verified.
 - Keep generated private keys, local PSKs, and handoff material on the jump
   host only; do not commit those secrets to Git.
+- Generate jump-host-only validation inputs with
+  `scripts/customers/prepare_live_validation_requests.py`; the outputs live
+  under `build/live-validation/`, which is intentionally gitignored.
 
 ## Use Cases
 
@@ -58,10 +61,11 @@ removal scripts only.
 For each customer:
 
 1. Build or update the jump-host-only validation request.
+   Use:
+   `python3 scripts/customers/prepare_live_validation_requests.py`
 2. Run `scripts/customers/remove_customer.py --approve --json`.
 3. Verify removal completed on all selected surfaces.
 4. Run `scripts/customers/deploy_customer.py --approve --json`.
 5. Verify execution-plan status is `applied`.
 6. Verify component state and any use-case-specific behavior.
 7. Record the result before moving to the next customer.
-

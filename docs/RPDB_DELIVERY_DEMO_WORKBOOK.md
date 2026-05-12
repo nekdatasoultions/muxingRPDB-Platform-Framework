@@ -562,20 +562,33 @@ It is useful for delivery demos because the profile names are easy to remember.
 
 ```bash
 python3 scripts/customers/demo_customer_lifecycle.py list-profiles
-python3 scripts/customers/demo_customer_lifecycle.py show customer4-non-nat
-python3 scripts/customers/demo_customer_lifecycle.py provision customer4-non-nat --json
-python3 scripts/customers/demo_customer_lifecycle.py reapply customer4-non-nat --json
-python3 scripts/customers/demo_customer_lifecycle.py remove customer4-non-nat --json
+python3 scripts/customers/prepare_live_validation_requests.py
+python3 scripts/customers/demo_customer_lifecycle.py show customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+python3 scripts/customers/demo_customer_lifecycle.py provision customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py reapply customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py remove customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
 ```
 
 Profiles:
 
 | Profile | Demo |
 | --- | --- |
-| `customer4-non-nat` | Regular non-NAT customer. |
-| `customer7-nat-t` | NAT-T customer with observation-driven promotion. |
-| `cgnat-per-customer-outer` | CGNAT where the customer owns the outer cert tunnel. |
-| `cgnat-shared-isp-gateway` | CGNAT where the ISP gateway owns the outer cert tunnel. |
+| `customer2-local-psk` | Customer 2 local-PSK request, then normal non-NAT-first/NAT-T promotion. |
+| `customer4-certificate` | Customer 4 certificate-auth request using generated demo-CA material. |
+| `customer5-inside-nat-explicit-map` | Customer 5 inside NAT with explicit host mappings. |
+| `cgnat-provided-per-customer-outer` | CGNAT where the customer owns the outer cert tunnel with provided cert material. |
+| `cgnat-provided-shared-isp-gateway` | CGNAT where `isp-cgnat-router-2` owns the outer cert tunnel with provided cert material. |
+
+The generated profiles live under `build/live-validation/requests` and are not
+committed. That is on purpose: Customer 2 contains a local PSK, and the
+certificate demos reference private-key material that should stay on the MOM.
 
 ## 6. Customer Public IP Change
 
@@ -719,21 +732,39 @@ adds the CGNAT remove step to rollback.
 Per-customer outer:
 
 ```bash
-python3 scripts/customers/demo_customer_lifecycle.py show cgnat-per-customer-outer
-python3 scripts/customers/demo_customer_lifecycle.py plan-provision cgnat-per-customer-outer --json
-python3 scripts/customers/demo_customer_lifecycle.py provision cgnat-per-customer-outer --json
-python3 scripts/customers/demo_customer_lifecycle.py reapply cgnat-per-customer-outer --json
-python3 scripts/customers/demo_customer_lifecycle.py remove cgnat-per-customer-outer --json
+python3 scripts/customers/demo_customer_lifecycle.py show cgnat-provided-per-customer-outer \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+python3 scripts/customers/demo_customer_lifecycle.py plan-provision cgnat-provided-per-customer-outer \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py provision cgnat-provided-per-customer-outer \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py reapply cgnat-provided-per-customer-outer \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py remove cgnat-provided-per-customer-outer \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
 ```
 
 Shared ISP gateway:
 
 ```bash
-python3 scripts/customers/demo_customer_lifecycle.py show cgnat-shared-isp-gateway
-python3 scripts/customers/demo_customer_lifecycle.py plan-provision cgnat-shared-isp-gateway --json
-python3 scripts/customers/demo_customer_lifecycle.py provision cgnat-shared-isp-gateway --json
-python3 scripts/customers/demo_customer_lifecycle.py reapply cgnat-shared-isp-gateway --json
-python3 scripts/customers/demo_customer_lifecycle.py remove cgnat-shared-isp-gateway --json
+python3 scripts/customers/demo_customer_lifecycle.py show cgnat-provided-shared-isp-gateway \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+python3 scripts/customers/demo_customer_lifecycle.py plan-provision cgnat-provided-shared-isp-gateway \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py provision cgnat-provided-shared-isp-gateway \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py reapply cgnat-provided-shared-isp-gateway \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py remove cgnat-provided-shared-isp-gateway \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
 ```
 
 Runtime proof on the CGNAT head end:
@@ -763,13 +794,16 @@ A good live demo order:
 2. Run a dry-run deploy and inspect the generated package before live apply.
 3. Show muxer generated routing, GRE, and nftables files.
 4. Show head-end generated `swanctl` and nftables files.
-5. Apply or reapply a regular non-NAT customer, such as `customer4-non-nat`.
-6. Show SmartConnect route intent and confirm it routes `remote_host_cidrs` or `translated_subnets`, never broad `remote_subnets`.
-7. Show Customer 1 style inside NAT and outside NAT on the non-NAT head end.
-8. Show NAT-T watcher status and the Customer 7 promotion path.
+5. Apply Customer 2 from the generated local-PSK request and show that NAT-T
+   promotion still uses the watcher, not a hand-built NAT deployment.
+6. Apply Customer 4 with certificate auth and show `swanctl` loading certs,
+   authorities, and public-key authentication instead of PSK.
+7. Apply Customer 5 and show SmartConnect routing `translated_subnets`, never
+   broad `remote_subnets`.
+8. Show Customer 1 style inside NAT and outside NAT on the non-NAT head end.
 9. Show customer dynamic-IP timer and the MOM registry watcher.
-10. Show CGNAT per-customer outer.
-11. Show CGNAT shared ISP gateway.
+10. Show CGNAT per-customer outer with provided cert material.
+11. Show CGNAT shared ISP gateway with provided cert material.
 12. Finish with rollback/remove for one profile to prove lifecycle symmetry.
 
 Opening narrative:
@@ -818,4 +852,3 @@ where needed, and records the resulting state in DynamoDB.
 | Dynamic peer-IP watcher | `muxer/scripts/watch_dynamic_peer_ip_registry.py` |
 | CGNAT overview | `CGNAT/README.md` |
 | CGNAT provisioning design | `CGNAT/framework/docs/CUSTOMER_PROVISIONING_INTEGRATION_DESIGN.md` |
-

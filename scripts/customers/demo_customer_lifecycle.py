@@ -23,6 +23,7 @@ class DemoProfile:
     customer_file: Path
     observation: Path | None = None
     notes: str | None = None
+    prepare_required: bool = False
 
 
 def _repo_file(*parts: str) -> Path:
@@ -30,6 +31,22 @@ def _repo_file(*parts: str) -> Path:
 
 
 PROFILES: dict[str, DemoProfile] = {
+    "customer2-local-psk": DemoProfile(
+        key="customer2-local-psk",
+        description="Customer 2 NAT-T auto-promotion demo using a jump-host-only local PSK request.",
+        customer_name="vpn-customer-stage1-15-cust-0002",
+        customer_file=_repo_file(
+            "build",
+            "live-validation",
+            "requests",
+            "vpn-customer-stage1-15-cust-0002-local-psk.yaml",
+        ),
+        notes=(
+            "Run scripts/customers/prepare_live_validation_requests.py first. "
+            "Use the generated local-PSK environment copy when provisioning."
+        ),
+        prepare_required=True,
+    ),
     "customer4-non-nat": DemoProfile(
         key="customer4-non-nat",
         description="Regular non-NAT VPN demo using the base Customer 4 request.",
@@ -42,6 +59,38 @@ PROFILES: dict[str, DemoProfile] = {
             "vpn-customer-stage1-15-cust-0004.yaml",
         ),
         notes="Validated dry run resolves to the non-NAT head-end family on rpdb-empty-live.",
+    ),
+    "customer4-certificate": DemoProfile(
+        key="customer4-certificate",
+        description="Customer 4 certificate-auth demo using a generated third-party/demo-CA bundle.",
+        customer_name="vpn-customer-stage1-15-cust-0004",
+        customer_file=_repo_file(
+            "build",
+            "live-validation",
+            "requests",
+            "vpn-customer-stage1-15-cust-0004-certificate.yaml",
+        ),
+        notes=(
+            "Run scripts/customers/prepare_live_validation_requests.py first, then install "
+            "the generated customer-side certificate handoff on the Customer 4 VPN host."
+        ),
+        prepare_required=True,
+    ),
+    "customer5-inside-nat-explicit-map": DemoProfile(
+        key="customer5-inside-nat-explicit-map",
+        description="Customer 5 inside-NAT demo using explicit one-to-one host mappings.",
+        customer_name="vpn-customer-stage1-15-cust-0005",
+        customer_file=_repo_file(
+            "build",
+            "live-validation",
+            "requests",
+            "vpn-customer-stage1-15-cust-0005-explicit-inside-nat.yaml",
+        ),
+        notes=(
+            "Run scripts/customers/prepare_live_validation_requests.py first. "
+            "SmartConnect should route translated_subnets, not remote_subnets."
+        ),
+        prepare_required=True,
     ),
     "customer7-nat-t": DemoProfile(
         key="customer7-nat-t",
@@ -88,6 +137,32 @@ PROFILES: dict[str, DemoProfile] = {
             "example-minimal-cgnat-shared-isp-scenario2-local-pki.yaml",
         ),
         notes="Validated dry run resolves to the CGNAT head-end, the non-NAT backend head-end, and isp-cgnat-router-2.",
+    ),
+    "cgnat-provided-per-customer-outer": DemoProfile(
+        key="cgnat-provided-per-customer-outer",
+        description="CGNAT per-customer outer demo using provided/demo-CA certificate material.",
+        customer_name="demo-ca-cgnat-customer-router",
+        customer_file=_repo_file(
+            "build",
+            "live-validation",
+            "requests",
+            "demo-ca-cgnat-customer-router.yaml",
+        ),
+        notes="Run scripts/customers/prepare_live_validation_requests.py first.",
+        prepare_required=True,
+    ),
+    "cgnat-provided-shared-isp-gateway": DemoProfile(
+        key="cgnat-provided-shared-isp-gateway",
+        description="CGNAT shared ISP gateway demo using provided/demo-CA certificate material.",
+        customer_name="demo-ca-cgnat-shared-gateway",
+        customer_file=_repo_file(
+            "build",
+            "live-validation",
+            "requests",
+            "demo-ca-cgnat-shared-gateway.yaml",
+        ),
+        notes="Run scripts/customers/prepare_live_validation_requests.py first.",
+        prepare_required=True,
     ),
 }
 
@@ -159,6 +234,7 @@ def print_profile_summary(profile: DemoProfile, environment: str, out_root: Path
     print(f"customer_name: {profile.customer_name}")
     print(f"customer_file: {repo_relative(profile.customer_file)}")
     print(f"observation: {repo_relative(profile.observation) if profile.observation else '(none)'}")
+    print(f"prepare_required: {str(profile.prepare_required).lower()}")
     print(f"default_environment: {environment}")
     print(f"default_out_root: {repo_relative(out_root)}")
     if profile.notes:
@@ -239,6 +315,13 @@ def main() -> int:
         out_root=out_root,
         json_output=args.json,
     )
+    if args.action in {"plan-provision", "provision", "reapply"} and not profile.customer_file.exists():
+        if profile.prepare_required:
+            raise SystemExit(
+                f"{repo_relative(profile.customer_file)} does not exist yet. "
+                "Run scripts/customers/prepare_live_validation_requests.py first."
+            )
+        raise SystemExit(f"{repo_relative(profile.customer_file)} does not exist")
     print(quote_command(command), file=sys.stderr)
     if args.print_only:
         return 0

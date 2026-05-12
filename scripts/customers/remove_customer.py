@@ -210,6 +210,28 @@ def headend_family_from_metadata(metadata: dict[str, Any], override: str) -> str
     return ""
 
 
+def current_headend_family_from_metadata(metadata: dict[str, Any]) -> str:
+    return headend_family_from_metadata(metadata, "auto")
+
+
+def remove_headend_family_from_request(
+    *,
+    metadata: dict[str, Any],
+    requested_headend_family: str,
+    sweep_stale_headends: bool,
+) -> tuple[str, str]:
+    requested_family = normalize_headend_family(requested_headend_family)
+    current_family = current_headend_family_from_metadata(metadata)
+
+    if requested_family in {"nat", "non_nat", "all"}:
+        return requested_family, current_family
+    if not current_family:
+        return "", current_family
+    if sweep_stale_headends and current_family in {"nat", "non_nat"}:
+        return "all", current_family
+    return current_family, current_family
+
+
 def nft_name(value: str, *, prefix: str) -> str:
     normalized = re.sub(r"[^a-z0-9_]+", "_", str(value).lower()).strip("_")
     normalized = normalized[:48] or "customer"
@@ -777,6 +799,8 @@ def build_touch_plan(
     environment_doc: dict[str, Any],
     customer_name: str,
     headend_family: str,
+    current_headend_family: str,
+    sweep_stale_headends: bool,
     backend: dict[str, Any],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
@@ -808,6 +832,8 @@ def build_touch_plan(
         "customer_present": backend.get("customer_present"),
         "allocation_count": backend.get("allocation_count"),
         "headend_family": headend_family,
+        "current_headend_family": current_headend_family,
+        "sweep_stale_headends": sweep_stale_headends,
         "transport_mode": metadata.get("transport_mode"),
         "muxer": muxer.get("name"),
         "smartconnect_gateway": smartconnect_gateway.get("name"),
@@ -1449,7 +1475,12 @@ def main() -> int:
         "--headend-family",
         default="auto",
         choices=["auto", "nat", "non_nat", "all"],
-        help="Override head-end target selection. Default reads the live SoT.",
+        help="Override head-end target selection. Default reads the SoT and sweeps stale NAT/non-NAT placements.",
+    )
+    parser.add_argument(
+        "--no-sweep-stale-headends",
+        action="store_true",
+        help="With --headend-family auto, remove only the SoT-resolved head-end family instead of both NAT and non-NAT.",
     )
     parser.add_argument("--out-dir", help="Output directory for execution plan and removal journal")
     parser.add_argument("--dry-run", action="store_true", help="Plan only. This is the default.")
@@ -1489,6 +1520,7 @@ def main() -> int:
                     "environment": args.environment,
                     "out_dir": repo_relative(out_dir),
                     "headend_family": args.headend_family,
+                    "sweep_stale_headends": not bool(args.no_sweep_stale_headends),
                     "skip_nat_t_watcher_cleanup": bool(args.skip_nat_t_watcher_cleanup),
                     "skip_dynamic_peer_ip_watcher_cleanup": bool(args.skip_dynamic_peer_ip_watcher_cleanup),
                 },
@@ -1513,6 +1545,8 @@ def main() -> int:
     backend: dict[str, Any] = {}
     metadata: dict[str, Any] = {}
     headend_family = ""
+    current_headend_family = ""
+    sweep_stale_headends = not bool(args.no_sweep_stale_headends)
     if environment_doc and not errors:
         environment = environment_doc.get("environment") or {}
         datastores = environment_doc.get("datastores") or {}
@@ -1556,7 +1590,11 @@ def main() -> int:
             metadata = customer_metadata(raw_metadata_item)
             if not backend.get("customer_present"):
                 errors.append(f"customer {customer_name} is not present in the customer SoT")
-            headend_family = headend_family_from_metadata(metadata, args.headend_family)
+            headend_family, current_headend_family = remove_headend_family_from_request(
+                metadata=metadata,
+                requested_headend_family=args.headend_family,
+                sweep_stale_headends=sweep_stale_headends,
+            )
             if not headend_family:
                 errors.append("unable to determine head-end family from SoT; use --headend-family nat|non_nat|all")
 
@@ -1642,6 +1680,8 @@ def main() -> int:
             environment_doc=environment_doc or {},
             customer_name=customer_name,
             headend_family=headend_family,
+            current_headend_family=current_headend_family,
+            sweep_stale_headends=sweep_stale_headends,
             backend=backend,
             metadata=metadata,
         )
@@ -1668,7 +1708,10 @@ def main() -> int:
             "allocation_count": backend.get("allocation_count"),
             "metadata": metadata,
         },
+        "requested_headend_family": args.headend_family,
+        "current_headend_family": current_headend_family,
         "headend_family": headend_family,
+        "sweep_stale_headends": sweep_stale_headends,
         "owner_status": owner_status,
         "backup_status": backup_status,
         "touch_plan": touch_plan,
