@@ -276,6 +276,28 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             installed_files["ca_certificate"],
             f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/pki/headend-install/outer-ca.crt",
         )
+        self.assertTrue(execution_plan["apply"]["validation"]["cgnat_isp_gateway"]["valid"])
+        gateway_customer_root = self.staged_root / "cgnat-isp-gateway-2-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / self.customer_name
+        gateway_config_json = self.staged_root / "cgnat-isp-gateway-2-root" / "etc" / "rpdb-cgnat" / "customers" / f"{self.customer_name}-gateway-handoff.json"
+        self.assertTrue((gateway_customer_root / "gateway-handoff" / "gateway-outer.crt").exists())
+        self.assertTrue((gateway_customer_root / "gateway-handoff" / "gateway-outer.key").exists())
+        self.assertTrue((gateway_customer_root / "gateway-handoff" / "outer-ca.crt").exists())
+        self.assertTrue((gateway_customer_root / "gateway-install-state.json").exists())
+        self.assertTrue(gateway_config_json.exists())
+        gateway_state = json.loads((gateway_customer_root / "gateway-install-state.json").read_text(encoding="utf-8"))
+        gateway_files = gateway_state["gateway_handoff"]["installed_files"]
+        self.assertEqual(
+            gateway_files["gateway_certificate"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/gateway-handoff/gateway-outer.crt",
+        )
+        self.assertEqual(
+            gateway_files["gateway_private_key"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/gateway-handoff/gateway-outer.key",
+        )
+        self.assertEqual(
+            gateway_files["ca_certificate"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/gateway-handoff/outer-ca.crt",
+        )
 
         rollback_plan_path = REPO_ROOT / execution_plan["apply"]["rollback_plan"]
         rollback_results = self._run_rollback(rollback_plan_path)
@@ -286,6 +308,8 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
                 for result in rollback_results
             )
         )
+        self.assertFalse(gateway_customer_root.exists())
+        self.assertFalse(gateway_config_json.exists())
 
 
 if __name__ == "__main__":

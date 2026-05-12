@@ -739,6 +739,45 @@ def _remote_path(prepared_root: Path, local_path: str | Path) -> str:
     return "/" + relative_path.as_posix()
 
 
+def _selector_instance_id(target: dict[str, Any], *, region: str) -> str:
+    selector = target.get("selector") or {}
+    selector_type = str(selector.get("type") or "").strip()
+    value = str(selector.get("value") or "").strip()
+    if selector_type == "instance_id":
+        return value
+    if selector_type != "tag":
+        return ""
+    key = str(selector.get("key") or "Name").strip() or "Name"
+    if not value:
+        return ""
+    completed = subprocess.run(
+        [
+            "aws",
+            "ec2",
+            "describe-instances",
+            "--region",
+            region,
+            "--filters",
+            f"Name=tag:{key},Values={value}",
+            "Name=instance-state-name,Values=running",
+            "--query",
+            "Reservations[].Instances[].InstanceId",
+            "--output",
+            "json",
+        ],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"failed to resolve target {target.get('name')} by tag: {completed.stderr or completed.stdout}")
+    matches = json.loads(completed.stdout or "[]")
+    if len(matches) != 1:
+        raise RuntimeError(f"target {target.get('name')} tag selector matched {len(matches)} running instances")
+    return str(matches[0])
+
+
 def _sudo_shell(command_text: str, *, strict: bool = True) -> str:
     prefix = "set -eu; " if strict else "set +e; "
     return "sudo bash -lc " + shlex.quote(prefix + command_text)
@@ -767,6 +806,8 @@ def execute_staged_live_apply(
     smartconnect_root = staged_target_root(smartconnect_target) if smartconnect_target else None
     cgnat_target = target_selection.get("cgnat_headend_active") or {}
     cgnat_root = staged_target_root(cgnat_target) if cgnat_target else None
+    cgnat_gateway_target = target_selection.get("cgnat_isp_gateway") or {}
+    cgnat_gateway_root = staged_target_root(cgnat_gateway_target) if cgnat_gateway_target else None
     cgnat_pki_review_dir = _cgnat_pki_review_dir_from_execution_plan(execution_plan_path)
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -824,6 +865,16 @@ def execute_staged_live_apply(
                 pki_review_dir=cgnat_pki_review_dir,
             )
             if cgnat_root is not None
+            else None
+        )
+        cgnat_gateway_prepared = (
+            _prepare_cgnat_gateway_root(
+                journal,
+                customer_name=customer_name,
+                apply_dir=apply_dir,
+                pki_review_dir=cgnat_pki_review_dir,
+            )
+            if cgnat_gateway_root is not None and cgnat_pki_review_dir is not None
             else None
         )
 
@@ -954,6 +1005,33 @@ def execute_staged_live_apply(
                 cleanup_files=[cgnat_config_json.relative_to(cgnat_prepared_root)],
                 apply_script=Path(cgnat_prepared["apply"]["master_apply_script"]).resolve(),
                 remove_script=Path(cgnat_prepared["apply"]["master_remove_script"]).resolve(),
+            )
+        cgnat_gateway_activation = None
+        if cgnat_gateway_prepared is not None and cgnat_gateway_root is not None:
+            cgnat_gateway_prepared_root = Path(cgnat_gateway_prepared["root"]).resolve()
+            cgnat_gateway_customer_root = Path(cgnat_gateway_prepared["apply"]["state_json"]).resolve().parent
+            cgnat_gateway_config_json = Path(cgnat_gateway_prepared["apply"]["config_json"]).resolve()
+            cgnat_gateway_activation = _build_activation_bundle(
+                journal,
+                customer_name=customer_name,
+                component_name="cgnat-isp-gateway",
+                target_name=str(cgnat_gateway_target.get("name") or "cgnat-isp-gateway"),
+                apply_dir=apply_dir,
+                prepared_root=cgnat_gateway_prepared_root,
+                target_root=cgnat_gateway_root,
+                relative_paths=[
+                    cgnat_gateway_customer_root.relative_to(cgnat_gateway_prepared_root),
+                    cgnat_gateway_config_json.relative_to(cgnat_gateway_prepared_root),
+                ],
+                validate_paths=[
+                    Path(cgnat_gateway_prepared["apply"]["state_json"]).resolve().relative_to(cgnat_gateway_prepared_root),
+                    cgnat_gateway_config_json.relative_to(cgnat_gateway_prepared_root),
+                    Path(cgnat_gateway_prepared["apply"]["master_apply_script"]).resolve().relative_to(cgnat_gateway_prepared_root),
+                ],
+                cleanup_paths=[cgnat_gateway_customer_root.relative_to(cgnat_gateway_prepared_root)],
+                cleanup_files=[cgnat_gateway_config_json.relative_to(cgnat_gateway_prepared_root)],
+                apply_script=Path(cgnat_gateway_prepared["apply"]["master_apply_script"]).resolve(),
+                remove_script=Path(cgnat_gateway_prepared["apply"]["master_remove_script"]).resolve(),
             )
 
         backend_apply = _execute_json(
@@ -1210,6 +1288,50 @@ def execute_staged_live_apply(
                 target=str(cgnat_target.get("name") or "cgnat-headend"),
                 command=validate_cgnat_command,
             )
+        cgnat_gateway_apply = None
+        cgnat_gateway_validation = None
+        if cgnat_gateway_activation is not None and cgnat_gateway_root is not None and cgnat_pki_review_dir is not None:
+            cgnat_gateway_apply = _execute_json(
+                journal,
+                action="apply_cgnat_isp_gateway_activation_bundle",
+                target=str(cgnat_gateway_target.get("name") or "cgnat-isp-gateway"),
+                command=[
+                    sys.executable,
+                    "scripts/customers/node_activation_runner.py",
+                    "--request",
+                    str(cgnat_gateway_activation["request_path_obj"]),
+                    "--json",
+                ],
+            )
+            rollback_steps.append(
+                {
+                    "action": "rollback_cgnat_isp_gateway_activation_bundle",
+                    "target": str(cgnat_gateway_target.get("name") or "cgnat-isp-gateway"),
+                    "command": [
+                        sys.executable,
+                        "scripts/customers/node_activation_runner.py",
+                        "--rollback-request",
+                        str(cgnat_gateway_activation["rollback_request_path_obj"]),
+                        "--json",
+                    ],
+                }
+            )
+            cgnat_gateway_validation = _execute_json(
+                journal,
+                action="validate_cgnat_isp_gateway_customer",
+                target=str(cgnat_gateway_target.get("name") or "cgnat-isp-gateway"),
+                command=[
+                    sys.executable,
+                    "scripts/deployment/validate_cgnat_gateway_customer.py",
+                    "--customer-name",
+                    customer_name,
+                    "--gateway-root",
+                    str(cgnat_gateway_root),
+                    "--pki-review-dir",
+                    str(cgnat_pki_review_dir),
+                    "--json",
+                ],
+            )
 
         rollback_plan = {
             "schema_version": 1,
@@ -1244,6 +1366,7 @@ def execute_staged_live_apply(
                 "headend_standby": repo_relative(headend_standby_root),
                 "smartconnect_gateway": repo_relative(smartconnect_root) if smartconnect_root is not None else None,
                 "cgnat_headend": repo_relative(cgnat_root) if cgnat_root is not None else None,
+                "cgnat_isp_gateway": repo_relative(cgnat_gateway_root) if cgnat_gateway_root is not None else None,
             },
             "activation_bundles": {
                 "muxer": {
@@ -1296,6 +1419,16 @@ def execute_staged_live_apply(
                     "rollback_journal": repo_relative(cgnat_activation["bundle_root_path"] / "rollback-journal.json"),
                     "rollback_result": repo_relative(cgnat_activation["bundle_root_path"] / "rollback-result.json"),
                 } if cgnat_activation is not None else None,
+                "cgnat_isp_gateway": {
+                    "bundle_root": cgnat_gateway_activation["bundle_root"],
+                    "request_path": cgnat_gateway_activation["request_path"],
+                    "rollback_request_path": cgnat_gateway_activation["rollback_request_path"],
+                    "payload_root": cgnat_gateway_activation["payload_root"],
+                    "activation_journal": repo_relative(cgnat_gateway_activation["bundle_root_path"] / "activation-journal.json"),
+                    "activation_result": repo_relative(cgnat_gateway_activation["bundle_root_path"] / "activation-result.json"),
+                    "rollback_journal": repo_relative(cgnat_gateway_activation["bundle_root_path"] / "rollback-journal.json"),
+                    "rollback_result": repo_relative(cgnat_gateway_activation["bundle_root_path"] / "rollback-result.json"),
+                } if cgnat_gateway_activation is not None else None,
             },
             "published_artifacts": {
                 "run_root": repo_relative(artifact_run_root),
@@ -1312,6 +1445,8 @@ def execute_staged_live_apply(
                 "smartconnect_gateway": smartconnect_validation,
                 "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
                 "cgnat_headend": cgnat_validation,
+                "prepared_cgnat_isp_gateway": cgnat_gateway_prepared["validate"] if cgnat_gateway_prepared is not None else None,
+                "cgnat_isp_gateway": cgnat_gateway_validation,
             },
             "applies": {
                 "backend": backend_apply,
@@ -1320,6 +1455,7 @@ def execute_staged_live_apply(
                 "headend_standby": standby_apply,
                 "smartconnect_gateway": smartconnect_apply,
                 "cgnat_headend": cgnat_apply,
+                "cgnat_isp_gateway": cgnat_gateway_apply,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
             "apply_journal": repo_relative(apply_dir / "apply-journal.json"),
@@ -1670,6 +1806,53 @@ def _prepare_cgnat_headend_root(
         command=validate_command,
     )
     return {"root": cgnat_root, "apply": apply_report, "validate": validate_report}
+
+
+def _prepare_cgnat_gateway_root(
+    journal: list[dict[str, Any]],
+    *,
+    customer_name: str,
+    apply_dir: Path,
+    pki_review_dir: Path,
+) -> dict[str, Any]:
+    gateway_root = apply_dir / "pg"
+    if gateway_root.exists():
+        shutil.rmtree(gateway_root)
+    gateway_root.mkdir(parents=True, exist_ok=True)
+
+    apply_report = _execute_json(
+        journal,
+        action="prepare_cgnat_isp_gateway_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/apply_cgnat_gateway_customer.py",
+            "--customer-name",
+            customer_name,
+            "--gateway-root",
+            str(gateway_root),
+            "--pki-review-dir",
+            str(pki_review_dir),
+            "--json",
+        ],
+    )
+    validate_report = _execute_json(
+        journal,
+        action="validate_prepared_cgnat_isp_gateway_customer",
+        target=customer_name,
+        command=[
+            sys.executable,
+            "scripts/deployment/validate_cgnat_gateway_customer.py",
+            "--customer-name",
+            customer_name,
+            "--gateway-root",
+            str(gateway_root),
+            "--pki-review-dir",
+            str(pki_review_dir),
+            "--json",
+        ],
+    )
+    return {"root": gateway_root, "apply": apply_report, "validate": validate_report}
 
 
 def _copy_relative_paths(source_root: Path, destination_root: Path, relative_paths: list[Path]) -> None:
@@ -2313,6 +2496,16 @@ def execute_ssh_live_apply(
             if target_selection.get("cgnat_headend_active")
             else None
         )
+        cgnat_gateway_prepared = (
+            _prepare_cgnat_gateway_root(
+                journal,
+                customer_name=customer_name,
+                apply_dir=apply_dir,
+                pki_review_dir=cgnat_pki_review_dir,
+            )
+            if target_selection.get("cgnat_isp_gateway") and cgnat_pki_review_dir is not None
+            else None
+        )
         headend_auth = _prepare_live_headend_auth_material(
             journal,
             package_dir=package_dir,
@@ -2401,6 +2594,7 @@ def execute_ssh_live_apply(
         headend_standby = target_selection.get("headend_standby") or {}
         smartconnect_gateway = target_selection.get("smartconnect_gateway") or {}
         cgnat_headend = target_selection.get("cgnat_headend_active") or {}
+        cgnat_isp_gateway = target_selection.get("cgnat_isp_gateway") or {}
         active_instance_id = str(((headend_active.get("selector") or {}).get("value")) or "").strip()
         standby_instance_id = str(((headend_standby.get("selector") or {}).get("value")) or "").strip()
         if not active_instance_id or not standby_instance_id:
@@ -2411,6 +2605,13 @@ def execute_ssh_live_apply(
         cgnat_instance_id = str(((cgnat_headend.get("selector") or {}).get("value")) or "").strip()
         if cgnat_prepared is not None and not cgnat_instance_id:
             raise RuntimeError("selected CGNAT head-end target is missing an instance_id selector")
+        cgnat_gateway_instance_id = (
+            _selector_instance_id(cgnat_isp_gateway, region=region)
+            if cgnat_gateway_prepared is not None
+            else ""
+        )
+        if cgnat_gateway_prepared is not None and not cgnat_gateway_instance_id:
+            raise RuntimeError("selected CGNAT ISP gateway target could not be resolved to an instance_id")
         ssh_user_overrides = {
             instance_id: user
             for instance_id, user in (
@@ -2419,6 +2620,7 @@ def execute_ssh_live_apply(
                 (standby_instance_id, _target_ssh_user(headend_standby)),
                 (smartconnect_instance_id, _target_ssh_user(smartconnect_gateway)),
                 (cgnat_instance_id, _target_ssh_user(cgnat_headend)),
+                (cgnat_gateway_instance_id, _target_ssh_user(cgnat_isp_gateway)),
             )
             if instance_id and user
         }
@@ -2433,6 +2635,7 @@ def execute_ssh_live_apply(
                 standby_instance_id,
                 *([smartconnect_instance_id] if smartconnect_instance_id else []),
                 *([cgnat_instance_id] if cgnat_instance_id else []),
+                *([cgnat_gateway_instance_id] if cgnat_gateway_instance_id else []),
             ],
             ssh_user_overrides=ssh_user_overrides,
         )
@@ -2441,6 +2644,7 @@ def execute_ssh_live_apply(
         headend_root = Path(headend_prepared["root"]).resolve()
         smartconnect_root = Path(smartconnect_prepared["root"]).resolve() if smartconnect_prepared is not None else None
         cgnat_root = Path(cgnat_prepared["root"]).resolve() if cgnat_prepared is not None else None
+        cgnat_gateway_root = Path(cgnat_gateway_prepared["root"]).resolve() if cgnat_gateway_prepared is not None else None
 
         muxer_runtime_remote = _sync_muxer_runtime(
             journal,
@@ -2611,6 +2815,46 @@ def execute_ssh_live_apply(
             if not rollback_preexisting_remote_customer:
                 rollback_steps.append(cgnat_remote["rollback"])
 
+        cgnat_gateway_remote = None
+        if (
+            cgnat_gateway_prepared is not None
+            and cgnat_gateway_root is not None
+            and cgnat_gateway_instance_id
+        ):
+            cgnat_gateway_customer_root = Path(cgnat_gateway_prepared["apply"]["state_json"]).resolve().parent
+            cgnat_gateway_config_json = Path(cgnat_gateway_prepared["apply"]["config_json"]).resolve()
+            cgnat_gateway_remote = _apply_remote_component(
+                journal,
+                context=context,
+                component_name="cgnat-isp-gateway",
+                target_name=str(cgnat_isp_gateway.get("name") or "cgnat-isp-gateway"),
+                target_instance_id=cgnat_gateway_instance_id,
+                via_bastion=True,
+                prepared_root=cgnat_gateway_root,
+                relative_paths=[
+                    cgnat_gateway_customer_root.relative_to(cgnat_gateway_root),
+                    cgnat_gateway_config_json.relative_to(cgnat_gateway_root),
+                ],
+                remote_apply_script=_remote_path(
+                    cgnat_gateway_root,
+                    cgnat_gateway_prepared["apply"]["master_apply_script"],
+                ),
+                remote_remove_script=_remote_path(
+                    cgnat_gateway_root,
+                    cgnat_gateway_prepared["apply"]["master_remove_script"],
+                ),
+                remote_checks=[
+                    _remote_path(cgnat_gateway_root, cgnat_gateway_prepared["apply"]["state_json"]),
+                    _remote_path(cgnat_gateway_root, cgnat_gateway_prepared["apply"]["config_json"]),
+                    _remote_path(cgnat_gateway_root, cgnat_gateway_prepared["apply"]["master_apply_script"]),
+                ],
+                remote_cleanup_paths=[_remote_path(cgnat_gateway_root, cgnat_gateway_customer_root)],
+                remote_cleanup_files=[_remote_path(cgnat_gateway_root, cgnat_gateway_config_json)],
+                remote_name=f"{customer_name}-cgnat-isp-gateway",
+            )
+            if not rollback_preexisting_remote_customer:
+                rollback_steps.append(cgnat_gateway_remote["rollback"])
+
         dynamic_peer_ip_registry = ensure_dynamic_peer_ip_registry_state(
             package_dir=package_dir,
             environment_doc=environment_doc,
@@ -2648,6 +2892,7 @@ def execute_ssh_live_apply(
                 "prepared_headend": repo_relative(Path(headend_prepared["root"])),
                 "prepared_smartconnect_gateway": repo_relative(Path(smartconnect_prepared["root"])) if smartconnect_prepared is not None else None,
                 "prepared_cgnat_headend": repo_relative(Path(cgnat_prepared["root"])) if cgnat_prepared is not None else None,
+                "prepared_cgnat_isp_gateway": repo_relative(Path(cgnat_gateway_prepared["root"])) if cgnat_gateway_prepared is not None else None,
             },
             "published_artifacts": published_artifacts,
             "backup_gate": backup_gate,
@@ -2659,6 +2904,7 @@ def execute_ssh_live_apply(
                 "prepared_headend": headend_prepared["validate"],
                 "prepared_smartconnect_gateway": smartconnect_prepared["validate"] if smartconnect_prepared is not None else None,
                 "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
+                "prepared_cgnat_isp_gateway": cgnat_gateway_prepared["validate"] if cgnat_gateway_prepared is not None else None,
                 "headend_auth": headend_auth,
                 "dynamic_peer_ip_registry": dynamic_peer_ip_registry,
                 "muxer": muxer_remote["validate"],
@@ -2666,6 +2912,7 @@ def execute_ssh_live_apply(
                 "headend_standby": standby_remote["validate"],
                 "smartconnect_gateway": smartconnect_remote["validate"] if smartconnect_remote is not None else None,
                 "cgnat_headend": cgnat_remote["validate"] if cgnat_remote is not None else None,
+                "cgnat_isp_gateway": cgnat_gateway_remote["validate"] if cgnat_gateway_remote is not None else None,
             },
             "applies": {
                 "backend": backend_apply,
@@ -2675,6 +2922,7 @@ def execute_ssh_live_apply(
                 "headend_standby": standby_remote["apply"],
                 "smartconnect_gateway": smartconnect_remote["apply"] if smartconnect_remote is not None else None,
                 "cgnat_headend": cgnat_remote["apply"] if cgnat_remote is not None else None,
+                "cgnat_isp_gateway": cgnat_gateway_remote["apply"] if cgnat_gateway_remote is not None else None,
             },
             "rollback_plan": repo_relative(apply_dir / "rollback-plan.json"),
             "apply_journal": repo_relative(apply_dir / "apply-journal.json"),

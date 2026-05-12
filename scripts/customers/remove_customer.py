@@ -260,6 +260,45 @@ def selector_instance_id(target: dict[str, Any]) -> str:
     return instance_id
 
 
+def resolve_selector_instance_id(target: dict[str, Any], *, region: str) -> str:
+    selector = target.get("selector") or {}
+    selector_type = str(selector.get("type") or "").strip()
+    if selector_type == "instance_id":
+        return selector_instance_id(target)
+    if selector_type != "tag":
+        return ""
+    key = str(selector.get("key") or "Name").strip() or "Name"
+    value = str(selector.get("value") or "").strip()
+    if not value:
+        return ""
+    completed = subprocess.run(
+        [
+            "aws",
+            "ec2",
+            "describe-instances",
+            "--region",
+            region,
+            "--filters",
+            f"Name=tag:{key},Values={value}",
+            "Name=instance-state-name,Values=running",
+            "--query",
+            "Reservations[].Instances[].InstanceId",
+            "--output",
+            "json",
+        ],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"failed to resolve target {target.get('name')} by tag: {completed.stderr or completed.stdout}")
+    matches = json.loads(completed.stdout or "[]")
+    if len(matches) != 1:
+        raise RuntimeError(f"target {target.get('name')} tag selector matched {len(matches)} running instances")
+    return str(matches[0])
+
+
 def selector_staged_root(target: dict[str, Any]) -> Path:
     selector = target.get("selector") or {}
     if str(selector.get("type") or "").strip() != "staged":
@@ -274,6 +313,17 @@ def selected_cgnat_headend(environment_doc: dict[str, Any], metadata: dict[str, 
     if normalize_transport_mode(str(metadata.get("transport_mode") or "")) != "cgnat":
         return {}
     return ((((environment_doc.get("targets") or {}).get("cgnat") or {}).get("headend") or {}).get("active") or {})
+
+
+def selected_cgnat_isp_gateway(environment_doc: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    if normalize_transport_mode(str(metadata.get("transport_mode") or "")) != "cgnat":
+        return {}
+    if str(metadata.get("cgnat_outer_topology") or "").strip() != "shared_isp_gateway":
+        return {}
+    gateway_ref = str(metadata.get("cgnat_outer_gateway_ref") or "").strip()
+    if not gateway_ref:
+        return {}
+    return ((((environment_doc.get("targets") or {}).get("cgnat") or {}).get("isp_gateways") or {}).get(gateway_ref) or {})
 
 
 def inspect_staged_backend_records(
@@ -469,6 +519,25 @@ def cgnat_headend_remove_command(customer_name: str) -> str:
             'test ! -e "${CUSTOMER_ROOT}"',
             'test ! -e "${CONFIG_JSON}"',
             'echo "removed_cgnat_customer=${CUST}"',
+        ]
+    )
+
+
+def cgnat_gateway_remove_command(customer_name: str) -> str:
+    customer_q = shlex.quote(customer_name)
+    return "\n".join(
+        [
+            f"CUST={customer_q}",
+            'CUSTOMER_ROOT="/var/lib/rpdb-cgnat/customers/${CUST}"',
+            'CONFIG_JSON="/etc/rpdb-cgnat/customers/${CUST}-gateway-handoff.json"',
+            'if [ -f "${CUSTOMER_ROOT}/remove-cgnat-gateway-customer.sh" ]; then',
+            '  bash "${CUSTOMER_ROOT}/remove-cgnat-gateway-customer.sh"',
+            "fi",
+            'rm -f "${CONFIG_JSON}"',
+            'rm -rf "${CUSTOMER_ROOT}"',
+            'test ! -e "${CUSTOMER_ROOT}"',
+            'test ! -e "${CONFIG_JSON}"',
+            'echo "removed_cgnat_gateway_customer=${CUST}"',
         ]
     )
 
@@ -717,6 +786,7 @@ def build_touch_plan(
     headends = selected_headends(environment_doc, headend_family)
     smartconnect_gateway = selected_smartconnect_gateway(environment_doc)
     cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
+    cgnat_gateway = selected_cgnat_isp_gateway(environment_doc, metadata)
     return {
         "customer_name": customer_name,
         "customer_sot_table": datastores.get("customer_sot_table"),
@@ -742,6 +812,7 @@ def build_touch_plan(
         "muxer": muxer.get("name"),
         "smartconnect_gateway": smartconnect_gateway.get("name"),
         "cgnat_headend_active": cgnat_headend.get("name"),
+        "cgnat_isp_gateway": cgnat_gateway.get("name"),
         "headends": [
             {
                 "family": headend.get("family"),
@@ -776,9 +847,40 @@ def execute_staged_remove(
     smartconnect_root = selector_staged_root(smartconnect_gateway) if smartconnect_gateway else None
     cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
     cgnat_root = selector_staged_root(cgnat_headend) if cgnat_headend else None
+    cgnat_gateway = selected_cgnat_isp_gateway(environment_doc, metadata)
+    cgnat_gateway_root = selector_staged_root(cgnat_gateway) if cgnat_gateway else None
 
     journal: list[dict[str, Any]] = []
     try:
+        if cgnat_gateway_root is not None:
+            returncode, payload, stdout, stderr = run_json(
+                [
+                    sys.executable,
+                    "scripts/deployment/remove_cgnat_gateway_customer.py",
+                    "--customer-name",
+                    customer_name,
+                    "--gateway-root",
+                    str(cgnat_gateway_root),
+                    "--json",
+                ]
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_cgnat_isp_gateway_customer",
+                    "target": cgnat_gateway.get("name"),
+                    "target_role": cgnat_gateway.get("role"),
+                    "success": returncode == 0,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "payload": payload,
+                }
+            )
+            if returncode != 0:
+                raise RuntimeError(
+                    f"CGNAT ISP gateway remove failed for {cgnat_gateway.get('name')}: {stderr or stdout}"
+                )
+
         if cgnat_root is not None:
             returncode, payload, stdout, stderr = run_json(
                 [
@@ -1045,6 +1147,12 @@ def execute_live_remove(
     smartconnect_instance_id = selector_instance_id(smartconnect_gateway) if smartconnect_gateway else ""
     cgnat_headend = selected_cgnat_headend(environment_doc, metadata)
     cgnat_instance_id = selector_instance_id(cgnat_headend) if cgnat_headend else ""
+    cgnat_gateway = selected_cgnat_isp_gateway(environment_doc, metadata)
+    cgnat_gateway_instance_id = (
+        resolve_selector_instance_id(cgnat_gateway, region=region)
+        if cgnat_gateway
+        else ""
+    )
     ssh_user_overrides = {
         instance_id: user
         for instance_id, user in (
@@ -1055,6 +1163,7 @@ def execute_live_remove(
             ],
             (smartconnect_instance_id, target_ssh_user(smartconnect_gateway)),
             (cgnat_instance_id, target_ssh_user(cgnat_headend)),
+            (cgnat_gateway_instance_id, target_ssh_user(cgnat_gateway)),
         )
         if instance_id and user
     }
@@ -1069,10 +1178,37 @@ def execute_live_remove(
             *headend_instance_ids,
             *([smartconnect_instance_id] if smartconnect_instance_id else []),
             *([cgnat_instance_id] if cgnat_instance_id else []),
+            *([cgnat_gateway_instance_id] if cgnat_gateway_instance_id else []),
         ],
         ssh_user_overrides=ssh_user_overrides,
     )
     try:
+        if cgnat_gateway_instance_id:
+            cgnat_gateway_result = run_remote_command(
+                context=context,
+                target_instance_id=cgnat_gateway_instance_id,
+                via_bastion=True,
+                remote_command=sudo_shell(cgnat_gateway_remove_command(customer_name), strict=True),
+                timeout_seconds=300,
+            )
+            journal.append(
+                {
+                    "recorded_at": utc_now(),
+                    "action": "remove_cgnat_isp_gateway_customer",
+                    "target": cgnat_gateway.get("name"),
+                    "instance_id": cgnat_gateway_instance_id,
+                    "target_role": cgnat_gateway.get("role"),
+                    "success": cgnat_gateway_result.get("success"),
+                    "stdout": cgnat_gateway_result.get("stdout"),
+                    "stderr": cgnat_gateway_result.get("stderr"),
+                }
+            )
+            if not cgnat_gateway_result.get("success"):
+                raise RuntimeError(
+                    f"CGNAT ISP gateway remove failed for {cgnat_gateway.get('name')}: "
+                    f"{cgnat_gateway_result.get('stderr') or cgnat_gateway_result.get('stdout')}"
+                )
+
         if cgnat_instance_id:
             cgnat_result = run_remote_command(
                 context=context,
@@ -1443,6 +1579,11 @@ def main() -> int:
         backup_status["smartconnect_gateway"] = reference_is_concrete(backup_refs.get("smartconnect_gateway"))
     if selected_cgnat_headend(environment_doc or {}, metadata):
         backup_status["cgnat_headend"] = reference_is_concrete(backup_refs.get("cgnat_headend"))
+    selected_gateway = selected_cgnat_isp_gateway(environment_doc or {}, metadata)
+    if selected_gateway:
+        gateway_ref = str(metadata.get("cgnat_outer_gateway_ref") or "").strip()
+        gateway_backup = ((backup_refs.get("cgnat_isp_gateways") or {}).get(gateway_ref))
+        backup_status["cgnat_isp_gateway"] = reference_is_concrete(gateway_backup)
     for key, present in owner_status.items():
         if not present:
             errors.append(f"owner reference missing for {key}")
@@ -1476,6 +1617,8 @@ def main() -> int:
         "validate_backup_and_owner_references",
         "write_execution_plan",
     ]
+    if selected_cgnat_isp_gateway(environment_doc or {}, metadata):
+        execution_order.append("remove_cgnat_isp_gateway_customer")
     if selected_cgnat_headend(environment_doc or {}, metadata):
         execution_order.append("remove_cgnat_headend_customer")
     execution_order.extend(
