@@ -39,6 +39,7 @@ class LiveApplySecretSeedTests(unittest.TestCase):
         transport_mode: str = "cgnat",
         pki_mode: str = "local_generate",
         peer: dict | None = None,
+        ipsec: dict | None = None,
     ) -> None:
         module = {
             "customer": {
@@ -57,6 +58,8 @@ class LiveApplySecretSeedTests(unittest.TestCase):
                 },
             },
         }
+        if ipsec is not None:
+            module["ipsec"] = ipsec
         (self.package_dir / "customer-module.json").write_text(
             json.dumps(module, indent=2) + "\n",
             encoding="utf-8",
@@ -153,6 +156,92 @@ class LiveApplySecretSeedTests(unittest.TestCase):
         self.assertEqual(report["source"], "local")
         self.assertEqual(report["secret_ref"], "local:customer.peer.psk")
         self.assertEqual(report["secret"], "inline-test-psk")
+
+    def test_certificate_auth_material_is_staged_from_local_files_without_aws_lookup(self) -> None:
+        cert_dir = self.test_root / "certs"
+        cert_dir.mkdir(parents=True, exist_ok=True)
+        headend_cert = cert_dir / "headend-cert.pem"
+        headend_key = cert_dir / "headend-key.pem"
+        headend_passphrase = cert_dir / "headend-key-passphrase.txt"
+        remote_trust = cert_dir / "remote-trust.pem"
+        remote_cert = cert_dir / "remote-cert.pem"
+        headend_cert.write_text("-----BEGIN CERTIFICATE-----\nheadend\n-----END CERTIFICATE-----\n", encoding="utf-8")
+        headend_key.write_text("-----BEGIN PRIVATE KEY-----\nheadend-key\n-----END PRIVATE KEY-----\n", encoding="utf-8")
+        headend_passphrase.write_text("test-passphrase\n", encoding="utf-8")
+        remote_trust.write_text("-----BEGIN CERTIFICATE-----\nremote-trust\n-----END CERTIFICATE-----\n", encoding="utf-8")
+        remote_cert.write_text("-----BEGIN CERTIFICATE-----\nremote-cert\n-----END CERTIFICATE-----\n", encoding="utf-8")
+        self._write_module(
+            peer={"public_ip": "203.0.113.70"},
+            ipsec={
+                "auth": {
+                    "method": "certificate",
+                    "certificate": {
+                        "profile": "customer_supplied",
+                        "headend": {
+                            "id": "rpdb-headend.example",
+                            "cert_ref": f"file://{headend_cert.as_posix()}",
+                            "private_key_secret_ref": f"file://{headend_key.as_posix()}",
+                            "private_key_passphrase_secret_ref": f"file://{headend_passphrase.as_posix()}",
+                        },
+                        "remote": {
+                            "id": "customer-cert.example",
+                            "trust_ref": f"file://{remote_trust.as_posix()}",
+                            "cert_ref": f"file://{remote_cert.as_posix()}",
+                        },
+                    },
+                },
+            },
+        )
+        headend_root = self.test_root / "headend-root"
+        swanctl_conf = headend_root / "etc" / "swanctl" / "conf.d" / "rpdb-customers" / "test-cgnat-customer.conf"
+        swanctl_conf.parent.mkdir(parents=True, exist_ok=True)
+        swanctl_conf.write_text(
+            "\n".join(
+                [
+                    "connections { test-cgnat-customer { local { auth = pubkey } } }",
+                    "secrets {",
+                    "  private-test-cgnat-customer-headend-key {",
+                    "    file = rpdb-customers/test-cgnat-customer-headend-key.pem",
+                    "    secret = resolved-via-secret-store",
+                    "  }",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(live_apply_lib, "run_local") as run_local:
+            report = live_apply_lib._prepare_live_headend_auth_material(
+                [],
+                package_dir=self.package_dir,
+                headend_prepared={
+                    "root": str(headend_root),
+                    "apply": {"swanctl_conf": str(swanctl_conf)},
+                },
+                region="us-east-1",
+                apply_dir=self.apply_dir,
+            )
+
+        run_local.assert_not_called()
+        self.assertEqual(report["source"], "certificate")
+        self.assertEqual(report["profile"], "customer_supplied")
+        self.assertEqual(
+            sorted(report["relative_paths"]),
+            sorted(
+                [
+                    "etc/swanctl/x509/rpdb-customers/test-cgnat-customer-headend-cert.pem",
+                    "etc/swanctl/private/rpdb-customers/test-cgnat-customer-headend-key.pem",
+                    "etc/swanctl/x509ca/rpdb-customers/test-cgnat-customer-remote-trust.pem",
+                    "etc/swanctl/x509/rpdb-customers/test-cgnat-customer-remote-cert.pem",
+                ]
+            ),
+        )
+        self.assertTrue((headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / "test-cgnat-customer-headend-cert.pem").exists())
+        self.assertTrue((headend_root / "etc" / "swanctl" / "private" / "rpdb-customers" / "test-cgnat-customer-headend-key.pem").exists())
+        self.assertTrue((headend_root / "etc" / "swanctl" / "x509ca" / "rpdb-customers" / "test-cgnat-customer-remote-trust.pem").exists())
+        self.assertEqual(report["private_key_passphrase"]["secret_length"], len("test-passphrase"))
+        self.assertIn('secret = "test-passphrase"', swanctl_conf.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

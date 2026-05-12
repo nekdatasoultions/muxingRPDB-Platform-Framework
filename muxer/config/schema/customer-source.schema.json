@@ -130,6 +130,18 @@
         "package_name": {
           "type": "string",
           "minLength": 1
+        },
+        "cert_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "private_key_secret_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "private_key_passphrase_secret_ref": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -155,6 +167,7 @@
           "enum": [
             "reference",
             "local_generate",
+            "provided",
             "provider_api"
           ]
         },
@@ -252,18 +265,6 @@
       "required": [
         "public_ip"
       ],
-      "oneOf": [
-        {
-          "required": [
-            "psk_secret_ref"
-          ]
-        },
-        {
-          "required": [
-            "psk"
-          ]
-        }
-      ],
       "properties": {
         "public_ip": {
           "$ref": "#/$defs/ipv4"
@@ -331,6 +332,135 @@
                 "psk"
               ]
             }
+          }
+        }
+      ]
+    },
+    "ipsec_auth_material": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cert_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "private_key_secret_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "private_key_passphrase_secret_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ipsec_certificate_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "cert_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "private_key_secret_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "ipsec_certificate_auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headend",
+        "remote"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "third_party_provided",
+            "customer_supplied"
+          ]
+        },
+        "headend": {
+          "$ref": "#/$defs/ipsec_auth_material"
+        },
+        "remote": {
+          "$ref": "#/$defs/ipsec_auth_material"
+        },
+        "customer_handoff": {
+          "$ref": "#/$defs/ipsec_certificate_handoff"
+        }
+      },
+      "allOf": [
+        {
+          "properties": {
+            "headend": {
+              "required": [
+                "cert_ref",
+                "private_key_secret_ref"
+              ]
+            },
+            "remote": {
+              "required": [
+                "id",
+                "trust_ref"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ipsec_auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "psk",
+            "certificate"
+          ]
+        },
+        "certificate": {
+          "$ref": "#/$defs/ipsec_certificate_auth"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "certificate"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "certificate"
+            ]
           }
         }
       ]
@@ -835,6 +965,9 @@
         },
         "initiation": {
           "$ref": "#/$defs/ipsec_initiation"
+        },
+        "auth": {
+          "$ref": "#/$defs/ipsec_auth"
         }
       }
     },

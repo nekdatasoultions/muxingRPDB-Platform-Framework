@@ -212,18 +212,50 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
                 f"headend JSON file has unresolved placeholders: {relative_name} -> {', '.join(unresolved)}"
             )
 
-    if "connections {" not in swanctl_text or "secrets {" not in swanctl_text:
-        report["errors"].append("swanctl-connection.conf is missing required connections/secrets blocks")
+    auth_intent = ipsec_intent.get("auth") or {}
+    auth_method = str(auth_intent.get("method") or "psk").strip().lower()
+    if "connections {" not in swanctl_text:
+        report["errors"].append("swanctl-connection.conf is missing required connections block")
     expected_secret_section = f"  ike-{bundle.customer_name}-psk {{"
     unsupported_secret_section = f"  {bundle.customer_name}-psk {{"
-    if expected_secret_section not in swanctl_text:
-        report["errors"].append(
-            "swanctl-connection.conf must render IKE PSK secrets under secrets.ike<suffix>"
-        )
-    if unsupported_secret_section in swanctl_text:
-        report["errors"].append(
-            "swanctl-connection.conf renders an unsupported non-ike PSK secret section"
-        )
+    if auth_method == "certificate":
+        if "auth = pubkey" not in swanctl_text:
+            report["errors"].append("certificate-auth customer must render swanctl auth = pubkey")
+        if "auth = psk" in swanctl_text or expected_secret_section in swanctl_text:
+            report["errors"].append("certificate-auth customer must not render PSK auth or PSK secrets")
+        certificate_intent = auth_intent.get("certificate") or {}
+        headend_intent = certificate_intent.get("headend") or {}
+        remote_intent = certificate_intent.get("remote") or {}
+        if headend_intent.get("id") and ipsec_intent.get("local_id") != headend_intent.get("id"):
+            report["errors"].append("certificate-auth IPsec local_id must match certificate headend.id")
+        if remote_intent.get("id") and ipsec_intent.get("remote_id") != remote_intent.get("id"):
+            report["errors"].append("certificate-auth IPsec remote_id must match certificate remote.id")
+        material_paths = auth_intent.get("certificate_material_paths") or {}
+        for label in ("headend_cert", "remote_trust"):
+            expected_path = str(material_paths.get(label) or "").strip()
+            if expected_path and expected_path not in swanctl_text:
+                report["errors"].append(f"certificate-auth swanctl is missing {label}: {expected_path}")
+        passphrase_ref = str(headend_intent.get("private_key_passphrase_secret_ref") or "").strip()
+        if passphrase_ref:
+            passphrase_section = f"private-{bundle.customer_name}-headend-key"
+            expected_key_path = str(material_paths.get("headend_private_key") or "").strip()
+            if passphrase_section not in swanctl_text:
+                report["errors"].append("certificate-auth encrypted private key must render a swanctl private-key secret block")
+            if expected_key_path and f"file = {expected_key_path}" not in swanctl_text:
+                report["errors"].append(f"certificate-auth private-key secret block is missing file = {expected_key_path}")
+            if not re.search(rf"(?ms)^\s*{re.escape(passphrase_section)}\s*\{{.*?^\s*secret\s*=", swanctl_text):
+                report["errors"].append("certificate-auth private-key secret block is missing secret")
+    else:
+        if "secrets {" not in swanctl_text:
+            report["errors"].append("PSK swanctl-connection.conf is missing required secrets block")
+        if expected_secret_section not in swanctl_text:
+            report["errors"].append(
+                "swanctl-connection.conf must render IKE PSK secrets under secrets.ike<suffix>"
+            )
+        if unsupported_secret_section in swanctl_text:
+            report["errors"].append(
+                "swanctl-connection.conf renders an unsupported non-ike PSK secret section"
+            )
 
     initiation = ipsec_intent.get("initiation") or {}
     start_action = str(initiation_intent.get("swanctl_start_action") or "").strip()
@@ -394,7 +426,7 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
         report["errors"].append("public identity remove script must retain the shared head-end loopback identity")
     if public_identity_intent.get("remove_policy") != "retain_shared_identity":
         report["errors"].append("public identity remove policy must retain the shared head-end loopback identity")
-    if public_identity_ip and ipsec_intent.get("local_id") not in (None, "", public_identity_ip):
+    if auth_method != "certificate" and public_identity_ip and ipsec_intent.get("local_id") not in (None, "", public_identity_ip):
         report["errors"].append("IPsec local_id must match the rendered public identity IP")
 
     if not route_lines:
@@ -662,6 +694,10 @@ def _render_master_remove_script(layout: dict[str, Path], customer_name: str) ->
             'rm -f "${SWANCTL_CONF}"',
             'rm -f "${SWANCTL_FLAT_CONF}"',
             'rm -f "${IPSEC_CUSTOMER_CONF}"',
+            'rm -f "${ROOT}/etc/swanctl/x509/rpdb-customers/${CUST}-headend-cert.pem"',
+            'rm -f "${ROOT}/etc/swanctl/private/rpdb-customers/${CUST}-headend-key.pem"',
+            'rm -f "${ROOT}/etc/swanctl/x509ca/rpdb-customers/${CUST}-remote-trust.pem"',
+            'rm -f "${ROOT}/etc/swanctl/x509/rpdb-customers/${CUST}-remote-cert.pem"',
             'bash "${CUSTOMER_ROOT}/routing/remove-routes.sh"',
             'bash "${CUSTOMER_ROOT}/post-ipsec-nat/remove-post-ipsec-nat.sh"',
             'bash "${CUSTOMER_ROOT}/outside-nat/remove-outside-nat.sh"',

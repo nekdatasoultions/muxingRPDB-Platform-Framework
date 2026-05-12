@@ -198,7 +198,7 @@ def _build_runtime_payloads(package: dict[str, Any]) -> dict[str, dict[str, Any]
     }
 
 
-def validate_cgnat_package(package_dir: Path) -> dict[str, Any]:
+def validate_cgnat_package(package_dir: Path, pki_review_dir: Path | None = None) -> dict[str, Any]:
     report: dict[str, Any] = {
         "package_dir": str(package_dir.resolve()),
         "customer_name": None,
@@ -228,6 +228,23 @@ def validate_cgnat_package(package_dir: Path) -> dict[str, Any]:
     report["details"]["transport_table"] = profile.get("transport_table")
     report["details"]["tunnel_mtu"] = profile.get("tunnel_mtu")
 
+    if pki_review_dir is not None:
+        try:
+            pki_review = _validate_pki_review_dir(pki_review_dir)
+            headend_manifest = _load_pki_headend_manifest(pki_review_dir, pki_review)
+        except Exception as exc:
+            report["errors"].append(str(exc))
+        else:
+            pki_customer_name = str(pki_review.get("customer_name") or "").strip()
+            if pki_customer_name != package["customer_name"]:
+                report["errors"].append(
+                    f"CGNAT PKI review customer mismatch: {pki_customer_name or 'missing'} != {package['customer_name']}"
+                )
+            report["details"]["pki_review_dir"] = str(pki_review_dir.resolve())
+            report["details"]["pki_mode"] = pki_review.get("mode")
+            report["details"]["pki_provider"] = pki_review.get("provider")
+            report["details"]["pki_material_mode"] = headend_manifest.get("material_mode")
+
     for relative_name, payload in {
         "customer_summary": runtime_payloads["customer_summary"],
         "transport_profile": runtime_payloads["transport_profile"],
@@ -247,6 +264,53 @@ def validate_cgnat_package(package_dir: Path) -> dict[str, Any]:
     return report
 
 
+def _validate_pki_review_dir(pki_review_dir: Path | None) -> dict[str, Any] | None:
+    if pki_review_dir is None:
+        return None
+    review_path = pki_review_dir / "pki-review.json"
+    if not review_path.exists():
+        raise ValueError(f"CGNAT PKI review is missing pki-review.json: {review_path}")
+    review = _load_json(review_path)
+    if not bool(review.get("ready_for_review")):
+        raise ValueError(f"CGNAT PKI review is not ready: {review_path}")
+    return review
+
+
+def _resolve_pki_artifact_path(
+    pki_review_dir: Path,
+    value: Any,
+    *,
+    default_relative: str,
+) -> Path:
+    candidates: list[Path] = []
+    value_text = str(value or "").strip()
+    if value_text:
+        raw_path = Path(value_text)
+        candidates.append(raw_path)
+        if not raw_path.is_absolute():
+            candidates.append((pki_review_dir / raw_path).resolve())
+        if raw_path.name:
+            candidates.extend(sorted(pki_review_dir.rglob(raw_path.name)))
+
+    candidates.append((pki_review_dir / default_relative).resolve())
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[-1]
+
+
+def _load_pki_headend_manifest(pki_review_dir: Path, pki_review: dict[str, Any] | None) -> dict[str, Any]:
+    artifacts = dict((pki_review or {}).get("artifacts") or {})
+    manifest_path = _resolve_pki_artifact_path(
+        pki_review_dir,
+        artifacts.get("headend_install_manifest"),
+        default_relative="headend-install/headend-install-manifest.json",
+    )
+    if not manifest_path.exists():
+        raise ValueError(f"CGNAT PKI head-end install manifest is missing: {manifest_path}")
+    return _load_json(manifest_path)
+
+
 def build_install_layout(cgnat_root: Path, customer_name: str) -> dict[str, Path]:
     resolved_root = cgnat_root.resolve()
     customer_root = resolved_root / CGNAT_STATE_ROOT / customer_name
@@ -264,11 +328,107 @@ def build_install_layout(cgnat_root: Path, customer_name: str) -> dict[str, Path
         "transport_remove_script": customer_root / "transport" / "remove-transport.sh",
         "validation_intent": customer_root / "validation" / "validation-intent.json",
         "activation_manifest": customer_root / "validation" / "activation-manifest.json",
+        "pki_root": customer_root / "pki",
+        "pki_review": customer_root / "pki" / "pki-review.json",
+        "pki_headend_root": customer_root / "pki" / "headend-install",
+        "pki_headend_manifest": customer_root / "pki" / "headend-install" / "headend-install-manifest.json",
         "config_json": config_root / f"{customer_name}.json",
         "master_apply_script": customer_root / "apply-cgnat-customer.sh",
         "master_remove_script": customer_root / "remove-cgnat-customer.sh",
         "applied_stamp": customer_root / "applied.stamp",
         "state_json": customer_root / "install-state.json",
+    }
+
+
+def _copy_pki_material_file(
+    source_value: Any,
+    destination: Path,
+    *,
+    label: str,
+    required: bool,
+    search_root: Path,
+) -> str:
+    source_text = str(source_value or "").strip()
+    if not source_text:
+        if required:
+            raise ValueError(f"CGNAT PKI head-end material is missing {label}")
+        return ""
+    source_path = Path(source_text)
+    if not source_path.exists() and not source_path.is_absolute():
+        repo_relative = (search_root / source_path).resolve()
+        if repo_relative.exists():
+            source_path = repo_relative
+    if not source_path.exists() and source_path.name:
+        matches = sorted(search_root.rglob(source_path.name))
+        if len(matches) == 1:
+            source_path = matches[0]
+    if not source_path.exists():
+        if required:
+            raise ValueError(f"CGNAT PKI head-end material does not exist for {label}: {source_path}")
+        return ""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, destination)
+    return str(destination)
+
+
+def _install_cgnat_pki_review(
+    *,
+    pki_review_dir: Path | None,
+    layout: dict[str, Path],
+) -> dict[str, Any] | None:
+    pki_review = _validate_pki_review_dir(pki_review_dir)
+    if pki_review is None or pki_review_dir is None:
+        return None
+
+    manifest = _load_pki_headend_manifest(pki_review_dir, pki_review)
+    material_mode = str(manifest.get("material_mode") or pki_review.get("mode") or "").strip()
+    requires_local_material = material_mode in {"local_generate", "provided"}
+
+    layout["pki_root"].mkdir(parents=True, exist_ok=True)
+    layout["pki_headend_root"].mkdir(parents=True, exist_ok=True)
+    _write_json(layout["pki_review"], pki_review)
+    _write_json(layout["pki_headend_manifest"], manifest)
+
+    installed_files = {
+        "headend_certificate": _copy_pki_material_file(
+            manifest.get("certificate_path"),
+            layout["pki_headend_root"] / "headend.crt",
+            label="headend certificate",
+            required=requires_local_material,
+            search_root=pki_review_dir,
+        ),
+        "headend_private_key": _copy_pki_material_file(
+            manifest.get("private_key_path"),
+            layout["pki_headend_root"] / "headend.key",
+            label="headend private key",
+            required=requires_local_material,
+            search_root=pki_review_dir,
+        ),
+        "ca_certificate": _copy_pki_material_file(
+            manifest.get("ca_certificate_path"),
+            layout["pki_headend_root"] / "outer-ca.crt",
+            label="CA certificate",
+            required=requires_local_material,
+            search_root=pki_review_dir,
+        ),
+        "headend_private_key_passphrase": _copy_pki_material_file(
+            manifest.get("private_key_passphrase_path"),
+            layout["pki_headend_root"] / "headend-key.passphrase",
+            label="headend private key passphrase",
+            required=False,
+            search_root=pki_review_dir,
+        ),
+    }
+    return {
+        "mode": pki_review.get("mode"),
+        "provider": pki_review.get("provider"),
+        "material_mode": material_mode,
+        "pki_review": str(layout["pki_review"]),
+        "headend_install_manifest": str(layout["pki_headend_manifest"]),
+        "installed_files": {key: value for key, value in installed_files.items() if value},
+        "outer_handoff": pki_review.get("outer_handoff"),
+        "customer_handoff": pki_review.get("customer_handoff"),
+        "gateway_handoff": pki_review.get("gateway_handoff"),
     }
 
 
@@ -347,8 +507,8 @@ def _render_master_remove_script(layout: dict[str, Path]) -> str:
     )
 
 
-def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]:
-    validation = validate_cgnat_package(package_dir)
+def install_cgnat_package(package_dir: Path, cgnat_root: Path, pki_review_dir: Path | None = None) -> dict[str, Any]:
+    validation = validate_cgnat_package(package_dir, pki_review_dir=pki_review_dir)
     if not validation["valid"]:
         raise ValueError("CGNAT package is not installable: " + "; ".join(validation["errors"]))
 
@@ -357,6 +517,8 @@ def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]
     layout = build_install_layout(cgnat_root, package["customer_name"])
     if layout["artifacts_root"].exists():
         shutil.rmtree(layout["artifacts_root"])
+    if layout["pki_root"].exists():
+        shutil.rmtree(layout["pki_root"])
     layout["artifacts_root"].mkdir(parents=True, exist_ok=True)
     layout["config_json"].parent.mkdir(parents=True, exist_ok=True)
 
@@ -374,6 +536,10 @@ def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]
     _write_text(layout["transport_remove_script"], _render_transport_remove_script(layout))
     _write_text(layout["master_apply_script"], _render_master_apply_script(layout))
     _write_text(layout["master_remove_script"], _render_master_remove_script(layout))
+    pki_install = _install_cgnat_pki_review(
+        pki_review_dir=pki_review_dir,
+        layout=layout,
+    )
     for key in (
         "transport_apply_script",
         "transport_remove_script",
@@ -389,6 +555,7 @@ def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]
         "package_dir": str(package["package_dir"]),
         "transport": package["cgnat_transport"],
         "transport_profile": runtime_payloads["transport_profile"],
+        "pki_install": pki_install,
         "paths": {name: str(path) for name, path in layout.items()},
     }
     _write_json(layout["state_json"], state)
@@ -404,6 +571,7 @@ def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]
         "transport_profile": str(layout["transport_profile"]),
         "validation_intent": str(layout["validation_intent"]),
         "activation_manifest": str(layout["activation_manifest"]),
+        "pki_install": pki_install,
         "transport_apply_script": str(layout["transport_apply_script"]),
         "transport_remove_script": str(layout["transport_remove_script"]),
         "master_apply_script": str(layout["master_apply_script"]),
@@ -411,8 +579,8 @@ def install_cgnat_package(package_dir: Path, cgnat_root: Path) -> dict[str, Any]
     }
 
 
-def validate_installed_cgnat(package_dir: Path, cgnat_root: Path) -> dict[str, Any]:
-    report = validate_cgnat_package(package_dir)
+def validate_installed_cgnat(package_dir: Path, cgnat_root: Path, pki_review_dir: Path | None = None) -> dict[str, Any]:
+    report = validate_cgnat_package(package_dir, pki_review_dir=pki_review_dir)
     if not report["valid"]:
         return report
 
@@ -475,6 +643,14 @@ def validate_installed_cgnat(package_dir: Path, cgnat_root: Path) -> dict[str, A
         report["details"]["install_state"] = state
         if state.get("customer_name") != package["customer_name"]:
             report["errors"].append(f"install-state customer mismatch in {layout['state_json']}")
+        pki_install = state.get("pki_install")
+        if isinstance(pki_install, dict):
+            for label, installed_path in dict(pki_install.get("installed_files") or {}).items():
+                if installed_path and not Path(str(installed_path)).exists():
+                    report["errors"].append(f"installed CGNAT PKI file missing for {label}: {installed_path}")
+            for required_path in (layout["pki_review"], layout["pki_headend_manifest"]):
+                if not required_path.exists():
+                    report["errors"].append(f"installed CGNAT PKI path missing: {required_path}")
 
     report["details"]["installed_root"] = str(layout["customer_root"])
     report["details"]["installed_config"] = str(layout["config_json"])

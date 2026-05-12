@@ -33,6 +33,33 @@ def _render_swanctl_version(ipsec: Dict[str, Any]) -> str:
     return "2"
 
 
+def _ipsec_auth(ipsec: Dict[str, Any]) -> Dict[str, Any]:
+    auth = ipsec.get("auth") or {}
+    method = str(auth.get("method") or "psk").strip().lower().replace("-", "_")
+    if method in {"cert", "certificates", "pubkey", "public_key"}:
+        method = "certificate"
+    if method not in {"psk", "certificate"}:
+        method = "psk"
+    return {**auth, "method": method}
+
+
+def _certificate_auth(ipsec: Dict[str, Any]) -> Dict[str, Any]:
+    auth = _ipsec_auth(ipsec)
+    if auth.get("method") != "certificate":
+        return {}
+    certificate = auth.get("certificate") or {}
+    return certificate if isinstance(certificate, dict) else {}
+
+
+def _certificate_material_paths(customer_name: str) -> Dict[str, str]:
+    return {
+        "headend_cert": f"rpdb-customers/{customer_name}-headend-cert.pem",
+        "headend_private_key": f"rpdb-customers/{customer_name}-headend-key.pem",
+        "remote_trust": f"rpdb-customers/{customer_name}-remote-trust.pem",
+        "remote_cert": f"rpdb-customers/{customer_name}-remote-cert.pem",
+    }
+
+
 def _render_ike_proposals(ipsec: Dict[str, Any]) -> str:
     policies = [str(value) for value in (ipsec.get("ike_policies") or []) if str(value).strip()]
     if policies:
@@ -426,6 +453,20 @@ def _render_ipsec_intent(
     resolved_transport = transport or {}
     headend_peer_endpoint = _headend_peer_endpoint(peer, resolved_transport)
     cgnat = _cgnat_transport_doc(resolved_transport)
+    auth = _ipsec_auth(ipsec)
+    certificate_auth = _certificate_auth(ipsec)
+    cert_headend = certificate_auth.get("headend") or {}
+    cert_remote = certificate_auth.get("remote") or {}
+    remote_id = (
+        str(cert_remote.get("id") or "").strip()
+        if auth.get("method") == "certificate"
+        else _headend_remote_id(peer, ipsec, resolved_transport)
+    )
+    local_id = (
+        str(cert_headend.get("id") or "").strip()
+        if auth.get("method") == "certificate"
+        else str(ipsec.get("local_id") or _placeholder("HEADEND_ID"))
+    )
     return {
         "customer_name": customer.get("name"),
         "peer_public_ip": headend_peer_endpoint,
@@ -433,8 +474,8 @@ def _render_ipsec_intent(
         "outer_topology": _cgnat_outer_topology(resolved_transport) if resolved_transport else "",
         "outer_gateway_ref": cgnat.get("outer_gateway_ref"),
         "local_addrs": local_addrs,
-        "remote_id": _headend_remote_id(peer, ipsec, resolved_transport),
-        "local_id": ipsec.get("local_id") or _placeholder("HEADEND_ID"),
+        "remote_id": remote_id,
+        "local_id": local_id,
         "ike_version": str(ipsec.get("ike_version") or "ikev2"),
         "swanctl_version": _render_swanctl_version(ipsec),
         "ike": ipsec.get("ike"),
@@ -467,6 +508,15 @@ def _render_ipsec_intent(
         "vti_routing": ipsec.get("vti_routing"),
         "vti_shared": ipsec.get("vti_shared"),
         "bidirectional_secret": ipsec.get("bidirectional_secret"),
+        "auth": {
+            "method": auth.get("method"),
+            "certificate": certificate_auth or None,
+            "certificate_material_paths": (
+                _certificate_material_paths(str(customer.get("name") or ""))
+                if auth.get("method") == "certificate"
+                else None
+            ),
+        },
         "encapsulation_model": "nat-t" if protocols.get("udp4500") else "strict-non-nat",
         "selectors": {
             "local_subnets": selectors.get("local_subnets") or [],
@@ -504,8 +554,21 @@ def _render_swanctl_connection(
     customer_name = str(customer.get("name") or "")
     secret_name = f"ike-{customer_name}-psk"
     resolved_transport = transport or {}
-    remote_id = _headend_remote_id(peer, ipsec, resolved_transport)
-    local_id = str(ipsec.get("local_id") or "")
+    auth = _ipsec_auth(ipsec)
+    certificate_auth = _certificate_auth(ipsec)
+    cert_headend = certificate_auth.get("headend") or {}
+    cert_remote = certificate_auth.get("remote") or {}
+    cert_paths = _certificate_material_paths(customer_name)
+    remote_id = (
+        str(cert_remote.get("id") or "").strip()
+        if auth.get("method") == "certificate"
+        else _headend_remote_id(peer, ipsec, resolved_transport)
+    )
+    local_id = (
+        str(cert_headend.get("id") or "").strip()
+        if auth.get("method") == "certificate"
+        else str(ipsec.get("local_id") or "")
+    )
     local_addrs = str(ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP"))
     remote_addrs = _headend_peer_endpoint(peer, resolved_transport)
     ike_proposals = _render_ike_proposals(ipsec)
@@ -527,15 +590,42 @@ def _render_swanctl_connection(
     _append_if(lines, "dpd_delay", str(ipsec.get("dpddelay") or ""))
     _append_if(lines, "dpd_timeout", str(ipsec.get("dpdtimeout") or ""))
     _append_if(lines, "rekey_time", str(ipsec.get("ikelifetime") or ""))
+    lines.extend(["    local {"])
+    if auth.get("method") == "certificate":
+        lines.extend(
+            [
+                "      auth = pubkey",
+                f"      id = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
+                f"      certs = {cert_paths['headend_cert']}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "      auth = psk",
+                f"      id = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
+            ]
+        )
+    lines.extend(["    }", "    remote {"])
+    if auth.get("method") == "certificate":
+        lines.extend(
+            [
+                "      auth = pubkey",
+                f"      id = {remote_id}",
+                f"      cacerts = {cert_paths['remote_trust']}",
+            ]
+        )
+        if cert_remote.get("cert_ref"):
+            lines.append(f"      certs = {cert_paths['remote_cert']}")
+    else:
+        lines.extend(
+            [
+                "      auth = psk",
+                f"      id = {remote_id}",
+            ]
+        )
     lines.extend(
         [
-            "    local {",
-            "      auth = psk",
-            f"      id = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
-            "    }",
-            "    remote {",
-            "      auth = psk",
-            f"      id = {remote_id}",
             "    }",
             "    children {",
             f"      {customer_name}-child {{",
@@ -559,22 +649,32 @@ def _render_swanctl_connection(
         lines.append(f"        # requested_pfs_groups = {','.join(ipsec.get('pfs_groups') or [])}")
     if ipsec.get("pfs_required") is not None:
         lines.append(f"        # requested_pfs_required = {_yes_no(ipsec.get('pfs_required'))}")
-    lines.extend(
-        [
-            "      }",
-            "    }",
-            "  }",
-            "}",
-            "",
-            "secrets {",
-            f"  {secret_name} {{",
-            f"    id-1 = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
-            f"    id-2 = {remote_id}",
-            f"    secret = {_placeholder('PSK_FROM_SECRET_REF')}",
-            "  }",
-            "}",
-        ]
-    )
+    lines.extend(["      }", "    }", "  }", "}"])
+    if auth.get("method") != "certificate":
+        lines.extend(
+            [
+                "",
+                "secrets {",
+                f"  {secret_name} {{",
+                f"    id-1 = {_render_ipsec_id(local_id, 'HEADEND_ID')}",
+                f"    id-2 = {remote_id}",
+                f"    secret = {_placeholder('PSK_FROM_SECRET_REF')}",
+                "  }",
+                "}",
+            ]
+        )
+    elif str(cert_headend.get("private_key_passphrase_secret_ref") or "").strip():
+        lines.extend(
+            [
+                "",
+                "secrets {",
+                f"  private-{customer_name}-headend-key {{",
+                f"    file = {cert_paths['headend_private_key']}",
+                f"    secret = {_placeholder('PRIVATE_KEY_PASSPHRASE')}",
+                "  }",
+                "}",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1839,9 +1939,46 @@ def build_customer_device_registry_artifacts(module: Dict[str, Any]) -> Dict[str
     }
 
 
+def build_customer_certificate_handoff_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    customer = module.get("customer") or {}
+    ipsec = module.get("ipsec") or {}
+    certificate_auth = _certificate_auth(ipsec)
+    if not certificate_auth:
+        return {}
+    handoff = certificate_auth.get("customer_handoff") or {}
+    if not handoff.get("enabled"):
+        return {}
+    customer_name = str(customer.get("name") or "")
+    readme = "\n".join(
+        [
+            "# Certificate Auth Handoff",
+            "",
+            "This customer is configured for IKE certificate authentication instead of PSK.",
+            "The values in `certificate-handoff.json` are material references, not embedded private material.",
+            "Resolve the references from the approved certificate source before installing them on the customer router.",
+            "",
+        ]
+    )
+    return {
+        "certificate-auth/certificate-handoff.json": {
+            "schema_version": 1,
+            "customer_name": customer_name,
+            "auth_method": "certificate",
+            "profile": certificate_auth.get("profile"),
+            "customer_handoff": handoff,
+            "headend_identity": (certificate_auth.get("headend") or {}).get("id"),
+            "customer_identity": (certificate_auth.get("remote") or {}).get("id"),
+        },
+        "certificate-auth/README.md": readme,
+    }
+
+
 def build_customer_artifact_tree(module: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
     return {
-        "customer": build_customer_device_registry_artifacts(module),
+        "customer": {
+            **build_customer_device_registry_artifacts(module),
+            **build_customer_certificate_handoff_artifacts(module),
+        },
         "muxer": build_muxer_artifacts(module, item),
         "headend": build_headend_artifacts(module),
         "smartconnect": build_smartconnect_artifacts(module),

@@ -25,6 +25,9 @@ class CgnatPkiEndpoint:
     identity_ref: str = ""
     auth_ref: str = ""
     package_name: str = ""
+    cert_ref: str = ""
+    private_key_secret_ref: str = ""
+    private_key_passphrase_secret_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,7 @@ class Ipsec:
     vti_shared: str = ""
     bidirectional_secret: Optional[bool] = None
     initiation: Optional[IpsecInitiation] = None
+    auth: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -398,7 +402,13 @@ def _normalized_cgnat_pki_mode(value: Any) -> str:
     if value in (None, ""):
         return "reference"
     normalized = str(value).strip().lower()
-    allowed = {"reference", "local_generate", "provider_api"}
+    aliases = {
+        "provided_material": "provided",
+        "third_party_provided": "provided",
+        "external": "provided",
+    }
+    normalized = aliases.get(normalized, normalized)
+    allowed = {"reference", "local_generate", "provided", "provider_api"}
     if normalized not in allowed:
         raise ValueError(f"unsupported customer.transport.cgnat.pki.mode {value!r}")
     return normalized
@@ -408,6 +418,8 @@ def _normalize_peer_psk(peer: Dict[str, Any]) -> Dict[str, str]:
     psk_secret_ref = str(peer.get("psk_secret_ref") or "").strip()
     psk = str(peer.get("psk") or "")
     raw_source = str(peer.get("psk_source") or "").strip().lower().replace("-", "_")
+    if not raw_source and not psk_secret_ref and not psk:
+        return {"psk_source": "", "psk_secret_ref": "", "psk": ""}
     if raw_source in {"", "aws_secrets_manager"}:
         psk_source = "local" if psk and not psk_secret_ref else "secrets_manager"
     elif raw_source in {"secrets_manager", "local"}:
@@ -433,6 +445,113 @@ def _normalize_peer_psk(peer: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _normalize_material_ref(value: Any, field_name: str, *, required: bool = False) -> str:
+    normalized = str(value or "").strip()
+    if required and not normalized:
+        raise ValueError(f"{field_name} is required")
+    return normalized
+
+
+def _normalize_ipsec_auth(auth: Any) -> Dict[str, Any]:
+    if auth in (None, ""):
+        return {"method": "psk"}
+    if not isinstance(auth, dict):
+        raise ValueError("customer.ipsec.auth must be an object")
+
+    method = str(auth.get("method") or "psk").strip().lower().replace("-", "_")
+    aliases = {
+        "cert": "certificate",
+        "certificates": "certificate",
+        "pubkey": "certificate",
+        "public_key": "certificate",
+    }
+    method = aliases.get(method, method)
+    if method not in {"psk", "certificate"}:
+        raise ValueError(f"unsupported customer.ipsec.auth.method {method!r}")
+    if method == "psk":
+        return {"method": "psk"}
+
+    certificate = auth.get("certificate") or {}
+    if not isinstance(certificate, dict):
+        raise ValueError("customer.ipsec.auth.certificate must be an object")
+    headend = certificate.get("headend") or {}
+    remote = certificate.get("remote") or {}
+    handoff = certificate.get("customer_handoff") or {}
+    if not isinstance(headend, dict) or not isinstance(remote, dict) or not isinstance(handoff, dict):
+        raise ValueError("customer.ipsec.auth.certificate sections must be objects")
+
+    profile = str(certificate.get("profile") or "third_party_provided").strip().lower().replace("-", "_")
+    if profile not in {"third_party_provided", "customer_supplied"}:
+        raise ValueError(f"unsupported customer.ipsec.auth.certificate.profile {profile!r}")
+
+    normalized_headend = {
+        "id": _normalize_material_ref(headend.get("id"), "customer.ipsec.auth.certificate.headend.id"),
+        "cert_ref": _normalize_material_ref(
+            headend.get("cert_ref"),
+            "customer.ipsec.auth.certificate.headend.cert_ref",
+            required=True,
+        ),
+        "private_key_secret_ref": _normalize_material_ref(
+            headend.get("private_key_secret_ref"),
+            "customer.ipsec.auth.certificate.headend.private_key_secret_ref",
+            required=True,
+        ),
+        "private_key_passphrase_secret_ref": _normalize_material_ref(
+            headend.get("private_key_passphrase_secret_ref"),
+            "customer.ipsec.auth.certificate.headend.private_key_passphrase_secret_ref",
+        ),
+    }
+    normalized_remote = {
+        "id": _normalize_material_ref(
+            remote.get("id"),
+            "customer.ipsec.auth.certificate.remote.id",
+            required=True,
+        ),
+        "trust_ref": _normalize_material_ref(
+            remote.get("trust_ref"),
+            "customer.ipsec.auth.certificate.remote.trust_ref",
+            required=True,
+        ),
+        "cert_ref": _normalize_material_ref(
+            remote.get("cert_ref"),
+            "customer.ipsec.auth.certificate.remote.cert_ref",
+        ),
+    }
+    normalized_handoff = {
+        "enabled": bool(handoff.get("enabled")) if handoff else False,
+        "cert_ref": _normalize_material_ref(handoff.get("cert_ref"), "customer.ipsec.auth.certificate.customer_handoff.cert_ref"),
+        "private_key_secret_ref": _normalize_material_ref(
+            handoff.get("private_key_secret_ref"),
+            "customer.ipsec.auth.certificate.customer_handoff.private_key_secret_ref",
+        ),
+        "trust_ref": _normalize_material_ref(handoff.get("trust_ref"), "customer.ipsec.auth.certificate.customer_handoff.trust_ref"),
+        "notes": _normalize_material_ref(handoff.get("notes"), "customer.ipsec.auth.certificate.customer_handoff.notes"),
+    }
+
+    if normalized_handoff["enabled"]:
+        missing = [
+            key
+            for key in ("cert_ref", "private_key_secret_ref", "trust_ref")
+            if not normalized_handoff.get(key)
+        ]
+        if missing:
+            raise ValueError(
+                "customer.ipsec.auth.certificate.customer_handoff enabled requires "
+                + ", ".join(missing)
+            )
+
+    return {
+        "method": "certificate",
+        "certificate": {
+            "profile": profile,
+            "material_source": "provided",
+            "headend": normalized_headend,
+            "remote": normalized_remote,
+            "customer_handoff": normalized_handoff,
+        },
+    }
+
+
 def _normalized_cgnat_outer_topology(value: Any) -> str:
     if value in (None, ""):
         return "per_customer_outer"
@@ -448,6 +567,15 @@ def _normalize_cgnat_pki_endpoint(doc: Dict[str, Any]) -> CgnatPkiEndpoint:
         identity_ref=str(doc.get("identity_ref") or ""),
         auth_ref=str(doc.get("auth_ref") or ""),
         package_name=str(doc.get("package_name") or ""),
+        cert_ref=_normalize_material_ref(doc.get("cert_ref"), "customer.transport.cgnat.pki.*.cert_ref"),
+        private_key_secret_ref=_normalize_material_ref(
+            doc.get("private_key_secret_ref"),
+            "customer.transport.cgnat.pki.*.private_key_secret_ref",
+        ),
+        private_key_passphrase_secret_ref=_normalize_material_ref(
+            doc.get("private_key_passphrase_secret_ref"),
+            "customer.transport.cgnat.pki.*.private_key_passphrase_secret_ref",
+        ),
     )
 
 
@@ -937,6 +1065,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
     dynamic_provisioning = customer.get("dynamic_provisioning")
     dynamic_peer_ip = customer.get("dynamic_peer_ip")
     ipsec = customer.get("ipsec") or {}
+    ipsec_auth = _normalize_ipsec_auth(ipsec.get("auth") if isinstance(ipsec, dict) else None)
     post_ipsec_nat = customer.get("post_ipsec_nat")
     outside_nat = customer.get("outside_nat")
     selector_local_subnets = _as_list(
@@ -951,6 +1080,11 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
         selector_remote_subnets,
     )
     peer_psk = _normalize_peer_psk(peer)
+    if ipsec_auth.get("method") == "certificate":
+        if peer_psk["psk_secret_ref"] or peer_psk["psk"]:
+            raise ValueError("customer.peer PSK fields must not be set when customer.ipsec.auth.method is certificate")
+    elif not peer_psk["psk_secret_ref"] and not peer_psk["psk"]:
+        raise ValueError("customer.peer.psk_secret_ref is required when customer.ipsec.auth.method is psk")
 
     return CustomerSource(
         schema_version=int(_require(raw.get("schema_version"), "schema_version")),
@@ -1071,6 +1205,7 @@ def parse_customer_source(raw: Dict[str, Any]) -> CustomerSource:
                     vti_shared=_as_yes_no(ipsec.get("vti_shared")),
                     bidirectional_secret=ipsec.get("bidirectional_secret"),
                     initiation=_normalize_ipsec_initiation(ipsec.get("initiation")),
+                    auth=ipsec_auth if ipsec_auth.get("method") != "psk" else None,
                 )
                 if isinstance(ipsec, dict) and ipsec
                 else None

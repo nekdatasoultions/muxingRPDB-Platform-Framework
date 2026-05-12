@@ -136,6 +136,48 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         self.assertNotIn("203.0.113.61/32", firewall_apply)
         self.assertNotIn("snat to", firewall_apply.lower())
 
+    def test_certificate_auth_headend_artifacts_render_pubkey_without_psk_secret(self) -> None:
+        request_doc = deepcopy(self._load_request("example-certificate-auth-nonnat.yaml"))
+
+        customer_module, customer_item = self._render_customer(request_doc)
+        artifacts = build_customer_artifact_tree(customer_module, customer_item)
+
+        headend_conf = artifacts["headend"]["ipsec/swanctl-connection.conf"]
+        ipsec_intent = artifacts["headend"]["ipsec/ipsec-intent.json"]
+        cert_handoff = artifacts["customer"]["certificate-auth/certificate-handoff.json"]
+
+        self.assertIn("auth = pubkey", headend_conf)
+        self.assertIn("certs = rpdb-customers/example-certificate-auth-nonnat-headend-cert.pem", headend_conf)
+        self.assertIn("cacerts = rpdb-customers/example-certificate-auth-nonnat-remote-trust.pem", headend_conf)
+        self.assertNotIn("auth = psk", headend_conf)
+        self.assertNotIn("secrets {", headend_conf)
+        self.assertEqual(ipsec_intent["auth"]["method"], "certificate")
+        self.assertEqual(ipsec_intent["local_id"], "rpdb-headend.example")
+        self.assertEqual(ipsec_intent["remote_id"], "customer-cert-70.example")
+        self.assertEqual(
+            ipsec_intent["auth"]["certificate_material_paths"]["headend_cert"],
+            "rpdb-customers/example-certificate-auth-nonnat-headend-cert.pem",
+        )
+        self.assertEqual(cert_handoff["auth_method"], "certificate")
+        self.assertEqual(cert_handoff["customer_identity"], "customer-cert-70.example")
+
+    def test_certificate_auth_passphrase_renders_private_key_secret_block(self) -> None:
+        request_doc = deepcopy(self._load_request("example-certificate-auth-nonnat.yaml"))
+        request_doc["customer"]["ipsec"]["auth"]["certificate"]["headend"][
+            "private_key_passphrase_secret_ref"
+        ] = "/muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-key-passphrase"
+
+        customer_module, customer_item = self._render_customer(request_doc)
+        artifacts = build_customer_artifact_tree(customer_module, customer_item)
+
+        headend_conf = artifacts["headend"]["ipsec/swanctl-connection.conf"]
+
+        self.assertIn("auth = pubkey", headend_conf)
+        self.assertIn("private-example-certificate-auth-nonnat-headend-key", headend_conf)
+        self.assertIn("file = rpdb-customers/example-certificate-auth-nonnat-headend-key.pem", headend_conf)
+        self.assertIn("secret = ${PRIVATE_KEY_PASSPHRASE}", headend_conf)
+        self.assertNotIn("auth = psk", headend_conf)
+
     def test_customer1_dual_nat_artifacts_render_expected_inside_and_outside_nat(self) -> None:
         request_doc = deepcopy(self._load_request("example-cgnat-customer-1-local-pki.yaml"))
 

@@ -2,8 +2,12 @@
 
 ## Status
 
-Paused. This is a working plan only. No implementation has been started from
-this document yet.
+Partially implemented for lab/provisioning review.
+
+The framework now supports `customer.transport.cgnat.pki.mode: provided`,
+which consumes supplied cert/key/trust refs and stages local `file://` material
+into CGNAT head-end and outer peer handoff manifests. The real provider API
+adapter remains future work.
 
 ## Goal
 
@@ -33,14 +37,16 @@ Current modes:
 | --- | --- |
 | `local_generate` | Generates local CA, head-end cert/key, and customer or gateway cert/key. Good for lab/demo. |
 | `reference` | Emits manifests with references only. Material must be resolved outside the flow. |
+| `provided` | Consumes supplied head-end and outer peer cert/key/trust refs. Local `file://` refs are staged into review artifacts. |
 | `provider_api` | Mode is modeled but not implemented. |
 
 Current gap:
 
 ```text
-We can generate demo material or reference external material, but we do not yet
-have a production resolver that validates, stages, installs, and reloads
-externally issued certificates on CGNAT head ends.
+We can generate demo material, reference external material, or consume supplied
+file/secret refs into CGNAT review artifacts. We still need production-grade
+certificate validation, live installation, reload orchestration, and provider
+API adapters before this is a full production external CA integration.
 ```
 
 ## Target Model
@@ -68,8 +74,8 @@ The resolver should normalize all sources into the same internal material set:
 
 ## Proposed Request Shape
 
-Keep `local_generate` for demo, but add a production mode such as
-`provided_material`.
+Keep `local_generate` for demo and use `provided` when certificate material is
+issued outside the CGNAT framework.
 
 Example:
 
@@ -83,30 +89,42 @@ customer:
       outer_identity_ref: isp-cgnat-router-2/customer-1234
       outer_auth_ref: pki/cgnat/gateway/isp-cgnat-router-2/customer-1234
       pki:
-        mode: provided_material
-        material_source:
-          type: secrets_manager
-          region: us-east-1
-          cert_secret_ref: /rpdb/cgnat/customer-1234/headend/cert
-          key_secret_ref: /rpdb/cgnat/customer-1234/headend/key
-          ca_chain_secret_ref: /rpdb/cgnat/customer-1234/trust/ca-chain
+        mode: provided
+        provider: third-party-ca
         headend:
           identity_ref: cgnat-head-end/customer-1234
           auth_ref: pki/cgnat/headend/customer-1234
+          cert_ref: /rpdb/cgnat/customer-1234/headend/cert
+          private_key_secret_ref: /rpdb/cgnat/customer-1234/headend/key
+        gateway:
+          identity_ref: isp-cgnat-router-2/customer-1234
+          auth_ref: pki/cgnat/gateway/isp-cgnat-router-2/customer-1234
+          package_name: customer-1234-isp-cgnat-router-2
+          cert_ref: /rpdb/cgnat/customer-1234/gateway/cert
+          private_key_secret_ref: /rpdb/cgnat/customer-1234/gateway/key
         trust:
-          ca_ref: pki/cgnat/ca/customer-1234
+          ca_ref: /rpdb/cgnat/customer-1234/trust/ca-chain
 ```
 
 Alternative local staged-file shape:
 
 ```yaml
 pki:
-  mode: provided_material
-  material_source:
-    type: local_files
-    cert_path: certs/cgnat/customer-1234/headend.crt
-    key_path: certs/cgnat/customer-1234/headend.key
-    ca_chain_path: certs/cgnat/customer-1234/ca-chain.crt
+  mode: provided
+  provider: rpdb-demo-ca-server
+  headend:
+    identity_ref: cgnat-head-end/customer-1234
+    auth_ref: pki/cgnat/headend/customer-1234
+    cert_ref: file:///staged/certs/cgnat/customer-1234/headend.crt
+    private_key_secret_ref: file:///staged/certs/cgnat/customer-1234/headend.key
+  customer:
+    identity_ref: customer-router/customer-1234
+    auth_ref: pki/cgnat/customer/customer-1234
+    package_name: customer-1234-customer-router
+    cert_ref: file:///staged/certs/cgnat/customer-1234/customer.crt
+    private_key_secret_ref: file:///staged/certs/cgnat/customer-1234/customer.key
+  trust:
+    ca_ref: file:///staged/certs/cgnat/customer-1234/ca-chain.crt
 ```
 
 Do not put raw private key material directly in the customer request.
@@ -337,4 +355,3 @@ add validation tests for good and bad cert/key/CA combinations.
 Do not start with the certificate server adapter. Prove the resolver and
 installer contract with local staged files first, then plug in the real
 certificate server.
-

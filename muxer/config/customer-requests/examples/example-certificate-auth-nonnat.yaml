@@ -1,0 +1,40 @@
+schema_version: 1
+
+customer:
+  name: example-certificate-auth-nonnat
+  customer_class: strict-non-nat
+  peer:
+    public_ip: 203.0.113.70
+  selectors:
+    local_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    remote_subnets:
+      - 10.200.70.70/32
+  backend:
+    cluster: non-nat
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+  natd_rewrite:
+    enabled: true
+  ipsec:
+    ike_version: ikev2
+    auth:
+      method: certificate
+      certificate:
+        profile: third_party_provided
+        headend:
+          id: rpdb-headend.example
+          cert_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-cert
+          private_key_secret_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-private-key
+        remote:
+          id: customer-cert-70.example
+          trust_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/customer-trust
+        customer_handoff:
+          enabled: true
+          cert_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/customer-cert
+          private_key_secret_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/customer-private-key
+          trust_ref: /muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-trust
+          notes: Demo references only. Put real PEM values in the referenced secret locations before live apply.

@@ -63,6 +63,32 @@ That switch is intentionally environment-scoped. It lets us prove customer
 provisioning without pre-seeding AWS Secrets Manager, while keeping the normal
 path anchored on secret references.
 
+Customers that use certificate authentication do not set `psk_secret_ref` or
+inline PSK fields. Instead, the customer source carries `ipsec.auth` with
+references to the provided PEM material:
+
+```yaml
+ipsec:
+  auth:
+    method: certificate
+    certificate:
+      profile: customer_supplied
+      headend:
+        id: rpdb-headend.example
+        cert_ref: /muxingrpdb/customers/example/headend-cert
+        private_key_secret_ref: /muxingrpdb/customers/example/headend-key
+        private_key_passphrase_secret_ref: /muxingrpdb/customers/example/headend-key-passphrase
+      remote:
+        id: customer-cert.example
+        trust_ref: /muxingrpdb/customers/example/customer-trust
+```
+
+The request stores references only. Live apply resolves those references,
+installs the head-end certificate/key/trust into the strongSwan swanctl
+directories, and renders the connection as `auth = pubkey` instead of PSK. The
+passphrase reference is optional and is only needed when the provided private
+key is encrypted.
+
 ## Operational Intent
 
 The default workflow should be:

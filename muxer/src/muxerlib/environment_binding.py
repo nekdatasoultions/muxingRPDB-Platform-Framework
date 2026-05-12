@@ -57,6 +57,7 @@ def build_binding_context(environment_doc: Dict[str, Any], customer_module: Dict
     peer = module.get("peer") or {}
     backend = module.get("backend") or {}
     transport = module.get("transport") or {}
+    ipsec = module.get("ipsec") or {}
 
     bindings.update(_resolve_backend_bindings(environment_doc, module))
 
@@ -77,6 +78,13 @@ def build_binding_context(environment_doc: Dict[str, Any], customer_module: Dict
     for key, value in derived.items():
         if key not in bindings and value not in (None, ""):
             bindings[key] = str(value)
+    certificate = (((ipsec.get("auth") or {}).get("certificate") or {}) if isinstance(ipsec, dict) else {})
+    headend_cert = (certificate.get("headend") or {}) if isinstance(certificate, dict) else {}
+    if (
+        str(headend_cert.get("private_key_passphrase_secret_ref") or "").strip()
+        and "PRIVATE_KEY_PASSPHRASE" not in bindings
+    ):
+        bindings["PRIVATE_KEY_PASSPHRASE"] = "resolved-via-secret-store"
     return bindings
 
 

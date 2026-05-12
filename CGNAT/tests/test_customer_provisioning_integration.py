@@ -25,6 +25,7 @@ from muxerlib.allocation import (  # noqa: E402
     render_allocated_customer_source,
 )
 from muxerlib.customer_merge import build_customer_item, build_customer_module, load_yaml_file  # noqa: E402
+from muxerlib.environment_binding import build_binding_context, replace_placeholders  # noqa: E402
 
 
 class CustomerProvisioningIntegrationTests(unittest.TestCase):
@@ -93,6 +94,55 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(customer_module["peer"]["psk"], "replace-me-demo-only")
         self.assertEqual(customer_json["peer"]["psk"], "<redacted-local-psk>")
         self.assertTrue(customer_json["peer"]["psk_redacted"])
+
+    def test_certificate_auth_request_uses_ipsec_auth_without_peer_psk(self) -> None:
+        request_doc = self._load_request("example-certificate-auth-nonnat.yaml")
+        jsonschema.validate(instance=request_doc, schema=self.schema)
+
+        customer_source = self._render_source(request_doc)
+        customer_module = build_customer_module(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-certificate-auth-nonnat.yaml",
+        )
+        customer_item = build_customer_item(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-certificate-auth-nonnat.yaml",
+        )
+        customer_json = json.loads(customer_item["customer_json"])
+
+        self.assertNotIn("psk_secret_ref", customer_module["peer"])
+        self.assertNotIn("psk", customer_module["peer"])
+        self.assertEqual(customer_module["ipsec"]["auth"]["method"], "certificate")
+        self.assertEqual(
+            customer_module["ipsec"]["auth"]["certificate"]["headend"]["cert_ref"],
+            "/muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-cert",
+        )
+        self.assertEqual(customer_json["ipsec"]["auth"]["method"], "certificate")
+        self.assertNotIn("psk", customer_json["peer"])
+
+    def test_certificate_private_key_passphrase_gets_safe_dry_run_binding(self) -> None:
+        request_doc = self._load_request("example-certificate-auth-nonnat.yaml")
+        request_doc["customer"]["ipsec"]["auth"]["certificate"]["headend"][
+            "private_key_passphrase_secret_ref"
+        ] = "/muxingrpdb/demo/certs/example-certificate-auth-nonnat/headend-key-passphrase"
+
+        customer_source = self._render_source(request_doc)
+        customer_module = build_customer_module(
+            customer_source,
+            self.defaults,
+            self.strict_non_nat_class,
+            source_ref="tests/example-certificate-auth-nonnat.yaml",
+        )
+        bindings = build_binding_context({"environment": {"bindings": {}}}, customer_module)
+        rendered, missing = replace_placeholders("secret = ${PRIVATE_KEY_PASSPHRASE}", bindings)
+
+        self.assertEqual(missing, [])
+        self.assertEqual(bindings["PRIVATE_KEY_PASSPHRASE"], "resolved-via-secret-store")
+        self.assertEqual(rendered, "secret = resolved-via-secret-store")
 
     def test_cgnat_request_survives_request_source_and_module_layers(self) -> None:
         request_doc = self._load_request("example-minimal-cgnat.yaml")

@@ -172,6 +172,9 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
         self.assertIn("verify_backup_gate", execution_plan["execution_order"])
         self.assertIn("apply_cgnat_headend_customer", execution_plan["execution_order"])
         self.assertIn("validate_cgnat_headend_customer", execution_plan["execution_order"])
+        self.assertTrue(execution_plan["cgnat_review"]["ready_for_review"])
+        self.assertEqual(execution_plan["cgnat_review"]["pki"]["mode"], "reference")
+        self.assertTrue((REPO_ROOT / execution_plan["cgnat_review"]["paths"]["pki_review"]).exists())
 
         apply_result = execution_plan["apply"]
         self.assertEqual(apply_result["status"], "applied")
@@ -192,9 +195,13 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
         self.assertTrue((customer_root / "transport" / "remove-transport.sh").exists())
         self.assertTrue((customer_root / "validation" / "validation-intent.json").exists())
         self.assertTrue((customer_root / "validation" / "activation-manifest.json").exists())
+        self.assertTrue((customer_root / "pki" / "pki-review.json").exists())
+        self.assertTrue((customer_root / "pki" / "headend-install" / "headend-install-manifest.json").exists())
         self.assertTrue((customer_root / "apply-cgnat-customer.sh").exists())
         self.assertTrue((customer_root / "remove-cgnat-customer.sh").exists())
         self.assertTrue(config_json.exists())
+        install_state = json.loads((customer_root / "install-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(install_state["pki_install"]["material_mode"], "reference")
 
         rollback_plan_path = REPO_ROOT / apply_result["rollback_plan"]
         rollback_plan = json.loads(rollback_plan_path.read_text(encoding="utf-8"))
@@ -251,6 +258,10 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
             "rpdb-staged-cgnat-isp-gateway-2",
         )
         self.assertTrue(execution_plan["apply"]["validation"]["cgnat_headend"]["valid"])
+        cgnat_customer_root = self.staged_root / "cgnat-headend-root" / "var" / "lib" / "rpdb-cgnat" / "customers" / self.customer_name
+        self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "headend.crt").exists())
+        self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "headend.key").exists())
+        self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "outer-ca.crt").exists())
 
         rollback_plan_path = REPO_ROOT / execution_plan["apply"]["rollback_plan"]
         rollback_results = self._run_rollback(rollback_plan_path)

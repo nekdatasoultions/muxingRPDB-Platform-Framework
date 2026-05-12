@@ -73,7 +73,8 @@ Supported values:
 Required fields:
 
 - `public_ip`
-- either `psk_secret_ref` or local demo PSK fields
+- `psk_secret_ref` or local demo PSK fields when `customer.ipsec.auth.method`
+  is omitted or set to `psk`
 
 Optional:
 
@@ -109,6 +110,9 @@ secrets:
 Do not use local inline PSKs for production customer records. The deploy package
 must temporarily carry the value so it can inject `swanctl`, but the DynamoDB
 `customer_json` copy is redacted before write.
+
+For certificate-authenticated customers, omit all PSK fields from `peer` and
+use `customer.ipsec.auth` instead.
 
 ### `customer.transport`
 
@@ -257,6 +261,7 @@ Optional per-customer IPsec overrides:
 - `vti_shared`
 - `bidirectional_secret`
 - `initiation`
+- `auth`
 
 `initiation` is the explicit tunnel bring-up contract. The default platform
 intent is bidirectional:
@@ -277,6 +282,44 @@ policies and also actively initiates the CHILD_SA when the connection is
 loaded. A customer can still initiate from their side because the generated
 head-end connection is loaded as a responder with the customer peer address,
 remote ID, PSK, and traffic selectors.
+
+`auth` controls IKE authentication. If omitted, the framework uses the existing
+PSK behavior. To use certificate authentication, set `method: certificate` and
+provide references to the PEM material that live apply must install on the
+head end:
+
+```yaml
+ipsec:
+  auth:
+    method: certificate
+    certificate:
+      profile: third_party_provided
+        headend:
+          id: rpdb-headend.example
+          cert_ref: /muxingrpdb/customers/example/headend-cert
+          private_key_secret_ref: /muxingrpdb/customers/example/headend-key
+          private_key_passphrase_secret_ref: /muxingrpdb/customers/example/headend-key-passphrase
+      remote:
+        id: customer-cert.example
+        trust_ref: /muxingrpdb/customers/example/customer-trust
+```
+
+Supported certificate profiles:
+
+- `third_party_provided`: install a provided head-end cert/key and customer
+  trust bundle, and optionally provide a customer handoff cert/key/trust back
+  to the customer.
+- `customer_supplied`: install the customer-issued cert/key/trust that the
+  customer requires us to use.
+
+The renderer changes the generated head-end `swanctl` connection to
+`auth = pubkey`, installs material under `/etc/swanctl/x509`,
+`/etc/swanctl/private`, and `/etc/swanctl/x509ca`, and does not render a
+`secrets {}` PSK block. If the head-end private key is encrypted, set
+`private_key_passphrase_secret_ref`; live apply resolves that reference and
+injects the passphrase into a swanctl private-key secret block. For the
+operational model and examples, see
+[CERTIFICATE_AUTH_MODEL.md](./CERTIFICATE_AUTH_MODEL.md).
 
 Current repo note:
 
@@ -387,7 +430,8 @@ Detailed model:
 
 ## Secret Handling
 
-The customer source file should never hold inline PSKs.
+The customer source file should never hold production inline PSKs or private
+certificate keys.
 
 Use:
 
@@ -397,6 +441,11 @@ psk_secret_ref: /muxingrpdb/customers/<customer-name>/psk
 
 The source file is allowed to reference the secret, but the secret value should
 not live in Git.
+
+Certificate material follows the same rule. Public certs and trust bundles can
+be referenced by Secrets Manager secret ID or by a controlled local `file://`
+path for lab work. Private keys should use `private_key_secret_ref` and should
+not be committed to the repo.
 
 ## Target Minimal Authoring Shape
 

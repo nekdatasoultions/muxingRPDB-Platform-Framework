@@ -160,16 +160,31 @@ def resolve_cgnat_pki_spec(request_doc: dict[str, Any]) -> dict[str, Any]:
         "headend": {
             "identity_ref": headend_identity_ref,
             "auth_ref": headend_auth_ref,
+            "cert_ref": str(headend_doc.get("cert_ref") or "").strip(),
+            "private_key_secret_ref": str(headend_doc.get("private_key_secret_ref") or "").strip(),
+            "private_key_passphrase_secret_ref": str(
+                headend_doc.get("private_key_passphrase_secret_ref") or ""
+            ).strip(),
         },
         "customer": {
             "identity_ref": customer_identity_ref,
             "auth_ref": customer_auth_ref,
             "package_name": customer_package_name,
+            "cert_ref": str(customer_pki_doc.get("cert_ref") or "").strip(),
+            "private_key_secret_ref": str(customer_pki_doc.get("private_key_secret_ref") or "").strip(),
+            "private_key_passphrase_secret_ref": str(
+                customer_pki_doc.get("private_key_passphrase_secret_ref") or ""
+            ).strip(),
         },
         "gateway": {
             "identity_ref": gateway_identity_ref,
             "auth_ref": gateway_auth_ref,
             "package_name": gateway_package_name,
+            "cert_ref": str(gateway_pki_doc.get("cert_ref") or "").strip(),
+            "private_key_secret_ref": str(gateway_pki_doc.get("private_key_secret_ref") or "").strip(),
+            "private_key_passphrase_secret_ref": str(
+                gateway_pki_doc.get("private_key_passphrase_secret_ref") or ""
+            ).strip(),
         },
         "trust": {
             "ca_ref": ca_ref,
@@ -179,6 +194,206 @@ def resolve_cgnat_pki_spec(request_doc: dict[str, Any]) -> dict[str, Any]:
             "outer_auth_ref": str(cgnat.get("outer_auth_ref") or "").strip(),
         },
     }
+
+
+def _required_ref(value: str, label: str) -> str:
+    if not str(value or "").strip():
+        raise ValueError(f"CGNAT provided PKI material is missing {label}")
+    return str(value).strip()
+
+
+def _local_material_path(material_ref: str) -> Path | None:
+    ref = str(material_ref or "").strip()
+    if not ref:
+        return None
+    if ref.startswith("file://"):
+        raw_path = ref[len("file://") :]
+        if raw_path.startswith("/") and len(raw_path) >= 4 and raw_path[2] == ":":
+            raw_path = raw_path[1:]
+        candidate = Path(raw_path)
+    else:
+        candidate = Path(ref)
+    if candidate.exists():
+        return candidate.resolve()
+    if ref.startswith("file://"):
+        raise FileNotFoundError(f"CGNAT provided PKI file ref does not exist: {material_ref}")
+    return None
+
+
+def _stage_material_ref(material_ref: str, destination: Path, *, label: str) -> dict[str, Any]:
+    ref = _required_ref(material_ref, label)
+    staged: dict[str, Any] = {
+        "ref": ref,
+        "resolved_local_file": False,
+    }
+    local_path = _local_material_path(ref)
+    if local_path:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(local_path, destination)
+        staged.update(
+            {
+                "resolved_local_file": True,
+                "source_path": str(local_path),
+                "staged_path": str(destination),
+            }
+        )
+    return staged
+
+
+def _write_provided_handoff(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
+    handoff_key, recipient_type, handoff_spec = _outer_handoff_target(spec)
+    headend_dir = ensure_path_within_cgnat(root / "headend-install")
+    handoff_dir = ensure_path_within_cgnat(root / f"{handoff_key}-handoff")
+    headend_dir.mkdir(parents=True, exist_ok=True)
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+
+    trust_ref = _required_ref(spec["trust"]["ca_ref"], "trust.ca_ref")
+    headend_cert = _stage_material_ref(
+        spec["headend"].get("cert_ref") or "",
+        headend_dir / "headend.crt",
+        label="headend.cert_ref",
+    )
+    headend_key = _stage_material_ref(
+        spec["headend"].get("private_key_secret_ref") or spec["headend"].get("auth_ref") or "",
+        headend_dir / "headend.key",
+        label="headend.private_key_secret_ref",
+    )
+    headend_ca = _stage_material_ref(
+        trust_ref,
+        headend_dir / "outer-ca.crt",
+        label="trust.ca_ref",
+    )
+    outer_cert = _stage_material_ref(
+        handoff_spec.get("cert_ref") or "",
+        handoff_dir / f"{handoff_key}-outer.crt",
+        label=f"{handoff_key}.cert_ref",
+    )
+    outer_key = _stage_material_ref(
+        handoff_spec.get("private_key_secret_ref") or handoff_spec.get("auth_ref") or "",
+        handoff_dir / f"{handoff_key}-outer.key",
+        label=f"{handoff_key}.private_key_secret_ref",
+    )
+    outer_ca = _stage_material_ref(
+        trust_ref,
+        handoff_dir / "outer-ca.crt",
+        label="trust.ca_ref",
+    )
+
+    headend_passphrase = {}
+    if spec["headend"].get("private_key_passphrase_secret_ref"):
+        headend_passphrase = _stage_material_ref(
+            spec["headend"]["private_key_passphrase_secret_ref"],
+            headend_dir / "headend-key.passphrase",
+            label="headend.private_key_passphrase_secret_ref",
+        )
+    outer_passphrase = {}
+    if handoff_spec.get("private_key_passphrase_secret_ref"):
+        outer_passphrase = _stage_material_ref(
+            handoff_spec["private_key_passphrase_secret_ref"],
+            handoff_dir / f"{handoff_key}-outer-key.passphrase",
+            label=f"{handoff_key}.private_key_passphrase_secret_ref",
+        )
+
+    headend_manifest = {
+        "material_mode": "provided",
+        "identity_ref": spec["headend"]["identity_ref"],
+        "auth_ref": spec["headend"]["auth_ref"],
+        "ca_ref": spec["trust"]["ca_ref"],
+        "certificate_ref": headend_cert["ref"],
+        "private_key_ref": headend_key["ref"],
+        "ca_certificate_ref": headend_ca["ref"],
+        "certificate_path": headend_cert.get("staged_path"),
+        "private_key_path": headend_key.get("staged_path"),
+        "ca_certificate_path": headend_ca.get("staged_path"),
+        "private_key_passphrase_ref": headend_passphrase.get("ref", ""),
+        "private_key_passphrase_path": headend_passphrase.get("staged_path", ""),
+    }
+    outer_manifest = {
+        "material_mode": "provided",
+        "package_name": handoff_spec["package_name"],
+        "package_format": spec["customer_package_format"],
+        "identity_ref": handoff_spec["identity_ref"],
+        "auth_ref": handoff_spec["auth_ref"],
+        "ca_ref": spec["trust"]["ca_ref"],
+        "recipient_type": recipient_type,
+        "outer_topology": spec["outer_topology"],
+        "outer_gateway_ref": spec["outer_gateway_ref"],
+        "certificate_ref": outer_cert["ref"],
+        "private_key_ref": outer_key["ref"],
+        "ca_certificate_ref": outer_ca["ref"],
+        "certificate_path": outer_cert.get("staged_path"),
+        "private_key_path": outer_key.get("staged_path"),
+        "ca_certificate_path": outer_ca.get("staged_path"),
+        "private_key_passphrase_ref": outer_passphrase.get("ref", ""),
+        "private_key_passphrase_path": outer_passphrase.get("staged_path", ""),
+    }
+    dump_json(headend_dir / "headend-install-manifest.json", headend_manifest)
+    dump_json(handoff_dir / f"{handoff_key}-handoff-manifest.json", outer_manifest)
+    dump_text(
+        handoff_dir / "README.md",
+        "\n".join(
+            [
+                "# CGNAT Outer-Tunnel Handoff",
+                "",
+                f"- Recipient type: `{recipient_type}`",
+                f"- Package name: `{handoff_spec['package_name']}`",
+                f"- Package format: `{spec['customer_package_format']}`",
+                f"- Identity ref: `{handoff_spec['identity_ref']}`",
+                f"- Auth ref: `{handoff_spec['auth_ref']}`",
+                f"- Trust CA ref: `{spec['trust']['ca_ref']}`",
+                "",
+                "Files included in this handoff package when refs resolve locally:",
+                f"- `{handoff_key}-outer.crt`",
+                f"- `{handoff_key}-outer.key`",
+                "- `outer-ca.crt`",
+                f"- `{handoff_key}-handoff-manifest.json`",
+                "",
+                "This package consumes provided certificate material. It does not mint a local CGNAT CA.",
+                "",
+            ]
+        ),
+    )
+    artifacts = {
+        "generated_material": False,
+        "provided_material": True,
+        "headend_install_manifest": str(headend_dir / "headend-install-manifest.json"),
+        "outer_handoff_manifest": str(handoff_dir / f"{handoff_key}-handoff-manifest.json"),
+        "outer_handoff_readme": str(handoff_dir / "README.md"),
+        "headend_certificate_ref": headend_cert["ref"],
+        "headend_private_key_ref": headend_key["ref"],
+        "outer_certificate_ref": outer_cert["ref"],
+        "outer_private_key_ref": outer_key["ref"],
+        "ca_certificate_ref": headend_ca["ref"],
+    }
+    if headend_cert.get("staged_path"):
+        artifacts["headend_certificate_path"] = headend_cert["staged_path"]
+    if headend_key.get("staged_path"):
+        artifacts["headend_private_key_path"] = headend_key["staged_path"]
+    if outer_cert.get("staged_path"):
+        artifacts["outer_certificate_path"] = outer_cert["staged_path"]
+    if outer_key.get("staged_path"):
+        artifacts["outer_private_key_path"] = outer_key["staged_path"]
+    if headend_ca.get("staged_path"):
+        artifacts["ca_certificate_path"] = headend_ca["staged_path"]
+    if recipient_type == "customer_device":
+        artifacts["customer_handoff_manifest"] = artifacts["outer_handoff_manifest"]
+        artifacts["customer_handoff_readme"] = artifacts["outer_handoff_readme"]
+        artifacts["customer_certificate_ref"] = outer_cert["ref"]
+        artifacts["customer_private_key_ref"] = outer_key["ref"]
+        if outer_cert.get("staged_path"):
+            artifacts["customer_certificate_path"] = outer_cert["staged_path"]
+        if outer_key.get("staged_path"):
+            artifacts["customer_private_key_path"] = outer_key["staged_path"]
+    else:
+        artifacts["gateway_handoff_manifest"] = artifacts["outer_handoff_manifest"]
+        artifacts["gateway_handoff_readme"] = artifacts["outer_handoff_readme"]
+        artifacts["gateway_certificate_ref"] = outer_cert["ref"]
+        artifacts["gateway_private_key_ref"] = outer_key["ref"]
+        if outer_cert.get("staged_path"):
+            artifacts["gateway_certificate_path"] = outer_cert["staged_path"]
+        if outer_key.get("staged_path"):
+            artifacts["gateway_private_key_path"] = outer_key["staged_path"]
+    return artifacts
 
 
 def _outer_handoff_target(spec: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
@@ -497,6 +712,8 @@ def materialize_cgnat_pki(request_doc: dict[str, Any], output_dir: str | Path) -
 
     if spec["mode"] == "local_generate":
         artifacts = _write_local_handoff(root, spec)
+    elif spec["mode"] == "provided":
+        artifacts = _write_provided_handoff(root, spec)
     else:
         artifacts = _write_reference_handoff(root, spec)
 

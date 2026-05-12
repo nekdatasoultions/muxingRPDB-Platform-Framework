@@ -54,6 +54,20 @@ def resolve_repo_path(path_like: str) -> Path:
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
 
+def _cgnat_pki_review_dir_from_execution_plan(execution_plan_path: Path) -> Path | None:
+    if not execution_plan_path.exists():
+        return None
+    execution_plan = json.loads(execution_plan_path.read_text(encoding="utf-8"))
+    review_paths = ((execution_plan.get("cgnat_review") or {}).get("paths") or {})
+    review_dir = str(review_paths.get("pki_review_dir") or "").strip()
+    if not review_dir:
+        return None
+    resolved = resolve_repo_path(review_dir)
+    if not (resolved / "pki-review.json").exists():
+        raise RuntimeError(f"CGNAT PKI review directory is missing pki-review.json: {resolved}")
+    return resolved
+
+
 def run_json(command: list[str]) -> tuple[int, dict[str, Any] | None, str, str]:
     completed = subprocess.run(
         command,
@@ -452,6 +466,214 @@ def _inject_live_headend_secret(
     return report
 
 
+def _customer_auth_method(package_dir: Path) -> str:
+    module = _load_customer_module(package_dir)
+    auth = ((module.get("ipsec") or {}).get("auth") or {})
+    method = str(auth.get("method") or "psk").strip().lower().replace("-", "_")
+    if method in {"cert", "certificates", "pubkey", "public_key"}:
+        return "certificate"
+    return method or "psk"
+
+
+def _read_material_ref(*, region: str, ref: str, apply_dir: Path, label: str) -> str:
+    material_ref = str(ref or "").strip()
+    if not material_ref:
+        raise RuntimeError(f"certificate material ref is missing for {label}")
+    if material_ref.startswith("file://"):
+        candidate = Path(material_ref.removeprefix("file://")).expanduser()
+        if not candidate.is_absolute():
+            candidate = (REPO_ROOT / candidate).resolve()
+        if not candidate.exists():
+            raise RuntimeError(f"certificate material file not found for {label}: {candidate}")
+        return candidate.read_text(encoding="utf-8")
+    else:
+        candidate = Path(material_ref).expanduser()
+    if candidate.exists():
+        return candidate.read_text(encoding="utf-8")
+    if not material_ref.startswith("/") and ":" not in material_ref:
+        repo_candidate = (REPO_ROOT / material_ref).resolve()
+        if repo_candidate.exists():
+            return repo_candidate.read_text(encoding="utf-8")
+    return _aws_secret_string(region, material_ref)
+
+
+def _write_pem_material(path: Path, material: str, *, private_key: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = material if material.endswith("\n") else material + "\n"
+    path.write_text(payload, encoding="utf-8", newline="\n")
+    if private_key:
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+
+def _inject_live_headend_private_key_passphrase(
+    journal: list[dict[str, Any]],
+    *,
+    package_dir: Path,
+    headend_prepared: dict[str, Any],
+    region: str,
+    apply_dir: Path,
+    passphrase_ref: str,
+) -> dict[str, Any]:
+    module = _load_customer_module(package_dir)
+    customer_name = str(((module.get("customer") or {}).get("name")) or "").strip() or "customer"
+    passphrase = _read_material_ref(
+        region=region,
+        ref=passphrase_ref,
+        apply_dir=apply_dir,
+        label="headend private key passphrase",
+    ).strip("\r\n")
+    if not passphrase:
+        raise RuntimeError("certificate private key passphrase resolved to an empty value")
+
+    swanctl_conf = Path(str((headend_prepared.get("apply") or {}).get("swanctl_conf") or "")).resolve()
+    if not swanctl_conf.exists():
+        raise RuntimeError(f"prepared head-end swanctl config not found: {swanctl_conf}")
+    original = swanctl_conf.read_text(encoding="utf-8")
+    section_name = re.escape(f"private-{customer_name}-headend-key")
+    pattern = rf"(?ms)(^\s*{section_name}\s*\{{.*?^\s*secret\s*=\s*)[^\r\n]*"
+    replaced = re.sub(
+        pattern,
+        lambda match: match.group(1) + _swanctl_quote(passphrase),
+        original,
+        count=1,
+    )
+    if replaced == original:
+        raise RuntimeError(
+            f"prepared head-end swanctl config did not contain a private key passphrase secret line: {swanctl_conf}"
+        )
+    with swanctl_conf.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(replaced)
+
+    report = {
+        "secret_ref": passphrase_ref,
+        "secret_sha256": hashlib.sha256(passphrase.encode("utf-8")).hexdigest(),
+        "secret_length": len(passphrase),
+        "swanctl_conf": repo_relative(swanctl_conf),
+        "injected": True,
+    }
+    _record_structured(
+        journal,
+        action="resolve_headend_private_key_passphrase",
+        target="certificate-material",
+        payload=report,
+    )
+    return report
+
+
+def _materialize_live_headend_certificates(
+    journal: list[dict[str, Any]],
+    *,
+    package_dir: Path,
+    headend_prepared: dict[str, Any],
+    region: str,
+    apply_dir: Path,
+) -> dict[str, Any]:
+    module = _load_customer_module(package_dir)
+    customer_name = str(((module.get("customer") or {}).get("name")) or "").strip() or "customer"
+    auth = ((module.get("ipsec") or {}).get("auth") or {})
+    certificate = auth.get("certificate") or {}
+    headend = certificate.get("headend") or {}
+    remote = certificate.get("remote") or {}
+    headend_root = Path(headend_prepared["root"]).resolve()
+    paths = {
+        "headend_cert": headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / f"{customer_name}-headend-cert.pem",
+        "headend_private_key": headend_root / "etc" / "swanctl" / "private" / "rpdb-customers" / f"{customer_name}-headend-key.pem",
+        "remote_trust": headend_root / "etc" / "swanctl" / "x509ca" / "rpdb-customers" / f"{customer_name}-remote-trust.pem",
+        "remote_cert": headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / f"{customer_name}-remote-cert.pem",
+    }
+
+    cert = _read_material_ref(region=region, ref=str(headend.get("cert_ref") or ""), apply_dir=apply_dir, label="headend cert")
+    key = _read_material_ref(
+        region=region,
+        ref=str(headend.get("private_key_secret_ref") or ""),
+        apply_dir=apply_dir,
+        label="headend private key",
+    )
+    trust = _read_material_ref(region=region, ref=str(remote.get("trust_ref") or ""), apply_dir=apply_dir, label="remote trust")
+    _write_pem_material(paths["headend_cert"], cert)
+    _write_pem_material(paths["headend_private_key"], key, private_key=True)
+    _write_pem_material(paths["remote_trust"], trust)
+
+    materialized = ["headend_cert", "headend_private_key", "remote_trust"]
+    if str(remote.get("cert_ref") or "").strip():
+        remote_cert = _read_material_ref(
+            region=region,
+            ref=str(remote.get("cert_ref") or ""),
+            apply_dir=apply_dir,
+            label="remote cert",
+        )
+        _write_pem_material(paths["remote_cert"], remote_cert)
+        materialized.append("remote_cert")
+
+    relative_paths = [paths[key].relative_to(headend_root) for key in materialized]
+    passphrase_ref = str(headend.get("private_key_passphrase_secret_ref") or "").strip()
+    passphrase_report = (
+        _inject_live_headend_private_key_passphrase(
+            journal,
+            package_dir=package_dir,
+            headend_prepared=headend_prepared,
+            region=region,
+            apply_dir=apply_dir,
+            passphrase_ref=passphrase_ref,
+        )
+        if passphrase_ref
+        else None
+    )
+    report = {
+        "source": "certificate",
+        "profile": certificate.get("profile"),
+        "materialized": {
+            key: {
+                "path": repo_relative(paths[key]),
+                "sha256": hashlib.sha256(paths[key].read_bytes()).hexdigest(),
+                "length": paths[key].stat().st_size,
+            }
+            for key in materialized
+        },
+        "relative_paths": [path.as_posix() for path in relative_paths],
+        "cleanup_files": [("/" + path.as_posix()) for path in relative_paths],
+        "private_key_passphrase": passphrase_report,
+    }
+    _record_structured(
+        journal,
+        action="materialize_headend_certificate_auth",
+        target="headend-swanctl",
+        payload=report,
+    )
+    return report
+
+
+def _prepare_live_headend_auth_material(
+    journal: list[dict[str, Any]],
+    *,
+    package_dir: Path,
+    headend_prepared: dict[str, Any],
+    region: str,
+    apply_dir: Path,
+    allow_local_psk: bool = False,
+) -> dict[str, Any]:
+    method = _customer_auth_method(package_dir)
+    if method == "certificate":
+        return _materialize_live_headend_certificates(
+            journal,
+            package_dir=package_dir,
+            headend_prepared=headend_prepared,
+            region=region,
+            apply_dir=apply_dir,
+        )
+    return _inject_live_headend_secret(
+        journal,
+        package_dir=package_dir,
+        headend_prepared=headend_prepared,
+        region=region,
+        apply_dir=apply_dir,
+        allow_local_psk=allow_local_psk,
+    )
+
+
 def _rollback_staged(
     *,
     rollback_steps: list[dict[str, Any]],
@@ -534,6 +756,7 @@ def execute_staged_live_apply(
     smartconnect_root = staged_target_root(smartconnect_target) if smartconnect_target else None
     cgnat_target = target_selection.get("cgnat_headend_active") or {}
     cgnat_root = staged_target_root(cgnat_target) if cgnat_target else None
+    cgnat_pki_review_dir = _cgnat_pki_review_dir_from_execution_plan(execution_plan_path)
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_run_root = staged_artifact_root / _artifact_customer_dirname(customer_name) / run_id
@@ -587,6 +810,7 @@ def execute_staged_live_apply(
                 customer_name=customer_name,
                 package_dir=package_dir,
                 apply_dir=apply_dir,
+                pki_review_dir=cgnat_pki_review_dir,
             )
             if cgnat_root is not None
             else None
@@ -692,6 +916,14 @@ def execute_staged_live_apply(
             cgnat_prepared_root = Path(cgnat_prepared["root"]).resolve()
             cgnat_customer_root = Path(cgnat_prepared["apply"]["state_json"]).resolve().parent
             cgnat_config_json = Path(cgnat_prepared["apply"]["config_json"]).resolve()
+            cgnat_validate_paths = [
+                Path(cgnat_prepared["apply"]["state_json"]).resolve().relative_to(cgnat_prepared_root),
+                cgnat_config_json.relative_to(cgnat_prepared_root),
+                Path(cgnat_prepared["apply"]["master_apply_script"]).resolve().relative_to(cgnat_prepared_root),
+            ]
+            cgnat_pki_install = cgnat_prepared["apply"].get("pki_install")
+            if isinstance(cgnat_pki_install, dict) and cgnat_pki_install.get("pki_review"):
+                cgnat_validate_paths.append(Path(cgnat_pki_install["pki_review"]).resolve().relative_to(cgnat_prepared_root))
             cgnat_activation = _build_activation_bundle(
                 journal,
                 customer_name=customer_name,
@@ -704,11 +936,7 @@ def execute_staged_live_apply(
                     cgnat_customer_root.relative_to(cgnat_prepared_root),
                     cgnat_config_json.relative_to(cgnat_prepared_root),
                 ],
-                validate_paths=[
-                    Path(cgnat_prepared["apply"]["state_json"]).resolve().relative_to(cgnat_prepared_root),
-                    cgnat_config_json.relative_to(cgnat_prepared_root),
-                    Path(cgnat_prepared["apply"]["master_apply_script"]).resolve().relative_to(cgnat_prepared_root),
-                ],
+                validate_paths=cgnat_validate_paths,
                 cleanup_paths=[cgnat_customer_root.relative_to(cgnat_prepared_root)],
                 cleanup_files=[cgnat_config_json.relative_to(cgnat_prepared_root)],
                 apply_script=Path(cgnat_prepared["apply"]["master_apply_script"]).resolve(),
@@ -927,6 +1155,17 @@ def execute_staged_live_apply(
         cgnat_apply = None
         cgnat_validation = None
         if cgnat_activation is not None and cgnat_root is not None:
+            validate_cgnat_command = [
+                sys.executable,
+                "scripts/deployment/validate_cgnat_headend_customer.py",
+                "--package-dir",
+                str(package_dir),
+                "--cgnat-root",
+                str(cgnat_root),
+                "--json",
+            ]
+            if cgnat_pki_review_dir is not None:
+                validate_cgnat_command.extend(["--pki-review-dir", str(cgnat_pki_review_dir)])
             cgnat_apply = _execute_json(
                 journal,
                 action="apply_cgnat_headend_activation_bundle",
@@ -956,15 +1195,7 @@ def execute_staged_live_apply(
                 journal,
                 action="validate_cgnat_headend_customer",
                 target=str(cgnat_target.get("name") or "cgnat-headend"),
-                command=[
-                    sys.executable,
-                    "scripts/deployment/validate_cgnat_headend_customer.py",
-                    "--package-dir",
-                    str(package_dir),
-                    "--cgnat-root",
-                    str(cgnat_root),
-                    "--json",
-                ],
+                command=validate_cgnat_command,
             )
 
         rollback_plan = {
@@ -1384,39 +1615,46 @@ def _prepare_cgnat_headend_root(
     customer_name: str,
     package_dir: Path,
     apply_dir: Path,
+    pki_review_dir: Path | None = None,
 ) -> dict[str, Any]:
     cgnat_root = apply_dir / "pc"
     if cgnat_root.exists():
         shutil.rmtree(cgnat_root)
     cgnat_root.mkdir(parents=True, exist_ok=True)
 
+    apply_command = [
+        sys.executable,
+        "scripts/deployment/apply_cgnat_headend_customer.py",
+        "--package-dir",
+        str(package_dir),
+        "--cgnat-root",
+        str(cgnat_root),
+        "--json",
+    ]
+    validate_command = [
+        sys.executable,
+        "scripts/deployment/validate_cgnat_headend_customer.py",
+        "--package-dir",
+        str(package_dir),
+        "--cgnat-root",
+        str(cgnat_root),
+        "--json",
+    ]
+    if pki_review_dir is not None:
+        apply_command.extend(["--pki-review-dir", str(pki_review_dir)])
+        validate_command.extend(["--pki-review-dir", str(pki_review_dir)])
+
     apply_report = _execute_json(
         journal,
         action="prepare_cgnat_headend_customer",
         target=customer_name,
-        command=[
-            sys.executable,
-            "scripts/deployment/apply_cgnat_headend_customer.py",
-            "--package-dir",
-            str(package_dir),
-            "--cgnat-root",
-            str(cgnat_root),
-            "--json",
-        ],
+        command=apply_command,
     )
     validate_report = _execute_json(
         journal,
         action="validate_prepared_cgnat_headend_customer",
         target=customer_name,
-        command=[
-            sys.executable,
-            "scripts/deployment/validate_cgnat_headend_customer.py",
-            "--package-dir",
-            str(package_dir),
-            "--cgnat-root",
-            str(cgnat_root),
-            "--json",
-        ],
+        command=validate_command,
     )
     return {"root": cgnat_root, "apply": apply_report, "validate": validate_report}
 
@@ -2003,6 +2241,7 @@ def execute_ssh_live_apply(
     apply_dir = deploy_dir / "approved-apply"
     apply_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    cgnat_pki_review_dir = _cgnat_pki_review_dir_from_execution_plan(execution_plan_path)
 
     journal: list[dict[str, Any]] = []
     rollback_steps: list[dict[str, Any]] = []
@@ -2056,11 +2295,12 @@ def execute_ssh_live_apply(
                 customer_name=customer_name,
                 package_dir=package_dir,
                 apply_dir=apply_dir,
+                pki_review_dir=cgnat_pki_review_dir,
             )
             if target_selection.get("cgnat_headend_active")
             else None
         )
-        headend_secret = _inject_live_headend_secret(
+        headend_auth = _prepare_live_headend_auth_material(
             journal,
             package_dir=package_dir,
             headend_prepared=headend_prepared,
@@ -2068,7 +2308,7 @@ def execute_ssh_live_apply(
             apply_dir=apply_dir,
             allow_local_psk=bool(((environment_doc.get("secrets") or {}).get("allow_local_psk"))),
         )
-        headend_prepared["secret_resolution"] = headend_secret
+        headend_prepared["auth_material"] = headend_auth
 
         published_artifacts = _publish_artifacts_to_s3(
             journal,
@@ -2234,6 +2474,10 @@ def execute_ssh_live_apply(
             headend_customer_root.relative_to(headend_root),
             headend_swanctl_conf.relative_to(headend_root),
         ]
+        for relative_path in (headend_prepared.get("auth_material") or {}).get("relative_paths") or []:
+            path_obj = Path(str(relative_path))
+            if path_obj not in headend_relative_paths:
+                headend_relative_paths.append(path_obj)
         headend_remote_apply = _remote_path(headend_root, headend_prepared["apply"]["master_apply_script"])
         headend_remote_remove = _remote_path(headend_root, headend_prepared["apply"]["master_remove_script"])
         headend_remote_checks = [
@@ -2241,8 +2485,11 @@ def execute_ssh_live_apply(
             _remote_path(headend_root, headend_prepared["apply"]["swanctl_conf"]),
             _remote_path(headend_root, headend_prepared["apply"]["master_apply_script"]),
         ]
+        for relative_path in (headend_prepared.get("auth_material") or {}).get("relative_paths") or []:
+            headend_remote_checks.append("/" + str(relative_path).replace("\\", "/"))
         headend_cleanup_paths = [_remote_path(headend_root, headend_customer_root)]
         headend_cleanup_files = [_remote_path(headend_root, headend_swanctl_conf)]
+        headend_cleanup_files.extend((headend_prepared.get("auth_material") or {}).get("cleanup_files") or [])
 
         active_remote = _apply_remote_component(
             journal,
@@ -2321,6 +2568,14 @@ def execute_ssh_live_apply(
         if cgnat_prepared is not None and cgnat_root is not None and cgnat_instance_id:
             cgnat_customer_root = Path(cgnat_prepared["apply"]["state_json"]).resolve().parent
             cgnat_config_json = Path(cgnat_prepared["apply"]["config_json"]).resolve()
+            cgnat_remote_checks = [
+                _remote_path(cgnat_root, cgnat_prepared["apply"]["state_json"]),
+                _remote_path(cgnat_root, cgnat_prepared["apply"]["config_json"]),
+                _remote_path(cgnat_root, cgnat_prepared["apply"]["master_apply_script"]),
+            ]
+            cgnat_pki_install = cgnat_prepared["apply"].get("pki_install")
+            if isinstance(cgnat_pki_install, dict) and cgnat_pki_install.get("pki_review"):
+                cgnat_remote_checks.append(_remote_path(cgnat_root, cgnat_pki_install["pki_review"]))
             cgnat_remote = _apply_remote_component(
                 journal,
                 context=context,
@@ -2335,11 +2590,7 @@ def execute_ssh_live_apply(
                 ],
                 remote_apply_script=_remote_path(cgnat_root, cgnat_prepared["apply"]["master_apply_script"]),
                 remote_remove_script=_remote_path(cgnat_root, cgnat_prepared["apply"]["master_remove_script"]),
-                remote_checks=[
-                    _remote_path(cgnat_root, cgnat_prepared["apply"]["state_json"]),
-                    _remote_path(cgnat_root, cgnat_prepared["apply"]["config_json"]),
-                    _remote_path(cgnat_root, cgnat_prepared["apply"]["master_apply_script"]),
-                ],
+                remote_checks=cgnat_remote_checks,
                 remote_cleanup_paths=[_remote_path(cgnat_root, cgnat_customer_root)],
                 remote_cleanup_files=[_remote_path(cgnat_root, cgnat_config_json)],
                 remote_name=f"{customer_name}-cgnat-headend",
@@ -2395,7 +2646,7 @@ def execute_ssh_live_apply(
                 "prepared_headend": headend_prepared["validate"],
                 "prepared_smartconnect_gateway": smartconnect_prepared["validate"] if smartconnect_prepared is not None else None,
                 "prepared_cgnat_headend": cgnat_prepared["validate"] if cgnat_prepared is not None else None,
-                "headend_secret": headend_secret,
+                "headend_auth": headend_auth,
                 "dynamic_peer_ip_registry": dynamic_peer_ip_registry,
                 "muxer": muxer_remote["validate"],
                 "headend_active": active_remote["validate"],
