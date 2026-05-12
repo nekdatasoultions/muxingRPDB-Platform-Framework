@@ -142,16 +142,40 @@ def _prune_empty_values(value: Any) -> Any:
     return value
 
 
+def _request_peer_from_module(
+    module_peer: dict[str, Any],
+    *,
+    fallback_peer: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    peer = copy.deepcopy(module_peer or {})
+    fallback = copy.deepcopy(fallback_peer or {})
+    local_psk_redacted = bool(peer.pop("psk_redacted", False)) or str(peer.get("psk") or "") == "<redacted-local-psk>"
+
+    if local_psk_redacted:
+        for key in ("psk_source", "psk_secret_ref", "psk"):
+            peer.pop(key, None)
+        for key in ("psk_source", "psk_secret_ref", "psk"):
+            value = fallback.get(key)
+            if value not in (None, ""):
+                peer[key] = value
+
+    return _prune_empty_values(peer)
+
+
 def _module_to_request(
     module: dict[str, Any],
     *,
+    fallback_peer: dict[str, Any] | None = None,
     fallback_dynamic_provisioning: dict[str, Any] | None = None,
     fallback_dynamic_peer_ip: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     customer = dict(module.get("customer") or {})
     request_customer: dict[str, Any] = {
         "name": customer.get("name"),
-        "peer": copy.deepcopy(module.get("peer") or {}),
+        "peer": _request_peer_from_module(
+            module.get("peer") or {},
+            fallback_peer=fallback_peer,
+        ),
         "selectors": copy.deepcopy(module.get("selectors") or {}),
     }
 
@@ -413,6 +437,7 @@ def main() -> int:
     base_request_doc = (
         _module_to_request(
             live_module,
+            fallback_peer=((customer_doc.get("customer") or {}).get("peer")),
             fallback_dynamic_provisioning=((customer_doc.get("customer") or {}).get("dynamic_provisioning")),
             fallback_dynamic_peer_ip=((customer_doc.get("customer") or {}).get("dynamic_peer_ip")),
         )

@@ -129,12 +129,23 @@ def resolve_customer2_psk(customer2_doc: dict[str, Any], *, region: str, explici
     return fetch_secret_string(str(peer.get("psk_secret_ref") or ""), region=region)
 
 
-def prepare_environment_copy(environment_path: Path, output_path: Path) -> dict[str, Any]:
+def prepare_environment_copy(environment_path: Path, output_path: Path, *, request_dir: Path | None = None) -> dict[str, Any]:
     environment_doc = load_yaml(environment_path)
     secrets_doc = environment_doc.setdefault("secrets", {})
     if not isinstance(secrets_doc, dict):
         raise RuntimeError("deployment environment secrets section must be an object")
     secrets_doc["allow_local_psk"] = True
+    if request_dir is not None:
+        customer_requests = environment_doc.setdefault("customer_requests", {})
+        if not isinstance(customer_requests, dict):
+            raise RuntimeError("deployment environment customer_requests section must be an object")
+        allowed_roots = customer_requests.setdefault("allowed_roots", [])
+        if not isinstance(allowed_roots, list):
+            raise RuntimeError("deployment environment customer_requests.allowed_roots must be a list")
+        request_ref = repo_relative(request_dir)
+        customer_requests["allowed_roots"] = [
+            str(root) for root in allowed_roots if str(root).strip() != request_ref
+        ] + [request_ref]
     description = ((environment_doc.get("environment") or {}).get("description") or "").strip()
     if description:
         environment_doc["environment"]["description"] = (
@@ -382,7 +393,11 @@ def main() -> int:
     ca_root = Path(args.ca_root).resolve()
     manifest_out = Path(args.manifest_out).resolve()
 
-    environment_doc = prepare_environment_copy(Path(args.environment).resolve(), environment_out)
+    environment_doc = prepare_environment_copy(
+        Path(args.environment).resolve(),
+        environment_out,
+        request_dir=request_dir,
+    )
     entries: list[dict[str, Any]] = [
         prepare_customer2_local_psk(
             request_dir=request_dir,

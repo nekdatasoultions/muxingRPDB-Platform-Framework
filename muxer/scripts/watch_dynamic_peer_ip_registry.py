@@ -124,21 +124,31 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _discover_request_paths(paths: Iterable[Path], roots: Iterable[Path]) -> list[Path]:
     discovered: dict[str, Path] = {}
+    ordered: list[Path] = []
+
+    def add_path(path: Path) -> None:
+        resolved = path.resolve()
+        key = str(resolved)
+        if key in discovered:
+            return
+        discovered[key] = resolved
+        ordered.append(resolved)
+
     for path in paths:
         resolved = path.resolve()
         if resolved.is_file():
-            discovered[str(resolved)] = resolved
+            add_path(resolved)
     for root in roots:
         resolved_root = root.resolve()
         if not resolved_root.exists():
             continue
         if resolved_root.is_file():
-            discovered[str(resolved_root)] = resolved_root
+            add_path(resolved_root)
             continue
         for candidate in sorted(resolved_root.rglob("*.yaml")):
             if candidate.is_file():
-                discovered[str(candidate.resolve())] = candidate.resolve()
-    return [discovered[key] for key in sorted(discovered)]
+                add_path(candidate)
+    return ordered
 
 
 def _load_customer_watches(

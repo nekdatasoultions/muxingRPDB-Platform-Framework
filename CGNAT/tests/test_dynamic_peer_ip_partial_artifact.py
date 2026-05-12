@@ -44,6 +44,43 @@ class DynamicPeerIpPartialArtifactTests(unittest.TestCase):
         self.assertTrue(quarantined.name.startswith("abc123.incomplete-"))
         self.assertEqual(partial_content, (quarantined / "updated-request.yaml").read_text(encoding="utf-8"))
 
+    def test_redacted_local_psk_is_restored_from_fallback_request_peer(self) -> None:
+        module = load_process_module()
+        request_doc = module._module_to_request(
+            {
+                "schema_version": 1,
+                "customer": {
+                    "name": "vpn-customer-demo",
+                    "customer_class": "strict-non-nat",
+                },
+                "peer": {
+                    "public_ip": "44.213.128.193",
+                    "remote_id": "3.236.161.125",
+                    "psk_source": "local",
+                    "psk": "<redacted-local-psk>",
+                    "psk_redacted": True,
+                },
+                "selectors": {
+                    "local_subnets": ["194.138.36.80/28"],
+                    "remote_subnets": ["10.129.3.128/32"],
+                    "remote_host_cidrs": ["10.129.3.128/32"],
+                },
+            },
+            fallback_peer={
+                "public_ip": "3.236.161.125",
+                "remote_id": "3.236.161.125",
+                "psk_source": "local",
+                "psk": "demo-local-psk",
+            },
+        )
+
+        peer = request_doc["customer"]["peer"]
+        self.assertEqual(peer["public_ip"], "44.213.128.193")
+        self.assertEqual(peer["remote_id"], "3.236.161.125")
+        self.assertEqual(peer["psk_source"], "local")
+        self.assertEqual(peer["psk"], "demo-local-psk")
+        self.assertNotIn("psk_redacted", peer)
+
 
 if __name__ == "__main__":
     unittest.main()
