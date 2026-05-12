@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"
 REMOVE_SCRIPT = REPO_ROOT / "scripts" / "customers" / "remove_customer.py"
 STATE_SCRIPT = REPO_ROOT / "scripts" / "customers" / "show_customer_live_state.py"
+CERT_HANDOFF_SCRIPT = REPO_ROOT / "scripts" / "customers" / "install_customer_certificate_handoff.py"
 
 
 @dataclass(frozen=True)
@@ -243,6 +244,18 @@ def build_action_command(
         ]
         if profile.key.startswith("cgnat"):
             command.extend(["--include-cgnat", "auto"])
+    elif action in {"install-customer-cert", "verify-customer-cert"}:
+        if profile.key != "customer4-certificate":
+            raise SystemExit(f"{action} is only supported for the customer4-certificate profile")
+        command = [
+            sys.executable,
+            repo_relative(CERT_HANDOFF_SCRIPT),
+            "--customer-file",
+            repo_relative(profile.customer_file),
+            "--environment",
+            environment,
+            "--approve" if action == "install-customer-cert" else "--verify-only",
+        ]
     else:
         raise SystemExit(f"Unsupported action '{action}'")
 
@@ -263,15 +276,21 @@ def print_profile_summary(profile: DemoProfile, environment: str, out_root: Path
     if profile.notes:
         print(f"notes: {profile.notes}")
     print("actions:")
-    for action in (
+    actions = [
         "verify-clean",
+        "install-customer-cert",
+        "verify-customer-cert",
         "plan-provision",
         "provision",
         "verify-deployed",
         "reapply",
         "plan-remove",
         "remove",
-    ):
+    ]
+    if profile.key != "customer4-certificate":
+        actions.remove("install-customer-cert")
+        actions.remove("verify-customer-cert")
+    for action in actions:
         command = build_action_command(
             profile=profile,
             action=action,
@@ -305,6 +324,8 @@ def parse_args() -> argparse.Namespace:
             "reapply",
             "plan-remove",
             "remove",
+            "install-customer-cert",
+            "verify-customer-cert",
         ],
         help="Operation to perform.",
     )
@@ -357,7 +378,16 @@ def main() -> int:
         out_root=out_root,
         json_output=args.json,
     )
-    if args.action in {"state", "verify-clean", "verify-deployed", "plan-provision", "provision", "reapply"} and not profile.customer_file.exists():
+    if args.action in {
+        "state",
+        "verify-clean",
+        "verify-deployed",
+        "plan-provision",
+        "provision",
+        "reapply",
+        "install-customer-cert",
+        "verify-customer-cert",
+    } and not profile.customer_file.exists():
         if profile.prepare_required:
             raise SystemExit(
                 f"{repo_relative(profile.customer_file)} does not exist yet. "

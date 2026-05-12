@@ -132,6 +132,42 @@ python3 scripts/customers/demo_customer_lifecycle.py remove customer2-local-psk 
   --json
 ```
 
+## Customer 4 Certificate Handoff
+
+Customer 4 uses generated demo-CA material, but the customer VPN host is a
+Libreswan node. Before provisioning the certificate-auth customer request,
+install the generated customer certificate and trust bundle on the customer
+side with the wrapper:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py install-customer-cert customer4-certificate \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+```
+
+That command copies the generated customer cert, private key, and CA trust to
+Customer 4, imports the identity into the Libreswan NSS database, writes the
+customer-side `/etc/ipsec.d/vpn-customer-stage1-15-cust-0004.conf`, backs up
+any previous files, and reloads the Libreswan connection.
+
+For a read-only demo check:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py verify-customer-cert customer4-certificate \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+```
+
+The lower-level installer is available if you need to target an instance
+explicitly:
+
+```bash
+python3 scripts/customers/install_customer_certificate_handoff.py \
+  --customer-file build/live-validation/requests/vpn-customer-stage1-15-cust-0004-certificate.yaml \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --customer-instance-id i-0b52ee7132bf6fa90 \
+  --approve
+```
+
 ## Profile Matrix
 
 Use these profile names directly with the wrapper:

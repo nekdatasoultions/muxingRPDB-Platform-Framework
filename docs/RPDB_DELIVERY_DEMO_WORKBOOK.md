@@ -580,6 +580,21 @@ python3 scripts/customers/demo_customer_lifecycle.py remove customer2-local-psk 
   --json
 ```
 
+For Customer 4 certificate-auth demos, run the customer-side handoff before the
+provision step:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py install-customer-cert customer4-certificate \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --json
+python3 scripts/customers/demo_customer_lifecycle.py verify-customer-cert customer4-certificate \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+```
+
+That installs the generated certificate, private key, and CA trust on the
+Customer 4 Libreswan host, imports the cert/key into the NSS database, writes
+the customer-side `/etc/ipsec.d` connection, and reloads IPsec.
+
 Profiles:
 
 | Profile | Demo |
