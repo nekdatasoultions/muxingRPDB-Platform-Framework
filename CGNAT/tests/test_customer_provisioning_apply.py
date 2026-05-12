@@ -262,6 +262,20 @@ class CustomerProvisioningApplyTests(unittest.TestCase):
         self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "headend.crt").exists())
         self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "headend.key").exists())
         self.assertTrue((cgnat_customer_root / "pki" / "headend-install" / "outer-ca.crt").exists())
+        install_state = json.loads((cgnat_customer_root / "install-state.json").read_text(encoding="utf-8"))
+        installed_files = install_state["pki_install"]["installed_files"]
+        self.assertEqual(
+            installed_files["headend_certificate"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/pki/headend-install/headend.crt",
+        )
+        self.assertEqual(
+            installed_files["headend_private_key"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/pki/headend-install/headend.key",
+        )
+        self.assertEqual(
+            installed_files["ca_certificate"],
+            f"/var/lib/rpdb-cgnat/customers/{self.customer_name}/pki/headend-install/outer-ca.crt",
+        )
 
         rollback_plan_path = REPO_ROOT / execution_plan["apply"]["rollback_plan"]
         rollback_results = self._run_rollback(rollback_plan_path)

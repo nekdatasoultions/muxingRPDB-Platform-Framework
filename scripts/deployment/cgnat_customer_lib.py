@@ -340,6 +340,27 @@ def build_install_layout(cgnat_root: Path, customer_name: str) -> dict[str, Path
     }
 
 
+def _runtime_path(cgnat_root: Path, path: Path) -> str:
+    """Return the path as it should exist after activation on a real target."""
+    return "/" + path.resolve().relative_to(cgnat_root.resolve()).as_posix()
+
+
+def _runtime_path_exists(cgnat_root: Path, raw_path: str) -> bool:
+    normalized = str(raw_path).replace("\\", "/")
+    path = Path(raw_path)
+    candidates = [path]
+    if normalized.startswith("/"):
+        candidates.append(cgnat_root.resolve() / normalized.lstrip("/"))
+    elif path.is_absolute():
+        try:
+            candidates.append(cgnat_root.resolve() / path.relative_to("/"))
+        except ValueError:
+            pass
+    else:
+        candidates.append(cgnat_root.resolve() / path)
+    return any(candidate.exists() for candidate in candidates)
+
+
 def _copy_pki_material_file(
     source_value: Any,
     destination: Path,
@@ -423,9 +444,13 @@ def _install_cgnat_pki_review(
         "mode": pki_review.get("mode"),
         "provider": pki_review.get("provider"),
         "material_mode": material_mode,
-        "pki_review": str(layout["pki_review"]),
-        "headend_install_manifest": str(layout["pki_headend_manifest"]),
-        "installed_files": {key: value for key, value in installed_files.items() if value},
+        "pki_review": _runtime_path(layout["cgnat_root"], layout["pki_review"]),
+        "headend_install_manifest": _runtime_path(layout["cgnat_root"], layout["pki_headend_manifest"]),
+        "installed_files": {
+            key: _runtime_path(layout["cgnat_root"], Path(value))
+            for key, value in installed_files.items()
+            if value
+        },
         "outer_handoff": pki_review.get("outer_handoff"),
         "customer_handoff": pki_review.get("customer_handoff"),
         "gateway_handoff": pki_review.get("gateway_handoff"),
@@ -646,7 +671,7 @@ def validate_installed_cgnat(package_dir: Path, cgnat_root: Path, pki_review_dir
         pki_install = state.get("pki_install")
         if isinstance(pki_install, dict):
             for label, installed_path in dict(pki_install.get("installed_files") or {}).items():
-                if installed_path and not Path(str(installed_path)).exists():
+                if installed_path and not _runtime_path_exists(cgnat_root, str(installed_path)):
                     report["errors"].append(f"installed CGNAT PKI file missing for {label}: {installed_path}")
             for required_path in (layout["pki_review"], layout["pki_headend_manifest"]):
                 if not required_path.exists():

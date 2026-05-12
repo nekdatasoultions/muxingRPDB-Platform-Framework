@@ -722,10 +722,20 @@ def _artifact_customer_dirname(customer_name: str, *, max_length: int = 48) -> s
     return f"{prefix}-{digest}"
 
 
-def _remote_path(prepared_root: Path, local_path: str | Path) -> str:
+def _relative_to_prepared_or_runtime(prepared_root: Path, local_path: str | Path) -> Path:
     resolved_root = prepared_root.resolve()
     resolved_path = Path(local_path).resolve()
-    relative_path = resolved_path.relative_to(resolved_root)
+    try:
+        return resolved_path.relative_to(resolved_root)
+    except ValueError:
+        raw_path = str(local_path).replace("\\", "/")
+        if raw_path.startswith("/"):
+            return Path(raw_path.lstrip("/"))
+        raise
+
+
+def _remote_path(prepared_root: Path, local_path: str | Path) -> str:
+    relative_path = _relative_to_prepared_or_runtime(prepared_root, local_path)
     return "/" + relative_path.as_posix()
 
 
@@ -924,7 +934,9 @@ def execute_staged_live_apply(
             ]
             cgnat_pki_install = cgnat_prepared["apply"].get("pki_install")
             if isinstance(cgnat_pki_install, dict) and cgnat_pki_install.get("pki_review"):
-                cgnat_validate_paths.append(Path(cgnat_pki_install["pki_review"]).resolve().relative_to(cgnat_prepared_root))
+                cgnat_validate_paths.append(
+                    _relative_to_prepared_or_runtime(cgnat_prepared_root, cgnat_pki_install["pki_review"])
+                )
             cgnat_activation = _build_activation_bundle(
                 journal,
                 customer_name=customer_name,
