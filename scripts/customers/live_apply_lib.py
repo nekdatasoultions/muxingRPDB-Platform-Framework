@@ -500,7 +500,8 @@ def _read_material_ref(*, region: str, ref: str, apply_dir: Path, label: str) ->
 def _write_pem_material(path: Path, material: str, *, private_key: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = material if material.endswith("\n") else material + "\n"
-    path.write_text(payload, encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
     if private_key:
         try:
             path.chmod(0o600)
