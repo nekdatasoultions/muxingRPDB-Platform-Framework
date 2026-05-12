@@ -565,9 +565,13 @@ python3 scripts/customers/demo_customer_lifecycle.py list-profiles
 python3 scripts/customers/prepare_live_validation_requests.py
 python3 scripts/customers/demo_customer_lifecycle.py show customer2-local-psk \
   --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+python3 scripts/customers/demo_customer_lifecycle.py verify-clean customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
 python3 scripts/customers/demo_customer_lifecycle.py provision customer2-local-psk \
   --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
   --json
+python3 scripts/customers/demo_customer_lifecycle.py verify-deployed customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
 python3 scripts/customers/demo_customer_lifecycle.py reapply customer2-local-psk \
   --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
   --json
@@ -589,6 +593,20 @@ Profiles:
 The generated profiles live under `build/live-validation/requests` and are not
 committed. That is on purpose: Customer 2 contains a local PSK, and the
 certificate demos reference private-key material that should stay on the MOM.
+
+The read-only state verifier is:
+
+```bash
+python3 scripts/customers/show_customer_live_state.py \
+  --customer-file build/live-validation/requests/vpn-customer-stage1-15-cust-0005-explicit-inside-nat.yaml \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
+  --expected deployed
+```
+
+It gives the clean/deployed proof per customer: SoT rows, muxer module/fwmark
+and nft table, VPN head-end `swanctl` and NAT nft tables, SmartConnectGateway3
+route intent/routes, and CGNAT head-end or ISP-gateway handoff state when the
+customer is a CGNAT profile.
 
 ## 6. Customer Public IP Change
 

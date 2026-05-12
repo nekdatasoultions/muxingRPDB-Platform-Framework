@@ -79,6 +79,20 @@ python3 scripts/customers/demo_customer_lifecycle.py show customer2-local-psk \
   --environment build/live-validation/rpdb-empty-live-local-psk.yaml
 ```
 
+Show the current live state for one profile:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py state customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+```
+
+Verify the customer is clean after removal:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py verify-clean customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
+```
+
 Plan provisioning:
 
 ```bash
@@ -93,6 +107,13 @@ Approve live provisioning:
 python3 scripts/customers/demo_customer_lifecycle.py provision customer2-local-psk \
   --environment build/live-validation/rpdb-empty-live-local-psk.yaml \
   --json
+```
+
+Verify the deployed state:
+
+```bash
+python3 scripts/customers/demo_customer_lifecycle.py verify-deployed customer2-local-psk \
+  --environment build/live-validation/rpdb-empty-live-local-psk.yaml
 ```
 
 Re-apply the same customer:
@@ -137,11 +158,34 @@ Legacy dry-run examples remain available:
 For each profile:
 
 1. `remove` first, even if you believe the customer is already clean.
-2. Verify removal on the muxer, selected head end, SmartConnect, and CGNAT
-   surfaces when applicable.
+2. Run `verify-clean` to prove the muxer, both VPN head-end families,
+   SmartConnectGateway3, and CGNAT surfaces when applicable are clean.
 3. `provision` with the wrapper or the underlying `deploy_customer.py`.
-4. Verify the generated `execution-plan.json` says the live apply completed.
-5. Verify the use-case behavior before moving to the next profile.
+4. Run `verify-deployed` to show the muxer, selected VPN head end,
+   SmartConnectGateway3 routes, and CGNAT surfaces when applicable.
+5. Verify the generated `execution-plan.json` says the live apply completed.
+6. Verify the use-case behavior before moving to the next profile.
+
+The state verifier is read-only:
+
+```text
+scripts/customers/show_customer_live_state.py
+```
+
+It checks:
+
+| Surface | Clean proof | Deployed proof |
+| --- | --- | --- |
+| SoT | No customer item and no allocation rows. | Customer item and allocation rows exist. |
+| Muxer | No customer root, module, or nft table. | Customer root/module, fwmark rule, route table, and nft table are present. |
+| VPN head end | No customer root, swanctl file, or NAT nft tables. | Customer root, swanctl file, connection, and NAT nft tables when enabled. |
+| SmartConnectGateway3 | No customer root and no expected route CIDRs. | Customer root and expected route CIDRs are installed. |
+| CGNAT | No CGNAT root or handoff/config files. | CGNAT root and handoff/config files are present. |
+
+For SmartConnectGateway3, the verifier follows the platform route rule:
+`post_ipsec_nat.translated_subnets` when inside NAT is enabled, otherwise
+`selectors.remote_host_cidrs`. It does not validate `remote_subnets` as a
+SmartConnect route source because those can overlap across customers.
 
 Notes:
 

@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "customers" / "deploy_customer.py"
 REMOVE_SCRIPT = REPO_ROOT / "scripts" / "customers" / "remove_customer.py"
+STATE_SCRIPT = REPO_ROOT / "scripts" / "customers" / "show_customer_live_state.py"
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,28 @@ def build_action_command(
             repo_relative(out_dir),
             "--dry-run" if action == "plan-remove" else "--approve",
         ]
+    elif action in {"state", "verify-clean", "verify-deployed"}:
+        expected = {
+            "state": "any",
+            "verify-clean": "clean",
+            "verify-deployed": "deployed",
+        }[action]
+        command = [
+            sys.executable,
+            repo_relative(STATE_SCRIPT),
+            "--customer-name",
+            profile.customer_name,
+            "--customer-file",
+            repo_relative(profile.customer_file),
+            "--environment",
+            environment,
+            "--expected",
+            expected,
+            "--headend-family",
+            "all",
+        ]
+        if profile.key.startswith("cgnat"):
+            command.extend(["--include-cgnat", "auto"])
     else:
         raise SystemExit(f"Unsupported action '{action}'")
 
@@ -240,7 +263,15 @@ def print_profile_summary(profile: DemoProfile, environment: str, out_root: Path
     if profile.notes:
         print(f"notes: {profile.notes}")
     print("actions:")
-    for action in ("plan-provision", "provision", "reapply", "plan-remove", "remove"):
+    for action in (
+        "verify-clean",
+        "plan-provision",
+        "provision",
+        "verify-deployed",
+        "reapply",
+        "plan-remove",
+        "remove",
+    ):
         command = build_action_command(
             profile=profile,
             action=action,
@@ -263,7 +294,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "action",
-        choices=["list-profiles", "show", "plan-provision", "provision", "reapply", "plan-remove", "remove"],
+        choices=[
+            "list-profiles",
+            "show",
+            "state",
+            "verify-clean",
+            "verify-deployed",
+            "plan-provision",
+            "provision",
+            "reapply",
+            "plan-remove",
+            "remove",
+        ],
         help="Operation to perform.",
     )
     parser.add_argument("profile", nargs="?", help="Demo profile name. Not required for list-profiles.")
@@ -315,7 +357,7 @@ def main() -> int:
         out_root=out_root,
         json_output=args.json,
     )
-    if args.action in {"plan-provision", "provision", "reapply"} and not profile.customer_file.exists():
+    if args.action in {"state", "verify-clean", "verify-deployed", "plan-provision", "provision", "reapply"} and not profile.customer_file.exists():
         if profile.prepare_required:
             raise SystemExit(
                 f"{repo_relative(profile.customer_file)} does not exist yet. "
