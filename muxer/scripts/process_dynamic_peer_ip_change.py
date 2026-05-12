@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -336,6 +337,18 @@ def _existing_audit_result(audit_path: Path) -> dict[str, Any]:
     return result
 
 
+def _quarantine_incomplete_artifact_dir(artifact_dir: Path) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base_candidate = artifact_dir.with_name(f"{artifact_dir.name}.incomplete-{timestamp}")
+    candidate = base_candidate
+    counter = 1
+    while candidate.exists():
+        candidate = artifact_dir.with_name(f"{base_candidate.name}-{counter}")
+        counter += 1
+    shutil.move(str(artifact_dir), str(candidate))
+    return candidate
+
+
 def main() -> int:
     muxer_dir = Path(__file__).resolve().parents[1]
     repo_root = muxer_dir.parent
@@ -435,17 +448,20 @@ def main() -> int:
     short_key = idempotency_key[:12]
     artifact_dir = out_dir / customer_name / short_key
     audit_path = artifact_dir / "audit.json"
+    recovered_artifact_dir = ""
 
     if audit_path.exists():
         result = _existing_audit_result(audit_path)
-        if args.json:
-            print(json.dumps(result, indent=2, sort_keys=True))
-        else:
-            print(f"Dynamic peer IP change already planned: {audit_path}")
-        return 0
+        if result["status"] != "audit_exists_artifacts_missing":
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"Dynamic peer IP change already planned: {audit_path}")
+            return 0
+        recovered_artifact_dir = _quarantine_incomplete_artifact_dir(artifact_dir).as_posix()
 
     if artifact_dir.exists() and any(artifact_dir.iterdir()):
-        raise SystemExit(f"artifact directory exists without audit record: {artifact_dir}")
+        recovered_artifact_dir = _quarantine_incomplete_artifact_dir(artifact_dir).as_posix()
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
     updated_request_path = artifact_dir / "updated-request.yaml"
@@ -491,6 +507,7 @@ def main() -> int:
         "customer_name": customer_name,
         "idempotency_key": idempotency_key,
         "artifact_dir": artifact_dir.as_posix(),
+        "recovered_incomplete_artifact_dir": recovered_artifact_dir,
         "live_customer_base_used": bool(live_module),
         "observation": observation,
         "change_summary": change_summary,
@@ -510,6 +527,7 @@ def main() -> int:
             "repo_only_no_live_apply",
             "same_customer_reapply_only",
             "duplicate_peer_change_events_return_existing_artifacts",
+            "incomplete_artifacts_are_quarantined_before_retry",
         ],
     }
     _write_json(audit_path, result)
