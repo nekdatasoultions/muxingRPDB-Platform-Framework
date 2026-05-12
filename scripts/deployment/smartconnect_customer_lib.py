@@ -6,10 +6,18 @@ import ipaddress
 import json
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MUXER_SRC = REPO_ROOT / "muxer" / "src"
+if str(MUXER_SRC) not in sys.path:
+    sys.path.insert(0, str(MUXER_SRC))
+
+from muxerlib.customer_route_scope import customer_cleanup_route_cidrs, customer_route_cidrs  # noqa: E402
 
 
 PLACEHOLDER_RE = re.compile(r"\$\{[^}]+\}")
@@ -72,28 +80,12 @@ def _executable_lines(text: str) -> list[str]:
 
 
 def _expected_route_cidrs(customer_module: dict[str, Any]) -> list[str]:
-    selectors = customer_module.get("selectors") or {}
-    post_ipsec_nat = customer_module.get("post_ipsec_nat") or {}
-    if bool(post_ipsec_nat.get("enabled")):
-        route_cidrs = post_ipsec_nat.get("translated_subnets") or []
-    else:
-        route_cidrs = selectors.get("remote_host_cidrs") or []
-    return [str(value).strip() for value in route_cidrs if str(value).strip()]
+    route_cidrs, _source = customer_route_cidrs(customer_module)
+    return route_cidrs
 
 
 def _customer_cleanup_route_cidrs(customer_module: dict[str, Any]) -> list[str]:
-    selectors = customer_module.get("selectors") or {}
-    post_ipsec_nat = customer_module.get("post_ipsec_nat") or {}
-    cidrs: list[str] = []
-    for value in selectors.get("remote_host_cidrs") or []:
-        cidr = str(value).strip()
-        if cidr and cidr not in cidrs:
-            cidrs.append(cidr)
-    for value in post_ipsec_nat.get("translated_subnets") or []:
-        cidr = str(value).strip()
-        if cidr and cidr not in cidrs:
-            cidrs.append(cidr)
-    return cidrs
+    return customer_cleanup_route_cidrs(customer_module)
 
 
 def load_smartconnect_bundle(bundle_dir: Path) -> SmartconnectBundle:

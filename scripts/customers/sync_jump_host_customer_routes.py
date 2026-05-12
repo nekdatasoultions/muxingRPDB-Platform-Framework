@@ -19,6 +19,7 @@ if str(MUXER_SRC) not in sys.path:
     sys.path.insert(0, str(MUXER_SRC))
 
 from muxerlib.customer_merge import load_yaml_file
+from muxerlib.customer_route_scope import customer_route_cidrs
 
 DEFAULT_STATE_FILE = Path("build/jump-host-routes/state/state.json")
 DEFAULT_OUT_DIR = Path("build/jump-host-routes/out")
@@ -104,30 +105,22 @@ def collect_customer_route_targets(environment_doc: dict[str, Any]) -> list[dict
         name = str(customer.get("name") or "").strip()
         if not name:
             continue
-        selectors = customer.get("selectors") or {}
-        post_ipsec_nat = customer.get("post_ipsec_nat") or {}
-        if bool(post_ipsec_nat.get("enabled")):
-            for cidr in [str(value).strip() for value in (post_ipsec_nat.get("translated_subnets") or []) if str(value).strip()]:
-                targets.append(
-                    {
-                        "customer_name": name,
-                        "cidr": cidr,
-                        "route_kind": "inside_nat",
-                        "source_file": str(path),
-                    }
-                )
-            continue
-        loopback_cidrs = [
-            str(value).strip()
-            for value in (selectors.get("remote_host_cidrs") or [])
-            if str(value).strip()
-        ]
-        for cidr in loopback_cidrs:
+        route_cidrs, route_source = customer_route_cidrs(customer)
+        if route_source == "post_ipsec_nat.host_mappings.translated_ip":
+            route_kind = "inside_nat_explicit"
+        elif route_source == "post_ipsec_nat.netmap_translated_hosts":
+            route_kind = "inside_nat_distinct"
+        elif route_source == "post_ipsec_nat.translated_subnets":
+            route_kind = "inside_nat_pool"
+        else:
+            route_kind = "loopback"
+        for cidr in route_cidrs:
             targets.append(
                 {
                     "customer_name": name,
                     "cidr": cidr,
-                    "route_kind": "loopback",
+                    "route_kind": route_kind,
+                    "route_source": route_source,
                     "source_file": str(path),
                 }
             )

@@ -20,6 +20,7 @@ for path in (REPO_ROOT, MUXER_SRC, Path(__file__).resolve().parent):
         sys.path.insert(0, str(path))
 
 from muxerlib.customer_merge import load_yaml_file  # noqa: E402
+from muxerlib.customer_route_scope import customer_route_cidrs  # noqa: E402
 
 from live_access_lib import (  # noqa: E402
     build_ssh_access_context,
@@ -123,26 +124,20 @@ def request_metadata(request_doc: dict[str, Any]) -> dict[str, Any]:
 
 def route_cidrs_from_request(request_doc: dict[str, Any]) -> tuple[list[str], str]:
     customer = request_doc.get("customer") or {}
-    selectors = customer.get("selectors") or {}
-    post_nat = customer.get("post_ipsec_nat") or {}
-    if bool(post_nat.get("enabled")):
-        cidrs = [str(value) for value in (post_nat.get("translated_subnets") or []) if str(value).strip()]
-        return cidrs, "post_ipsec_nat.translated_subnets"
-    cidrs = [str(value) for value in (selectors.get("remote_host_cidrs") or []) if str(value).strip()]
-    return cidrs, "selectors.remote_host_cidrs"
+    cidrs, source = customer_route_cidrs(customer)
+    if source == "remote_host_cidrs":
+        source = "selectors.remote_host_cidrs"
+    return cidrs, source
 
 
 def route_cidrs_from_metadata(metadata: dict[str, Any]) -> tuple[list[str], str]:
     module = metadata.get("customer_json") or {}
     if not isinstance(module, dict) or not module:
         return [], ""
-    post_nat = module.get("post_ipsec_nat") or {}
-    if bool(post_nat.get("enabled")):
-        cidrs = [str(value) for value in (post_nat.get("translated_subnets") or []) if str(value).strip()]
-        return cidrs, "post_ipsec_nat.translated_subnets"
-    selectors = module.get("selectors") or {}
-    cidrs = [str(value) for value in (selectors.get("remote_host_cidrs") or []) if str(value).strip()]
-    return cidrs, "selectors.remote_host_cidrs"
+    cidrs, source = customer_route_cidrs(module)
+    if source == "remote_host_cidrs":
+        source = "selectors.remote_host_cidrs"
+    return cidrs, source
 
 
 def merged_metadata(sot_metadata: dict[str, Any], request_doc: dict[str, Any]) -> dict[str, Any]:

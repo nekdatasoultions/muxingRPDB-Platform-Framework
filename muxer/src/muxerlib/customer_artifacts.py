@@ -9,6 +9,8 @@ import ipaddress
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
+from .customer_route_scope import customer_route_cidrs
+
 
 def _yes_no(value: Any) -> str | None:
     if value is None or value == "":
@@ -1711,18 +1713,8 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
 
 
 def _smartconnect_route_scope(module: Dict[str, Any]) -> Tuple[List[str], str]:
-    selectors = module.get("selectors") or {}
-    post_ipsec_nat = module.get("post_ipsec_nat") or {}
-    values: List[str] = []
-
-    if bool(post_ipsec_nat.get("enabled")):
-        for value in post_ipsec_nat.get("translated_subnets") or []:
-            _append_unique(values, value)
-        return values, "post_ipsec_nat.translated_subnets"
-
-    for value in selectors.get("remote_host_cidrs") or []:
-        _append_unique(values, value)
-    return values, "remote_host_cidrs"
+    route_cidrs, cidr_source = customer_route_cidrs(module)
+    return list(route_cidrs), cidr_source
 
 
 def build_smartconnect_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:

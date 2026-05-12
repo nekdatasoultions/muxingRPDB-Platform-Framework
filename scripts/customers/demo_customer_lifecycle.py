@@ -90,7 +90,7 @@ PROFILES: dict[str, DemoProfile] = {
         ),
         notes=(
             "Run scripts/customers/prepare_live_validation_requests.py first. "
-            "SmartConnect should route translated_subnets, not remote_subnets."
+            "SmartConnect should route the explicit translated host mappings for this profile."
         ),
         prepare_required=True,
     ),
