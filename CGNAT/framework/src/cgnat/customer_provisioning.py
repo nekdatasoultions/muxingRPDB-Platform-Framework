@@ -38,13 +38,14 @@ def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "
     customer_pki = dict(pki.get("customer") or {})
     gateway_pki = dict(pki.get("gateway") or {})
     topology = _outer_topology(request_doc)
+    outer_gateway_ref = str(cgnat.get("outer_gateway_ref") or "").strip()
     required = [
         "service_profile",
         "customer_loopback_ip",
         "known_inside_identity",
     ]
     missing = [field for field in required if not str(cgnat.get(field) or "").strip()]
-    if topology == "shared_isp_gateway" and not str(cgnat.get("outer_gateway_ref") or "").strip():
+    if topology == "shared_isp_gateway" and not outer_gateway_ref:
         missing.append("outer_gateway_ref")
     if topology == "shared_isp_gateway":
         if not (str(cgnat.get("outer_identity_ref") or "").strip() or str(gateway_pki.get("identity_ref") or "").strip()):
@@ -60,6 +61,24 @@ def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "
         raise ValueError(
             f"{request_path} is missing required customer.transport.cgnat fields: {', '.join(missing)}"
         )
+
+    ownership_errors: list[str] = []
+    if topology == "per_customer_outer":
+        if outer_gateway_ref:
+            ownership_errors.append(
+                "per_customer_outer must not declare outer_gateway_ref; the customer router owns the outer tunnel"
+            )
+        if gateway_pki:
+            ownership_errors.append(
+                "per_customer_outer must not declare customer.transport.cgnat.pki.gateway; use pki.customer"
+            )
+    elif topology == "shared_isp_gateway":
+        if customer_pki:
+            ownership_errors.append(
+                "shared_isp_gateway must not declare customer.transport.cgnat.pki.customer; use pki.gateway"
+            )
+    if ownership_errors:
+        raise ValueError(f"{request_path} violates CGNAT topology ownership guardrails: {'; '.join(ownership_errors)}")
 
 
 def _package_paths(readiness: dict[str, Any]) -> dict[str, Any]:

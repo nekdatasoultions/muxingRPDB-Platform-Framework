@@ -99,6 +99,34 @@ class PackageRenderingTests(unittest.TestCase):
         if isp_eip_action is not None:
             self.assertEqual(isp_eip_action["association_target"], "transit_network_interface")
 
+    def test_aws_deploy_plan_can_scope_to_customer_router_requests_only(self) -> None:
+        aws_output = self.tempdir_path / "aws-package"
+        deploy_output = self.tempdir_path / "aws-deploy-plan-routers-only"
+
+        self._run(str(CGNAT_ROOT / "aws" / "scripts" / "render_aws_package.py"), str(self.bundle_path), str(aws_output))
+        self._run(
+            str(CGNAT_ROOT / "aws" / "scripts" / "deploy_scenario1_aws.py"),
+            str(aws_output),
+            str(deploy_output),
+            "--mode",
+            "plan",
+            "--role-scope",
+            "customer-vpn-routers",
+        )
+
+        plan = json.loads((deploy_output / "deployment-plan.json").read_text(encoding="utf-8"))
+        readiness = json.loads((deploy_output / "deployment-readiness.json").read_text(encoding="utf-8"))
+        router_requests = json.loads((deploy_output / "customer-vpn-router-run-instances-requests.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(plan["deployment_ready_for_live_create"])
+        self.assertEqual(plan["role_scope"], "customer-vpn-routers")
+        self.assertEqual(readiness["role_scope"], "customer-vpn-routers")
+        self.assertEqual(set(plan["ec2_requests"]), {"customer_vpn_routers"})
+        self.assertEqual(len(router_requests), 2)
+        self.assertEqual(plan["post_create_actions"]["actions"], [])
+        self.assertFalse((deploy_output / "head-end-run-instances-request.json").exists())
+        self.assertFalse((deploy_output / "isp-head-end-run-instances-request.json").exists())
+
     def test_server_config_renderer_outputs_per_router_artifacts(self) -> None:
         server_output = self.tempdir_path / "server-package"
         config_output = self.tempdir_path / "server-configs"
@@ -170,7 +198,10 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertIn("CGNAT_TRANSPORT_ROLE=", isp_runtime)
         self.assertNotIn("CGNAT_OUTER_LOCAL_IDENTITY=", isp_runtime)
         self.assertIn("NAT/transit only", isp_conf)
+        self.assertIn("No IPsec daemon terminates on this node", isp_conf)
+        self.assertIn("table ip cgnat_scenario1_nat", isp_forwarding)
         self.assertIn("masquerade", isp_forwarding)
+        self.assertIn('ip saddr $CUSTOMER_SUBNET oifname "$CGNAT_ISP_UPLINK_INTERFACE" masquerade', isp_forwarding)
         self.assertIn("nft -f /etc/nftables.d/cgnat-scenario1-isp.nft", isp_forwarding)
         self.assertFalse((config_output / "cgnat-isp-head-end-inner-swanctl.conf").exists())
 

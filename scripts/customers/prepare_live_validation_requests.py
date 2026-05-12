@@ -308,6 +308,82 @@ def prepare_customer5_explicit_inside_nat(*, request_dir: Path) -> dict[str, Any
     }
 
 
+CGNAT_SERVICE_REACHABLE_SUBNETS = ["23.20.31.151/32", "194.138.36.86/32"]
+CGNAT_OUTSIDE_NAT_ROUTE_VIA = "172.31.63.44"
+CGNAT_OUTSIDE_NAT_ROUTE_DEV = "ens36"
+
+
+def cgnat_inside_nat(real_subnet: str, translated_subnet: str) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "mode": "netmap",
+        "mapping_strategy": "one_to_one",
+        "real_subnets": [real_subnet],
+        "translated_subnets": [translated_subnet],
+        "core_subnets": list(CGNAT_SERVICE_REACHABLE_SUBNETS),
+    }
+
+
+def cgnat_outside_nat(translated_subnet: str, customer_source: str) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "mode": "netmap",
+        "mapping_strategy": "one_to_one",
+        "real_subnets": ["194.138.36.86/32"],
+        "translated_subnets": [translated_subnet],
+        "customer_sources": [customer_source],
+        "route_via": CGNAT_OUTSIDE_NAT_ROUTE_VIA,
+        "route_dev": CGNAT_OUTSIDE_NAT_ROUTE_DEV,
+    }
+
+
+def cgnat_demo_spec(
+    *,
+    profile: str,
+    customer_name: str,
+    outer_topology: str,
+    peer_public_ip: str,
+    customer_loopback_ip: str,
+    real_inside_subnet: str,
+    inside_translated_subnet: str = "",
+    outside_translated_subnet: str = "",
+    outer_gateway_ref: str = "",
+) -> dict[str, Any]:
+    normalized_topology = outer_topology.strip().lower().replace("-", "_")
+    normalized_gateway_ref = outer_gateway_ref.strip()
+    if normalized_topology == "per_customer_outer" and normalized_gateway_ref:
+        raise ValueError("per_customer_outer demo profiles must not set outer_gateway_ref")
+    if normalized_topology == "shared_isp_gateway" and not normalized_gateway_ref:
+        raise ValueError("shared_isp_gateway demo profiles must pin an ISP outer_gateway_ref")
+    has_inside_nat = bool(inside_translated_subnet)
+    has_outside_nat = bool(outside_translated_subnet)
+    local_subnets = (
+        ["23.20.31.151/32", outside_translated_subnet]
+        if has_outside_nat
+        else list(CGNAT_SERVICE_REACHABLE_SUBNETS)
+    )
+    return {
+        "profile": profile,
+        "customer_name": customer_name,
+        "outer_topology": normalized_topology,
+        "outer_gateway_ref": normalized_gateway_ref,
+        "service_profile": "scenario2" if normalized_topology == "shared_isp_gateway" else "scenario1",
+        "peer_public_ip": peer_public_ip,
+        "customer_loopback_ip": customer_loopback_ip,
+        "known_inside_identity": real_inside_subnet,
+        "local_subnets": local_subnets,
+        "remote_subnets": [real_inside_subnet],
+        "remote_host_cidrs": [real_inside_subnet],
+        "service_reachable_subnets": list(CGNAT_SERVICE_REACHABLE_SUBNETS),
+        "post_ipsec_nat": (
+            cgnat_inside_nat(real_inside_subnet, inside_translated_subnet) if has_inside_nat else None
+        ),
+        "outside_nat": cgnat_outside_nat(outside_translated_subnet, real_inside_subnet) if has_outside_nat else None,
+        "inside_nat_enabled": has_inside_nat,
+        "outside_nat_enabled": has_outside_nat,
+    }
+
+
 def prepare_cgnat_requests(
     *,
     request_dir: Path,
@@ -342,7 +418,7 @@ def prepare_cgnat_requests(
         headend_key_passphrase=headend_key_passphrase,
         request_out=request_dir / "demo-ca-cgnat-shared-gateway.yaml",
     )
-    return [
+    entries = [
         {
             "profile": "cgnat-provided-per-customer-outer",
             "customer_name": per_customer["customer_name"],
@@ -361,6 +437,102 @@ def prepare_cgnat_requests(
             "certificate_manifest": shared_gateway,
         },
     ]
+    cgnat_nat_specs = [
+        cgnat_demo_spec(
+            profile="cgnat-per-customer-outer-inside-nat",
+            customer_name="demo-ca-cgnat-per-outer-inside-nat",
+            outer_topology="per_customer_outer",
+            peer_public_ip="203.0.113.201",
+            customer_loopback_ip="10.250.10.10",
+            real_inside_subnet="10.60.10.10/32",
+            inside_translated_subnet="172.30.10.10/32",
+        ),
+        cgnat_demo_spec(
+            profile="cgnat-per-customer-outer-inside-outside-nat",
+            customer_name="demo-ca-cgnat-per-outer-inside-outside-nat",
+            outer_topology="per_customer_outer",
+            peer_public_ip="203.0.113.202",
+            customer_loopback_ip="10.250.10.11",
+            real_inside_subnet="10.60.10.11/32",
+            inside_translated_subnet="172.30.10.11/32",
+            outside_translated_subnet="10.60.40.11/32",
+        ),
+        cgnat_demo_spec(
+            profile="cgnat-per-customer-outer-outside-nat",
+            customer_name="demo-ca-cgnat-per-outer-outside-nat",
+            outer_topology="per_customer_outer",
+            peer_public_ip="203.0.113.203",
+            customer_loopback_ip="10.250.10.12",
+            real_inside_subnet="10.60.10.12/32",
+            outside_translated_subnet="10.60.40.12/32",
+        ),
+        cgnat_demo_spec(
+            profile="cgnat-shared-isp-gateway-inside-nat",
+            customer_name="demo-ca-cgnat-shared-isp-inside-nat",
+            outer_topology="shared_isp_gateway",
+            outer_gateway_ref="isp-cgnat-router-2",
+            peer_public_ip="203.0.113.211",
+            customer_loopback_ip="10.250.20.10",
+            real_inside_subnet="10.60.20.10/32",
+            inside_translated_subnet="172.30.20.10/32",
+        ),
+        cgnat_demo_spec(
+            profile="cgnat-shared-isp-gateway-inside-outside-nat",
+            customer_name="demo-ca-cgnat-shared-isp-inside-outside-nat",
+            outer_topology="shared_isp_gateway",
+            outer_gateway_ref="isp-cgnat-router-2",
+            peer_public_ip="203.0.113.212",
+            customer_loopback_ip="10.250.20.11",
+            real_inside_subnet="10.60.20.11/32",
+            inside_translated_subnet="172.30.20.11/32",
+            outside_translated_subnet="10.60.50.11/32",
+        ),
+        cgnat_demo_spec(
+            profile="cgnat-shared-isp-gateway-outside-nat",
+            customer_name="demo-ca-cgnat-shared-isp-outside-nat",
+            outer_topology="shared_isp_gateway",
+            outer_gateway_ref="isp-cgnat-router-2",
+            peer_public_ip="203.0.113.213",
+            customer_loopback_ip="10.250.20.12",
+            real_inside_subnet="10.60.20.12/32",
+            outside_translated_subnet="10.60.50.12/32",
+        ),
+    ]
+    for spec in cgnat_nat_specs:
+        manifest = issue_cgnat_customer_bundle(
+            ca_root=ca_root,
+            ca_name=ca_name,
+            customer_name=spec["customer_name"],
+            peer_public_ip=spec["peer_public_ip"],
+            outer_topology=spec["outer_topology"],
+            outer_gateway_ref=spec["outer_gateway_ref"],
+            service_profile=spec["service_profile"],
+            customer_loopback_ip=spec["customer_loopback_ip"],
+            known_inside_identity=spec["known_inside_identity"],
+            local_subnets=spec["local_subnets"],
+            remote_subnets=spec["remote_subnets"],
+            remote_host_cidrs=spec["remote_host_cidrs"],
+            service_reachable_subnets=spec["service_reachable_subnets"],
+            post_ipsec_nat=spec["post_ipsec_nat"],
+            outside_nat=spec["outside_nat"],
+            encrypt_headend_key=encrypt_headend_key,
+            headend_key_passphrase=headend_key_passphrase,
+            request_out=request_dir / f"{spec['customer_name']}.yaml",
+        )
+        entries.append(
+            {
+                "profile": spec["profile"],
+                "customer_name": manifest["customer_name"],
+                "request_path": manifest["request_path"],
+                "request_ref": repo_relative(Path(manifest["request_path"])),
+                "outer_topology": manifest["outer_topology"],
+                "outer_gateway_ref": manifest["outer_gateway_ref"],
+                "inside_nat_enabled": spec["inside_nat_enabled"],
+                "outside_nat_enabled": spec["outside_nat_enabled"],
+                "certificate_manifest": manifest,
+            }
+        )
+    return entries
 
 
 def parse_args() -> argparse.Namespace:

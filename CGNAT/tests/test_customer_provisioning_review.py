@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -84,6 +85,38 @@ class CustomerProvisioningReviewTests(unittest.TestCase):
 
     def test_validate_cgnat_request_accepts_example(self) -> None:
         validate_cgnat_request(self.request_doc, request_path="example-minimal-cgnat.yaml")
+
+    def test_validate_cgnat_request_rejects_per_customer_outer_gateway_owner_shape(self) -> None:
+        request_doc = deepcopy(self.request_doc)
+        cgnat = request_doc["customer"]["transport"]["cgnat"]
+        cgnat["outer_gateway_ref"] = "isp-cgnat-router-2"
+        cgnat["pki"]["gateway"] = {
+            "identity_ref": "isp-cgnat-router-2/example-minimal-cgnat",
+            "auth_ref": "pki/cgnat/gateway/isp-cgnat-router-2/example-minimal-cgnat",
+            "package_name": "example-minimal-cgnat-isp-cgnat-router-2",
+        }
+
+        with self.assertRaisesRegex(ValueError, "per_customer_outer must not declare outer_gateway_ref"):
+            validate_cgnat_request(request_doc, request_path="bad-per-customer.yaml")
+
+    def test_validate_cgnat_request_rejects_shared_gateway_customer_owner_shape(self) -> None:
+        request_doc = self._shared_isp_request()
+        cgnat = request_doc["customer"]["transport"]["cgnat"]
+        cgnat["pki"]["customer"] = {
+            "identity_ref": "customer-router-1/bad-shared-isp",
+            "auth_ref": "pki/cgnat/customer-router-1/bad-shared-isp",
+            "package_name": "bad-shared-isp-customer-router-1",
+        }
+
+        with self.assertRaisesRegex(ValueError, "shared_isp_gateway must not declare"):
+            validate_cgnat_request(request_doc, request_path="bad-shared-isp.yaml")
+
+    def test_validate_cgnat_request_rejects_shared_gateway_without_gateway_ref(self) -> None:
+        request_doc = self._shared_isp_request()
+        request_doc["customer"]["transport"]["cgnat"].pop("outer_gateway_ref", None)
+
+        with self.assertRaisesRegex(ValueError, "outer_gateway_ref"):
+            validate_cgnat_request(request_doc, request_path="bad-shared-isp.yaml")
 
     def test_surface_reviews_capture_expected_targets_and_metadata(self) -> None:
         backend = build_backend_surface_review(

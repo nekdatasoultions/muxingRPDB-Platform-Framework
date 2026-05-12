@@ -264,6 +264,52 @@ def yaml_list(values: list[str], *, indent: int) -> list[str]:
     return [f"{prefix}- {value}" for value in values]
 
 
+def yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def append_nat_section(lines: list[str], section_name: str, nat_doc: dict[str, Any] | None) -> None:
+    if not nat_doc:
+        return
+    ordered_keys = [
+        "enabled",
+        "mode",
+        "mapping_strategy",
+        "real_subnets",
+        "translated_subnets",
+        "host_mappings",
+        "core_subnets",
+        "customer_sources",
+        "route_via",
+        "route_dev",
+        "interface",
+        "output_mark",
+        "tcp_mss_clamp",
+    ]
+    lines.append(f"  {section_name}:")
+    for key in ordered_keys:
+        if key not in nat_doc:
+            continue
+        value = nat_doc[key]
+        if value in ("", None, []):
+            continue
+        if isinstance(value, list):
+            lines.append(f"    {key}:")
+            for item in value:
+                if isinstance(item, dict):
+                    real_ip = item.get("real_ip")
+                    translated_ip = item.get("translated_ip")
+                    if real_ip and translated_ip:
+                        lines.append(f"      - real_ip: {real_ip}")
+                        lines.append(f"        translated_ip: {translated_ip}")
+                else:
+                    lines.append(f"      - {item}")
+            continue
+        lines.append(f"    {key}: {yaml_scalar(value)}")
+
+
 def render_customer_request_yaml(
     *,
     customer_name: str,
@@ -343,6 +389,7 @@ def render_cgnat_customer_request_yaml(
     peer_public_ip: str,
     local_subnets: list[str],
     remote_subnets: list[str],
+    remote_host_cidrs: list[str] | None,
     service_profile: str,
     outer_topology: str,
     outer_gateway_ref: str,
@@ -358,6 +405,8 @@ def render_cgnat_customer_request_yaml(
     outer_key_ref: str,
     outer_passphrase_ref: str,
     trust_ref: str,
+    post_ipsec_nat: dict[str, Any] | None = None,
+    outside_nat: dict[str, Any] | None = None,
 ) -> str:
     pki_edge_key = "gateway" if outer_topology == "shared_isp_gateway" else "customer"
     pki_edge_package = (
@@ -380,20 +429,37 @@ def render_cgnat_customer_request_yaml(
         *yaml_list(local_subnets, indent=6),
         "    remote_subnets:",
         *yaml_list(remote_subnets, indent=6),
-        "  backend:",
-        "    cluster: non-nat",
-        "  protocols:",
-        "    udp500: true",
-        "    udp4500: false",
-        "    esp50: true",
-        "  natd_rewrite:",
-        "    enabled: true",
-        "  transport:",
-        "    mode: cgnat",
-        "    tunnel_mtu: 1436",
-        "    cgnat:",
-        f"      service_profile: {service_profile}",
     ]
+    if remote_host_cidrs:
+        lines.extend(
+            [
+                "    remote_host_cidrs:",
+                *yaml_list(remote_host_cidrs, indent=6),
+            ]
+        )
+    lines.extend(
+        [
+            "  backend:",
+            "    cluster: non-nat",
+            "  protocols:",
+            "    udp500: true",
+            "    udp4500: false",
+            "    esp50: true",
+            "  natd_rewrite:",
+            "    enabled: true",
+        ]
+    )
+    append_nat_section(lines, "post_ipsec_nat", post_ipsec_nat)
+    append_nat_section(lines, "outside_nat", outside_nat)
+    lines.extend(
+        [
+            "  transport:",
+            "    mode: cgnat",
+            "    tunnel_mtu: 1436",
+            "    cgnat:",
+            f"      service_profile: {service_profile}",
+        ]
+    )
     if outer_topology == "shared_isp_gateway":
         lines.extend(
             [
@@ -558,13 +624,16 @@ def issue_cgnat_customer_bundle(
     ca_name: str = DEFAULT_CA_NAME,
     peer_public_ip: str = "203.0.113.72",
     outer_topology: str = "per_customer_outer",
-    outer_gateway_ref: str = "isp-cgnat-router-1",
+    outer_gateway_ref: str = "",
     service_profile: str = "scenario1",
     customer_loopback_ip: str = "10.250.9.10",
     known_inside_identity: str = "10.20.30.10/32",
     local_subnets: list[str] | None = None,
     remote_subnets: list[str] | None = None,
+    remote_host_cidrs: list[str] | None = None,
     service_reachable_subnets: list[str] | None = None,
+    post_ipsec_nat: dict[str, Any] | None = None,
+    outside_nat: dict[str, Any] | None = None,
     headend_id: str = "",
     outer_id: str = "",
     encrypt_headend_key: bool = False,
@@ -577,6 +646,11 @@ def issue_cgnat_customer_bundle(
     normalized_topology = outer_topology.strip().lower().replace("-", "_")
     if normalized_topology not in {"per_customer_outer", "shared_isp_gateway"}:
         raise ValueError("outer_topology must be per_customer_outer or shared_isp_gateway")
+    normalized_gateway_ref = str(outer_gateway_ref or "").strip()
+    if normalized_topology == "per_customer_outer" and normalized_gateway_ref:
+        raise ValueError("per_customer_outer must not set outer_gateway_ref; the customer router owns the outer tunnel")
+    if normalized_topology == "shared_isp_gateway" and not normalized_gateway_ref:
+        raise ValueError("shared_isp_gateway requires outer_gateway_ref for the ISP-owned outer tunnel")
 
     ca_manifest = ensure_demo_ca(ca_root, ca_name=ca_name)
     ca_dir = Path(ca_manifest["ca_root"])
@@ -593,7 +667,7 @@ def issue_cgnat_customer_bundle(
     if outer_id:
         resolved_outer_id = outer_id
     elif normalized_topology == "shared_isp_gateway":
-        resolved_outer_id = f"{outer_gateway_ref}.{safe_customer}.example"
+        resolved_outer_id = f"{normalized_gateway_ref}.{safe_customer}.example"
     else:
         resolved_outer_id = f"{safe_customer}.customer-router.example"
     resolved_local_subnets = local_subnets or list(DEFAULT_CGNAT_LOCAL_SUBNETS)
@@ -629,9 +703,10 @@ def issue_cgnat_customer_bundle(
         peer_public_ip=peer_public_ip,
         local_subnets=resolved_local_subnets,
         remote_subnets=resolved_remote_subnets,
+        remote_host_cidrs=remote_host_cidrs,
         service_profile=service_profile,
         outer_topology=normalized_topology,
-        outer_gateway_ref=outer_gateway_ref,
+        outer_gateway_ref=normalized_gateway_ref,
         customer_loopback_ip=customer_loopback_ip,
         known_inside_identity=known_inside_identity,
         service_reachable_subnets=resolved_service_reachable,
@@ -644,6 +719,8 @@ def issue_cgnat_customer_bundle(
         outer_key_ref=outer["private_key_ref"],
         outer_passphrase_ref=outer["private_key_passphrase_ref"],
         trust_ref=trust_ref,
+        post_ipsec_nat=post_ipsec_nat,
+        outside_nat=outside_nat,
     )
     write_text(request_path, request_text)
 
@@ -657,7 +734,9 @@ def issue_cgnat_customer_bundle(
         "request_ref": file_ref(request_path),
         "transport_mode": "cgnat",
         "outer_topology": normalized_topology,
-        "outer_gateway_ref": outer_gateway_ref if normalized_topology == "shared_isp_gateway" else "",
+        "outer_gateway_ref": normalized_gateway_ref if normalized_topology == "shared_isp_gateway" else "",
+        "post_ipsec_nat": post_ipsec_nat or {},
+        "outside_nat": outside_nat or {},
         "headend": headend,
         "outer": outer,
         "trust_ref": trust_ref,
@@ -705,15 +784,18 @@ class DemoCaRequestHandler(BaseHTTPRequestHandler):
                     customer_name=str(payload["customer_name"]),
                     peer_public_ip=str(payload.get("peer_public_ip") or "203.0.113.72"),
                     outer_topology=str(payload.get("outer_topology") or "per_customer_outer"),
-                    outer_gateway_ref=str(payload.get("outer_gateway_ref") or "isp-cgnat-router-1"),
+                    outer_gateway_ref=str(payload.get("outer_gateway_ref") or ""),
                     service_profile=str(payload.get("service_profile") or "scenario1"),
                     customer_loopback_ip=str(payload.get("customer_loopback_ip") or "10.250.9.10"),
                     known_inside_identity=str(payload.get("known_inside_identity") or "10.20.30.10/32"),
                     local_subnets=[str(item) for item in payload.get("local_subnets") or DEFAULT_CGNAT_LOCAL_SUBNETS],
                     remote_subnets=[str(item) for item in payload.get("remote_subnets") or DEFAULT_CGNAT_REMOTE_SUBNETS],
+                    remote_host_cidrs=[str(item) for item in payload.get("remote_host_cidrs") or []] or None,
                     service_reachable_subnets=[
                         str(item) for item in payload.get("service_reachable_subnets") or DEFAULT_CGNAT_LOCAL_SUBNETS
                     ],
+                    post_ipsec_nat=payload.get("post_ipsec_nat") if isinstance(payload.get("post_ipsec_nat"), dict) else None,
+                    outside_nat=payload.get("outside_nat") if isinstance(payload.get("outside_nat"), dict) else None,
                     headend_id=str(payload.get("headend_id") or ""),
                     outer_id=str(payload.get("outer_id") or ""),
                     encrypt_headend_key=bool(payload.get("encrypt_headend_key")),
@@ -793,14 +875,17 @@ def main() -> int:
         choices=["per_customer_outer", "shared_isp_gateway"],
         default="per_customer_outer",
     )
-    cgnat_issue_parser.add_argument("--outer-gateway-ref", default="isp-cgnat-router-1")
+    cgnat_issue_parser.add_argument("--outer-gateway-ref", default="")
     cgnat_issue_parser.add_argument("--peer-public-ip", default="203.0.113.72")
     cgnat_issue_parser.add_argument("--service-profile", default="scenario1")
     cgnat_issue_parser.add_argument("--customer-loopback-ip", default="10.250.9.10")
     cgnat_issue_parser.add_argument("--known-inside-identity", default="10.20.30.10/32")
     cgnat_issue_parser.add_argument("--local-subnet", action="append", dest="local_subnets")
     cgnat_issue_parser.add_argument("--remote-subnet", action="append", dest="remote_subnets")
+    cgnat_issue_parser.add_argument("--remote-host-cidr", action="append", dest="remote_host_cidrs")
     cgnat_issue_parser.add_argument("--service-reachable-subnet", action="append", dest="service_reachable_subnets")
+    cgnat_issue_parser.add_argument("--post-ipsec-nat-json", default="")
+    cgnat_issue_parser.add_argument("--outside-nat-json", default="")
     cgnat_issue_parser.add_argument("--headend-id", default="")
     cgnat_issue_parser.add_argument("--outer-id", default="")
     cgnat_issue_parser.add_argument("--encrypt-headend-key", action="store_true")
@@ -852,7 +937,10 @@ def main() -> int:
             known_inside_identity=args.known_inside_identity,
             local_subnets=args.local_subnets,
             remote_subnets=args.remote_subnets,
+            remote_host_cidrs=args.remote_host_cidrs,
             service_reachable_subnets=args.service_reachable_subnets,
+            post_ipsec_nat=json.loads(args.post_ipsec_nat_json) if args.post_ipsec_nat_json else None,
+            outside_nat=json.loads(args.outside_nat_json) if args.outside_nat_json else None,
             headend_id=args.headend_id,
             outer_id=args.outer_id,
             encrypt_headend_key=args.encrypt_headend_key,

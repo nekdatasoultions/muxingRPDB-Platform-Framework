@@ -20,6 +20,28 @@ CGNAT rendition:
 No real deployment attempt should happen until all required gates below are
 green for the current implementation slice.
 
+## Topology Guardrails
+
+These rules are hard boundaries for CGNAT customer provisioning. If any rule is
+violated, the request or demo generator should fail before live apply.
+
+- `per_customer_outer` means the customer-side router owns both the outer CGNAT
+  certificate tunnel and the inner VPN tunnel. It must not declare
+  `outer_gateway_ref` or `customer.transport.cgnat.pki.gateway`.
+- The Scenario 1 ISP router for `per_customer_outer` is NAT/transit only. Its
+  nftables masquerade is for the outer transport path and must not be confused
+  with customer inside NAT or outside NAT.
+- `shared_isp_gateway` means the ISP gateway owns the outer CGNAT certificate
+  tunnel, and the customer owns only the inner VPN tunnel. It must declare
+  `outer_gateway_ref` and use `customer.transport.cgnat.pki.gateway`, not
+  `pki.customer`.
+- Both CGNAT ISP models still target the same hosted CGNAT head-end platform.
+- Customer inside NAT and outside NAT remain backend VPN head-end features.
+  They are rendered by `post_ipsec_nat` and `outside_nat` nftables on the
+  selected VPN head-end, not on the CGNAT ISP router.
+- SmartConnect routing must follow the translated customer service identity
+  selected by provisioning. It must not route overlapping `remote_subnets`.
+
 ## Regression Layers
 
 ### Layer 1: CGNAT-Local Regression

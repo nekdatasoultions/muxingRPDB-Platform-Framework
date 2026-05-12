@@ -395,59 +395,56 @@ def _build_customer_vpn_router_run_instances_requests(package: dict[str, Any]) -
     return requests
 
 
-def _build_post_create_actions(package: dict[str, Any]) -> dict[str, Any]:
+def _build_post_create_actions(package: dict[str, Any], role_scope: str = "all") -> dict[str, Any]:
     head_end = package["cgnat_head_end"]
     isp_head_end = package["cgnat_isp_head_end"]
     actions: list[dict[str, Any]] = []
 
-    head_strategy = head_end.get("public_eip_strategy") or "existing_allocation"
-    if head_strategy == "existing_allocation":
-        actions.append(
-            {
-                "name": "associate_head_end_eip",
-                "service_role": "cgnat_head_end",
-                "allocation_id": head_end["public_eip_allocation_id"],
-                "association_target": "primary_network_interface",
-            }
-        )
-    elif head_strategy == "allocate_new":
-        actions.append(
-            {
-                "name": "allocate_and_associate_head_end_eip",
-                "service_role": "cgnat_head_end",
-                "association_target": "primary_network_interface",
-            }
-        )
+    if role_scope in {"all", "cgnat-head-end"}:
+        head_strategy = head_end.get("public_eip_strategy") or "existing_allocation"
+        if head_strategy == "existing_allocation":
+            actions.append(
+                {
+                    "name": "associate_head_end_eip",
+                    "service_role": "cgnat_head_end",
+                    "allocation_id": head_end["public_eip_allocation_id"],
+                    "association_target": "primary_network_interface",
+                }
+            )
+        elif head_strategy == "allocate_new":
+            actions.append(
+                {
+                    "name": "allocate_and_associate_head_end_eip",
+                    "service_role": "cgnat_head_end",
+                    "association_target": "primary_network_interface",
+                }
+            )
+        actions.append({"name": "disable_source_dest_check_head_end", "service_role": "cgnat_head_end"})
 
-    isp_strategy = isp_head_end.get("public_eip_strategy") or "none"
-    if isp_strategy == "existing_allocation":
-        actions.append(
-            {
-                "name": "associate_isp_head_end_eip",
-                "service_role": "cgnat_isp_head_end",
-                "allocation_id": isp_head_end["public_eip_allocation_id"],
-                "association_target": "transit_network_interface",
-            }
-        )
-    elif isp_strategy == "allocate_new":
-        actions.append(
-            {
-                "name": "allocate_and_associate_isp_head_end_eip",
-                "service_role": "cgnat_isp_head_end",
-                "association_target": "transit_network_interface",
-            }
-        )
-
-    actions.extend(
-        [
-            {"name": "disable_source_dest_check_head_end", "service_role": "cgnat_head_end"},
-            {"name": "disable_source_dest_check_isp_head_end", "service_role": "cgnat_isp_head_end"},
-        ]
-    )
+    if role_scope in {"all", "cgnat-isp-head-end"}:
+        isp_strategy = isp_head_end.get("public_eip_strategy") or "none"
+        if isp_strategy == "existing_allocation":
+            actions.append(
+                {
+                    "name": "associate_isp_head_end_eip",
+                    "service_role": "cgnat_isp_head_end",
+                    "allocation_id": isp_head_end["public_eip_allocation_id"],
+                    "association_target": "transit_network_interface",
+                }
+            )
+        elif isp_strategy == "allocate_new":
+            actions.append(
+                {
+                    "name": "allocate_and_associate_isp_head_end_eip",
+                    "service_role": "cgnat_isp_head_end",
+                    "association_target": "transit_network_interface",
+                }
+            )
+        actions.append({"name": "disable_source_dest_check_isp_head_end", "service_role": "cgnat_isp_head_end"})
     return {"actions": actions}
 
 
-def _build_plan(package: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_plan(package: dict[str, Any], issues: list[dict[str, Any]], role_scope: str = "all") -> dict[str, Any]:
     manifest = package["manifest"]
     dependencies = package["dependencies"]
     cgnat_head_end = package["cgnat_head_end"]
@@ -458,12 +455,13 @@ def _build_plan(package: dict[str, Any], issues: list[dict[str, Any]]) -> dict[s
     ec2_requests: dict[str, Any] = {}
     post_create_actions: dict[str, Any] = {"actions": []}
     if not blocking:
-        ec2_requests = {
-            "cgnat_head_end": _build_head_end_run_instances_request(package),
-            "cgnat_isp_head_end": _build_isp_head_end_run_instances_request(package),
-            "customer_vpn_routers": _build_customer_vpn_router_run_instances_requests(package),
-        }
-        post_create_actions = _build_post_create_actions(package)
+        if role_scope in {"all", "cgnat-head-end"}:
+            ec2_requests["cgnat_head_end"] = _build_head_end_run_instances_request(package)
+        if role_scope in {"all", "cgnat-isp-head-end"}:
+            ec2_requests["cgnat_isp_head_end"] = _build_isp_head_end_run_instances_request(package)
+        if role_scope in {"all", "customer-vpn-routers"}:
+            ec2_requests["customer_vpn_routers"] = _build_customer_vpn_router_run_instances_requests(package)
+        post_create_actions = _build_post_create_actions(package, role_scope=role_scope)
     return {
         "plan_type": "cgnat_scenario1_aws_deploy_plan",
         "service_id": manifest["service_id"],
@@ -471,6 +469,7 @@ def _build_plan(package: dict[str, Any], issues: list[dict[str, Any]]) -> dict[s
         "environment_name": manifest["environment_name"],
         "scenario": manifest["scenario"],
         "deployment_ready_for_live_create": not blocking,
+        "role_scope": role_scope,
         "aws_context": dependencies["aws"],
         "roles": {
             "cgnat_head_end": cgnat_head_end,
@@ -498,6 +497,7 @@ def _render_readme(plan: dict[str, Any]) -> str:
             f"- Service ID: `{plan['service_id']}`",
             f"- Environment: `{plan['environment_name']}`",
             f"- Scenario: `{plan['scenario']}`",
+            f"- Role scope: `{plan.get('role_scope', 'all')}`",
             f"- Live create readiness: `{status}`",
             "",
             "## Summary",
@@ -582,8 +582,10 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
                 return {"status": "dry_run_ok", "response": exc.response}
             raise RuntimeError(f"{name} EC2 run_instances failed: {exc}") from exc
 
-    result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
-    result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
+    if "cgnat_head_end" in plan["ec2_requests"]:
+        result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
+    if "cgnat_isp_head_end" in plan["ec2_requests"]:
+        result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
     for router in plan["ec2_requests"].get("customer_vpn_routers", []):
         router_result = _run_instance_request(router["role"], router["request"])
         router_result["role"] = router["role"]
@@ -724,8 +726,10 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
         status, response = _aws_cli_json(region, args, input_payload=request, dry_run_expected=dry_run)
         return {"status": "created" if not dry_run else status, "response": response}
 
-    result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
-    result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
+    if "cgnat_head_end" in plan["ec2_requests"]:
+        result["head_end"] = _run_instance_request("cgnat_head_end", plan["ec2_requests"]["cgnat_head_end"])
+    if "cgnat_isp_head_end" in plan["ec2_requests"]:
+        result["isp_head_end"] = _run_instance_request("cgnat_isp_head_end", plan["ec2_requests"]["cgnat_isp_head_end"])
     for router in plan["ec2_requests"].get("customer_vpn_routers", []):
         router_result = _run_instance_request(router["role"], router["request"])
         router_result["role"] = router["role"]
@@ -865,6 +869,12 @@ def main() -> int:
         action="store_true",
         help="When used with --mode apply, execute real AWS create calls instead of EC2 DryRun.",
     )
+    parser.add_argument(
+        "--role-scope",
+        choices=("all", "cgnat-head-end", "cgnat-isp-head-end", "customer-vpn-routers"),
+        default="all",
+        help="Limit EC2 create requests to one role family. Defaults to the full Scenario 1 stack.",
+    )
     args = parser.parse_args()
 
     package_dir = Path(args.package_dir).resolve()
@@ -873,19 +883,26 @@ def main() -> int:
 
     package = _load_package(package_dir)
     issues = _detect_issues(package)
-    plan = _build_plan(package, issues)
+    plan = _build_plan(package, issues, role_scope=args.role_scope)
 
     dump_json(output_dir / "deployment-plan.json", plan)
     dump_json(output_dir / "deployment-issues.json", {"issues": issues})
     if plan["ec2_requests"]:
-        dump_json(output_dir / "head-end-run-instances-request.json", plan["ec2_requests"]["cgnat_head_end"])
-        dump_json(output_dir / "isp-head-end-run-instances-request.json", plan["ec2_requests"]["cgnat_isp_head_end"])
-        dump_json(output_dir / "customer-vpn-router-run-instances-requests.json", plan["ec2_requests"]["customer_vpn_routers"])
+        if "cgnat_head_end" in plan["ec2_requests"]:
+            dump_json(output_dir / "head-end-run-instances-request.json", plan["ec2_requests"]["cgnat_head_end"])
+        if "cgnat_isp_head_end" in plan["ec2_requests"]:
+            dump_json(output_dir / "isp-head-end-run-instances-request.json", plan["ec2_requests"]["cgnat_isp_head_end"])
+        if "customer_vpn_routers" in plan["ec2_requests"]:
+            dump_json(
+                output_dir / "customer-vpn-router-run-instances-requests.json",
+                plan["ec2_requests"]["customer_vpn_routers"],
+            )
         dump_json(output_dir / "post-create-actions.json", plan["post_create_actions"])
     dump_json(
         output_dir / "deployment-readiness.json",
         {
             "mode": args.mode,
+            "role_scope": args.role_scope,
             "live_create_allowed": plan["deployment_ready_for_live_create"],
             "blocking_issue_count": len([issue for issue in issues if issue["severity"] in {"error", "blocking_gap"}]),
         },
