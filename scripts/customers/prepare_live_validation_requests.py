@@ -559,11 +559,7 @@ def prepare_cgnat_requests(
             request_doc = yaml.safe_load(request_path.read_text(encoding="utf-8")) or {}
             cgnat = request_doc.setdefault("customer", {}).setdefault("transport", {}).setdefault("cgnat", {})
             cgnat["outer_transport"] = spec["outer_transport"]
-            request_path.write_text(
-                yaml.safe_dump(request_doc, sort_keys=False),
-                encoding="utf-8",
-                newline="\n",
-            )
+            write_yaml(request_path, request_doc)
         entries.append(
             {
                 "profile": spec["profile"],
