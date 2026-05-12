@@ -315,7 +315,9 @@ Supported certificate profiles:
 The renderer changes the generated head-end `swanctl` connection to
 `auth = pubkey`, installs material under `/etc/swanctl/x509`,
 `/etc/swanctl/private`, and `/etc/swanctl/x509ca`, and does not render a
-`secrets {}` PSK block. If the head-end private key is encrypted, set
+`secrets {}` PSK block. Head-end private keys are placed directly in
+`/etc/swanctl/private` so `swanctl --load-creds` loads them as private
+credentials. If the head-end private key is encrypted, set
 `private_key_passphrase_secret_ref`; live apply resolves that reference and
 injects the passphrase into a swanctl private-key secret block. For the
 operational model and examples, see

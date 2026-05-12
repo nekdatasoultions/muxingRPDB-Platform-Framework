@@ -201,7 +201,7 @@ class LiveApplySecretSeedTests(unittest.TestCase):
                     "connections { test-cgnat-customer { local { auth = pubkey } } }",
                     "secrets {",
                     "  private-test-cgnat-customer-headend-key {",
-                    "    file = rpdb-customers/test-cgnat-customer-headend-key.pem",
+                    "    file = test-cgnat-customer-headend-key.pem",
                     "    secret = resolved-via-secret-store",
                     "  }",
                     "}",
@@ -231,14 +231,14 @@ class LiveApplySecretSeedTests(unittest.TestCase):
             sorted(
                 [
                     "etc/swanctl/x509/rpdb-customers/test-cgnat-customer-headend-cert.pem",
-                    "etc/swanctl/private/rpdb-customers/test-cgnat-customer-headend-key.pem",
+                    "etc/swanctl/private/test-cgnat-customer-headend-key.pem",
                     "etc/swanctl/x509ca/rpdb-customers/test-cgnat-customer-remote-trust.pem",
                     "etc/swanctl/x509/rpdb-customers/test-cgnat-customer-remote-cert.pem",
                 ]
             ),
         )
         self.assertTrue((headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / "test-cgnat-customer-headend-cert.pem").exists())
-        self.assertTrue((headend_root / "etc" / "swanctl" / "private" / "rpdb-customers" / "test-cgnat-customer-headend-key.pem").exists())
+        self.assertTrue((headend_root / "etc" / "swanctl" / "private" / "test-cgnat-customer-headend-key.pem").exists())
         self.assertTrue((headend_root / "etc" / "swanctl" / "x509ca" / "rpdb-customers" / "test-cgnat-customer-remote-trust.pem").exists())
         self.assertEqual(report["private_key_passphrase"]["secret_length"], len("test-passphrase"))
         self.assertIn('secret = "test-passphrase"', swanctl_conf.read_text(encoding="utf-8"))

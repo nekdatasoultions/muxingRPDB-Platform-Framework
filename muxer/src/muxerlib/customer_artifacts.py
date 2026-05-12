@@ -54,7 +54,9 @@ def _certificate_auth(ipsec: Dict[str, Any]) -> Dict[str, Any]:
 def _certificate_material_paths(customer_name: str) -> Dict[str, str]:
     return {
         "headend_cert": f"rpdb-customers/{customer_name}-headend-cert.pem",
-        "headend_private_key": f"rpdb-customers/{customer_name}-headend-key.pem",
+        # swanctl loads private keys from /etc/swanctl/private without
+        # recursing into customer subdirectories.
+        "headend_private_key": f"{customer_name}-headend-key.pem",
         "remote_trust": f"rpdb-customers/{customer_name}-remote-trust.pem",
         "remote_cert": f"rpdb-customers/{customer_name}-remote-cert.pem",
     }

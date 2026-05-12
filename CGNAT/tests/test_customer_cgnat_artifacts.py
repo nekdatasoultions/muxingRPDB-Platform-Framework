@@ -151,6 +151,11 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         self.assertIn("cacerts = rpdb-customers/example-certificate-auth-nonnat-remote-trust.pem", headend_conf)
         self.assertNotIn("auth = psk", headend_conf)
         self.assertNotIn("secrets {", headend_conf)
+        self.assertIn("headend-key.pem", ipsec_intent["auth"]["certificate_material_paths"]["headend_private_key"])
+        self.assertNotIn(
+            "rpdb-customers/",
+            ipsec_intent["auth"]["certificate_material_paths"]["headend_private_key"],
+        )
         self.assertEqual(ipsec_intent["auth"]["method"], "certificate")
         self.assertEqual(ipsec_intent["local_id"], "rpdb-headend.example")
         self.assertEqual(ipsec_intent["remote_id"], "customer-cert-70.example")
@@ -174,7 +179,7 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
 
         self.assertIn("auth = pubkey", headend_conf)
         self.assertIn("private-example-certificate-auth-nonnat-headend-key", headend_conf)
-        self.assertIn("file = rpdb-customers/example-certificate-auth-nonnat-headend-key.pem", headend_conf)
+        self.assertIn("file = example-certificate-auth-nonnat-headend-key.pem", headend_conf)
         self.assertIn("secret = ${PRIVATE_KEY_PASSPHRASE}", headend_conf)
         self.assertNotIn("auth = psk", headend_conf)
 

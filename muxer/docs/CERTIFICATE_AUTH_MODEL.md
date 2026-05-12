@@ -76,7 +76,7 @@ YAML for dry-run provisioning.
 For customer `<customer>`, live apply stages:
 
 - `/etc/swanctl/x509/rpdb-customers/<customer>-headend-cert.pem`
-- `/etc/swanctl/private/rpdb-customers/<customer>-headend-key.pem`
+- `/etc/swanctl/private/<customer>-headend-key.pem`
 - `/etc/swanctl/x509ca/rpdb-customers/<customer>-remote-trust.pem`
 - `/etc/swanctl/x509/rpdb-customers/<customer>-remote-cert.pem` when a remote
   certificate reference is provided
@@ -89,7 +89,7 @@ native swanctl private-key secret block:
 ```text
 secrets {
   private-<customer>-headend-key {
-    file = rpdb-customers/<customer>-headend-key.pem
+    file = <customer>-headend-key.pem
     secret = resolved-via-secret-store
   }
 }

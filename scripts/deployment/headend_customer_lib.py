@@ -695,6 +695,7 @@ def _render_master_remove_script(layout: dict[str, Path], customer_name: str) ->
             'rm -f "${SWANCTL_FLAT_CONF}"',
             'rm -f "${IPSEC_CUSTOMER_CONF}"',
             'rm -f "${ROOT}/etc/swanctl/x509/rpdb-customers/${CUST}-headend-cert.pem"',
+            'rm -f "${ROOT}/etc/swanctl/private/${CUST}-headend-key.pem"',
             'rm -f "${ROOT}/etc/swanctl/private/rpdb-customers/${CUST}-headend-key.pem"',
             'rm -f "${ROOT}/etc/swanctl/x509ca/rpdb-customers/${CUST}-remote-trust.pem"',
             'rm -f "${ROOT}/etc/swanctl/x509/rpdb-customers/${CUST}-remote-cert.pem"',

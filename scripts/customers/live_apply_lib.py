@@ -581,7 +581,7 @@ def _materialize_live_headend_certificates(
     headend_root = Path(headend_prepared["root"]).resolve()
     paths = {
         "headend_cert": headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / f"{customer_name}-headend-cert.pem",
-        "headend_private_key": headend_root / "etc" / "swanctl" / "private" / "rpdb-customers" / f"{customer_name}-headend-key.pem",
+        "headend_private_key": headend_root / "etc" / "swanctl" / "private" / f"{customer_name}-headend-key.pem",
         "remote_trust": headend_root / "etc" / "swanctl" / "x509ca" / "rpdb-customers" / f"{customer_name}-remote-trust.pem",
         "remote_cert": headend_root / "etc" / "swanctl" / "x509" / "rpdb-customers" / f"{customer_name}-remote-cert.pem",
     }
