@@ -871,6 +871,7 @@ def execute_staged_live_apply(
             _prepare_cgnat_gateway_root(
                 journal,
                 customer_name=customer_name,
+                package_dir=package_dir,
                 apply_dir=apply_dir,
                 pki_review_dir=cgnat_pki_review_dir,
             )
@@ -1329,6 +1330,8 @@ def execute_staged_live_apply(
                     str(cgnat_gateway_root),
                     "--pki-review-dir",
                     str(cgnat_pki_review_dir),
+                    "--package-dir",
+                    str(package_dir),
                     "--json",
                 ],
             )
@@ -1812,6 +1815,7 @@ def _prepare_cgnat_gateway_root(
     journal: list[dict[str, Any]],
     *,
     customer_name: str,
+    package_dir: Path,
     apply_dir: Path,
     pki_review_dir: Path,
 ) -> dict[str, Any]:
@@ -1833,6 +1837,8 @@ def _prepare_cgnat_gateway_root(
             str(gateway_root),
             "--pki-review-dir",
             str(pki_review_dir),
+            "--package-dir",
+            str(package_dir),
             "--json",
         ],
     )
@@ -1849,6 +1855,8 @@ def _prepare_cgnat_gateway_root(
             str(gateway_root),
             "--pki-review-dir",
             str(pki_review_dir),
+            "--package-dir",
+            str(package_dir),
             "--json",
         ],
     )
@@ -2500,6 +2508,7 @@ def execute_ssh_live_apply(
             _prepare_cgnat_gateway_root(
                 journal,
                 customer_name=customer_name,
+                package_dir=package_dir,
                 apply_dir=apply_dir,
                 pki_review_dir=cgnat_pki_review_dir,
             )

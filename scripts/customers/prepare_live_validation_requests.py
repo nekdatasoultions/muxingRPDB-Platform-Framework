@@ -348,6 +348,7 @@ def cgnat_demo_spec(
     inside_translated_subnet: str = "",
     outside_translated_subnet: str = "",
     outer_gateway_ref: str = "",
+    outer_transport: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_topology = outer_topology.strip().lower().replace("-", "_")
     normalized_gateway_ref = outer_gateway_ref.strip()
@@ -375,6 +376,7 @@ def cgnat_demo_spec(
         "remote_subnets": [real_inside_subnet],
         "remote_host_cidrs": [real_inside_subnet],
         "service_reachable_subnets": list(CGNAT_SERVICE_REACHABLE_SUBNETS),
+        "outer_transport": dict(outer_transport or {}),
         "post_ipsec_nat": (
             cgnat_inside_nat(real_inside_subnet, inside_translated_subnet) if has_inside_nat else None
         ),
@@ -446,6 +448,12 @@ def prepare_cgnat_requests(
             customer_loopback_ip="10.250.10.10",
             real_inside_subnet="10.60.10.10/32",
             inside_translated_subnet="172.30.10.10/32",
+            outer_transport={
+                "headend_underlay_interface": "ens34",
+                "headend_xfrm_interface": "cgxfrm-r3",
+                "headend_if_id": 103,
+                "customer_router_private_ip": "172.31.48.30",
+            },
         ),
         cgnat_demo_spec(
             profile="cgnat-per-customer-outer-inside-outside-nat",
@@ -456,6 +464,12 @@ def prepare_cgnat_requests(
             real_inside_subnet="10.60.10.11/32",
             inside_translated_subnet="172.30.10.11/32",
             outside_translated_subnet="10.60.40.11/32",
+            outer_transport={
+                "headend_underlay_interface": "ens34",
+                "headend_xfrm_interface": "cgxfrm-r4",
+                "headend_if_id": 104,
+                "customer_router_private_ip": "172.31.48.31",
+            },
         ),
         cgnat_demo_spec(
             profile="cgnat-per-customer-outer-outside-nat",
@@ -465,6 +479,12 @@ def prepare_cgnat_requests(
             customer_loopback_ip="10.250.10.12",
             real_inside_subnet="10.60.10.12/32",
             outside_translated_subnet="10.60.40.12/32",
+            outer_transport={
+                "headend_underlay_interface": "ens34",
+                "headend_xfrm_interface": "cgxfrm-r5",
+                "headend_if_id": 105,
+                "customer_router_private_ip": "172.31.48.32",
+            },
         ),
         cgnat_demo_spec(
             profile="cgnat-shared-isp-gateway-inside-nat",
@@ -475,6 +495,11 @@ def prepare_cgnat_requests(
             customer_loopback_ip="10.250.20.10",
             real_inside_subnet="10.60.20.10/32",
             inside_translated_subnet="172.30.20.10/32",
+            outer_transport={
+                "headend_xfrm_interface": "cgxfrm-gw2",
+                "customer_router_private_ip": "172.31.48.33",
+                "gateway_customer_interface": "ens34",
+            },
         ),
         cgnat_demo_spec(
             profile="cgnat-shared-isp-gateway-inside-outside-nat",
@@ -486,6 +511,11 @@ def prepare_cgnat_requests(
             real_inside_subnet="10.60.20.11/32",
             inside_translated_subnet="172.30.20.11/32",
             outside_translated_subnet="10.60.50.11/32",
+            outer_transport={
+                "headend_xfrm_interface": "cgxfrm-gw2",
+                "customer_router_private_ip": "172.31.48.34",
+                "gateway_customer_interface": "ens34",
+            },
         ),
         cgnat_demo_spec(
             profile="cgnat-shared-isp-gateway-outside-nat",
@@ -496,6 +526,11 @@ def prepare_cgnat_requests(
             customer_loopback_ip="10.250.20.12",
             real_inside_subnet="10.60.20.12/32",
             outside_translated_subnet="10.60.50.12/32",
+            outer_transport={
+                "headend_xfrm_interface": "cgxfrm-gw2",
+                "customer_router_private_ip": "172.31.48.35",
+                "gateway_customer_interface": "ens34",
+            },
         ),
     ]
     for spec in cgnat_nat_specs:
@@ -519,6 +554,16 @@ def prepare_cgnat_requests(
             headend_key_passphrase=headend_key_passphrase,
             request_out=request_dir / f"{spec['customer_name']}.yaml",
         )
+        if spec["outer_transport"]:
+            request_path = Path(manifest["request_path"])
+            request_doc = yaml.safe_load(request_path.read_text(encoding="utf-8")) or {}
+            cgnat = request_doc.setdefault("customer", {}).setdefault("transport", {}).setdefault("cgnat", {})
+            cgnat["outer_transport"] = spec["outer_transport"]
+            request_path.write_text(
+                yaml.safe_dump(request_doc, sort_keys=False),
+                encoding="utf-8",
+                newline="\n",
+            )
         entries.append(
             {
                 "profile": spec["profile"],

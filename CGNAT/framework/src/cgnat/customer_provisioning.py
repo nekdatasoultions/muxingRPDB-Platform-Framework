@@ -37,6 +37,7 @@ def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "
     pki = dict(cgnat.get("pki") or {})
     customer_pki = dict(pki.get("customer") or {})
     gateway_pki = dict(pki.get("gateway") or {})
+    outer_transport = dict(cgnat.get("outer_transport") or {})
     topology = _outer_topology(request_doc)
     outer_gateway_ref = str(cgnat.get("outer_gateway_ref") or "").strip()
     required = [
@@ -79,6 +80,28 @@ def validate_cgnat_request(request_doc: dict[str, Any], *, request_path: str = "
             )
     if ownership_errors:
         raise ValueError(f"{request_path} violates CGNAT topology ownership guardrails: {'; '.join(ownership_errors)}")
+
+    if outer_transport:
+        activation_missing = []
+        if not str(outer_transport.get("headend_xfrm_interface") or "").strip():
+            activation_missing.append("outer_transport.headend_xfrm_interface")
+        if topology == "per_customer_outer":
+            for field in (
+                "headend_underlay_interface",
+                "headend_if_id",
+                "customer_router_private_ip",
+            ):
+                if not str(outer_transport.get(field) or "").strip():
+                    activation_missing.append(f"outer_transport.{field}")
+        elif topology == "shared_isp_gateway":
+            for field in ("customer_router_private_ip", "gateway_customer_interface"):
+                if not str(outer_transport.get(field) or "").strip():
+                    activation_missing.append(f"outer_transport.{field}")
+        if activation_missing:
+            raise ValueError(
+                f"{request_path} has incomplete CGNAT live activation metadata: "
+                + ", ".join(activation_missing)
+            )
 
 
 def _package_paths(readiness: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +230,7 @@ def build_cgnat_headend_surface_review(
             "customer_loopback_ip": cgnat.get("customer_loopback_ip"),
             "known_inside_identity": cgnat.get("known_inside_identity"),
             "service_reachable_subnets": service_reachable_subnets,
+            "outer_transport": dict(cgnat.get("outer_transport") or {}),
         },
         "pki_binding": {
             "headend_identity_ref": pki_spec["headend"]["identity_ref"],

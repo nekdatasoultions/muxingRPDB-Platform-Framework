@@ -513,6 +513,32 @@
         }
       }
     },
+    "cgnat_outer_transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "headend_underlay_interface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headend_xfrm_interface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headend_if_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "customer_router_private_ip": {
+          "$ref": "#/$defs/ipv4"
+        },
+        "gateway_customer_interface": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "cgnat_transport": {
       "type": "object",
       "additionalProperties": false,
@@ -548,6 +574,9 @@
         },
         "service_reachable_subnets": {
           "$ref": "#/$defs/ipv4_cidr_array"
+        },
+        "outer_transport": {
+          "$ref": "#/$defs/cgnat_outer_transport"
         },
         "pki": {
           "$ref": "#/$defs/cgnat_pki"

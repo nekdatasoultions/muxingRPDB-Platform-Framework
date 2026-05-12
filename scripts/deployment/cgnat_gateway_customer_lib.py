@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 CGNAT_STATE_ROOT = Path("var") / "lib" / "rpdb-cgnat" / "customers"
 CGNAT_CONFIG_ROOT = Path("etc") / "rpdb-cgnat" / "customers"
@@ -132,6 +134,23 @@ def _load_gateway_handoff(pki_review_dir: Path) -> dict[str, Any]:
     }
 
 
+def _load_customer_route(package_dir: Path | None) -> dict[str, str]:
+    if package_dir is None:
+        return {}
+    source_path = package_dir.resolve() / "customer-source.yaml"
+    if not source_path.exists():
+        raise ValueError(f"CGNAT gateway route package is missing customer-source.yaml: {source_path}")
+    source_doc = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
+    cgnat = dict((((source_doc.get("customer") or {}).get("transport") or {}).get("cgnat")) or {})
+    outer_transport = dict(cgnat.get("outer_transport") or {})
+    route = {
+        "customer_loopback_ip": str(cgnat.get("customer_loopback_ip") or "").strip(),
+        "customer_router_private_ip": str(outer_transport.get("customer_router_private_ip") or "").strip(),
+        "gateway_customer_interface": str(outer_transport.get("gateway_customer_interface") or "").strip(),
+    }
+    return {key: value for key, value in route.items() if value}
+
+
 def build_install_layout(gateway_root: Path, customer_name: str) -> dict[str, Path]:
     resolved_root = gateway_root.resolve()
     customer_root = resolved_root / CGNAT_STATE_ROOT / customer_name
@@ -155,7 +174,12 @@ def build_install_layout(gateway_root: Path, customer_name: str) -> dict[str, Pa
     }
 
 
-def _expected_payload(customer_name: str, handoff: dict[str, Any], installed_files: dict[str, str]) -> dict[str, Any]:
+def _expected_payload(
+    customer_name: str,
+    handoff: dict[str, Any],
+    installed_files: dict[str, str],
+    route: dict[str, str] | None = None,
+) -> dict[str, Any]:
     manifest = dict(handoff["manifest"])
     gateway_handoff = dict(handoff["gateway_handoff"])
     return {
@@ -169,6 +193,7 @@ def _expected_payload(customer_name: str, handoff: dict[str, Any], installed_fil
         "package_name": manifest.get("package_name") or gateway_handoff.get("package_name"),
         "material_mode": manifest.get("material_mode"),
         "installed_files": installed_files,
+        "customer_route": dict(route or {}),
     }
 
 
@@ -188,6 +213,23 @@ def _render_master_apply_script(layout: dict[str, Path]) -> str:
             'test -f "${CUSTOMER_ROOT}/gateway-install-state.json"',
             'test -f "${CONFIG_JSON}"',
             'test -f "${MANIFEST}"',
+            'ROUTE_ENV="$(mktemp)"',
+            'python3 - "${CONFIG_JSON}" > "${ROUTE_ENV}" <<\'PY\'',
+            'import json, shlex, sys',
+            'payload = json.load(open(sys.argv[1], encoding="utf-8"))',
+            'route = dict(payload.get("customer_route") or {})',
+            'def emit(name, value):',
+            '    print(f"{name}={shlex.quote(str(value or \'\'))}")',
+            'emit("CUSTOMER_LOOPBACK_IP", route.get("customer_loopback_ip") or "")',
+            'emit("CUSTOMER_ROUTER_PRIVATE_IP", route.get("customer_router_private_ip") or "")',
+            'emit("GATEWAY_CUSTOMER_INTERFACE", route.get("gateway_customer_interface") or "")',
+            'PY',
+            '. "${ROUTE_ENV}"',
+            'rm -f "${ROUTE_ENV}"',
+            'if [ -n "${CUSTOMER_LOOPBACK_IP}" ] && [ -n "${CUSTOMER_ROUTER_PRIVATE_IP}" ] && [ -n "${GATEWAY_CUSTOMER_INTERFACE}" ]; then',
+            '  ip route replace "${CUSTOMER_LOOPBACK_IP}/32" via "${CUSTOMER_ROUTER_PRIVATE_IP}" dev "${GATEWAY_CUSTOMER_INTERFACE}"',
+            '  echo "cgnat_gateway_customer_route=${CUSTOMER_LOOPBACK_IP}/32 via ${CUSTOMER_ROUTER_PRIVATE_IP} dev ${GATEWAY_CUSTOMER_INTERFACE}"',
+            'fi',
             'date -u +%Y-%m-%dT%H:%M:%SZ > "${APPLIED_STAMP}"',
             'echo "cgnat_gateway_customer_staged=${CUSTOMER_ROOT}"',
         ]
@@ -203,6 +245,24 @@ def _render_master_remove_script(layout: dict[str, Path]) -> str:
             'ROOT="${ROOT%/}"',
             f'CUSTOMER_ROOT="${{ROOT}}{customer_root}"',
             f'CONFIG_JSON="${{ROOT}}{config_json}"',
+            'if [ -f "${CONFIG_JSON}" ]; then',
+            '  ROUTE_ENV="$(mktemp)"',
+            '  python3 - "${CONFIG_JSON}" > "${ROUTE_ENV}" <<\'PY\'',
+            'import json, shlex, sys',
+            'payload = json.load(open(sys.argv[1], encoding="utf-8"))',
+            'route = dict(payload.get("customer_route") or {})',
+            'def emit(name, value):',
+            '    print(f"{name}={shlex.quote(str(value or \'\'))}")',
+            'emit("CUSTOMER_LOOPBACK_IP", route.get("customer_loopback_ip") or "")',
+            'emit("CUSTOMER_ROUTER_PRIVATE_IP", route.get("customer_router_private_ip") or "")',
+            'emit("GATEWAY_CUSTOMER_INTERFACE", route.get("gateway_customer_interface") or "")',
+            'PY',
+            '  . "${ROUTE_ENV}"',
+            '  rm -f "${ROUTE_ENV}"',
+            '  if [ -n "${CUSTOMER_LOOPBACK_IP}" ] && [ -n "${GATEWAY_CUSTOMER_INTERFACE}" ]; then',
+            '    ip route del "${CUSTOMER_LOOPBACK_IP}/32" dev "${GATEWAY_CUSTOMER_INTERFACE}" 2>/dev/null || true',
+            '  fi',
+            'fi',
             'rm -f "${CONFIG_JSON}"',
             'rm -rf "${CUSTOMER_ROOT}"',
             'echo "removed_cgnat_gateway_customer=${CUSTOMER_ROOT}"',
@@ -210,8 +270,15 @@ def _render_master_remove_script(layout: dict[str, Path]) -> str:
     )
 
 
-def install_gateway_handoff(*, customer_name: str, gateway_root: Path, pki_review_dir: Path) -> dict[str, Any]:
+def install_gateway_handoff(
+    *,
+    customer_name: str,
+    gateway_root: Path,
+    pki_review_dir: Path,
+    package_dir: Path | None = None,
+) -> dict[str, Any]:
     handoff = _load_gateway_handoff(pki_review_dir.resolve())
+    route = _load_customer_route(package_dir)
     layout = build_install_layout(gateway_root, customer_name)
     if layout["customer_root"].exists():
         shutil.rmtree(layout["customer_root"])
@@ -234,7 +301,7 @@ def install_gateway_handoff(*, customer_name: str, gateway_root: Path, pki_revie
         for key, value in copied.items()
         if value
     }
-    payload = _expected_payload(customer_name, handoff, installed_files)
+    payload = _expected_payload(customer_name, handoff, installed_files, route)
     _write_json(layout["config_json"], payload)
     _write_text(layout["master_apply_script"], _render_master_apply_script(layout))
     _write_text(layout["master_remove_script"], _render_master_remove_script(layout))
@@ -246,6 +313,7 @@ def install_gateway_handoff(*, customer_name: str, gateway_root: Path, pki_revie
         "customer_name": customer_name,
         "pki_review": str((pki_review_dir / "pki-review.json").resolve()),
         "gateway_handoff": payload,
+        "customer_route": route,
         "paths": {
             key: _runtime_path(layout["gateway_root"], path)
             for key, path in layout.items()
@@ -264,10 +332,17 @@ def install_gateway_handoff(*, customer_name: str, gateway_root: Path, pki_revie
         "master_apply_script": str(layout["master_apply_script"]),
         "master_remove_script": str(layout["master_remove_script"]),
         "installed_files": installed_files,
+        "customer_route": route,
     }
 
 
-def validate_installed_gateway_handoff(*, customer_name: str, gateway_root: Path, pki_review_dir: Path) -> dict[str, Any]:
+def validate_installed_gateway_handoff(
+    *,
+    customer_name: str,
+    gateway_root: Path,
+    pki_review_dir: Path,
+    package_dir: Path | None = None,
+) -> dict[str, Any]:
     report = {
         "customer_name": customer_name,
         "gateway_root": str(gateway_root.resolve()),
@@ -278,6 +353,7 @@ def validate_installed_gateway_handoff(*, customer_name: str, gateway_root: Path
     }
     try:
         handoff = _load_gateway_handoff(pki_review_dir.resolve())
+        expected_route = _load_customer_route(package_dir)
     except Exception as exc:
         report["errors"].append(str(exc))
         return report
@@ -321,6 +397,7 @@ def validate_installed_gateway_handoff(*, customer_name: str, gateway_root: Path
             customer_name,
             handoff,
             expected_files,
+            expected_route,
         )
         if config != expected:
             report["errors"].append(f"installed gateway handoff config does not match expected payload: {layout['config_json']}")

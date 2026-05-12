@@ -15,6 +15,7 @@ def main() -> int:
     parser.add_argument("--customer-name", required=True)
     parser.add_argument("--gateway-root", required=True)
     parser.add_argument("--pki-review-dir", required=True)
+    parser.add_argument("--package-dir", help="Optional customer package directory used for live gateway route activation")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -22,11 +23,13 @@ def main() -> int:
         customer_name=args.customer_name,
         gateway_root=Path(args.gateway_root).resolve(),
         pki_review_dir=Path(args.pki_review_dir).resolve(),
+        package_dir=Path(args.package_dir).resolve() if args.package_dir else None,
     )
     validation = validate_installed_gateway_handoff(
         customer_name=args.customer_name,
         gateway_root=Path(args.gateway_root).resolve(),
         pki_review_dir=Path(args.pki_review_dir).resolve(),
+        package_dir=Path(args.package_dir).resolve() if args.package_dir else None,
     )
     report["validation"] = validation
     if args.json:
