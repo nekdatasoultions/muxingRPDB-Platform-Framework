@@ -103,6 +103,11 @@ def redact_sensitive_report(value: Any) -> Any:
     return value
 
 
+def write_text_lf(path: Path, content: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+
+
 def resolve_repo_path(value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
@@ -310,20 +315,18 @@ def prepare_staging_tree(
     shutil.copyfile(cert_path, material_dir / "customer.crt")
     shutil.copyfile(key_path, material_dir / "customer.key")
     shutil.copyfile(trust_path, material_dir / "trust.crt")
-    (material_dir / "ipsec.conf").write_text(
+    write_text_lf(
+        material_dir / "ipsec.conf",
         render_libreswan_config(
             customer_name=customer_name,
             nickname=nickname,
             request_doc=request_doc,
             muxer_public_ip=muxer_public_ip,
         ),
-        encoding="utf-8",
-        newline="\n",
     )
-    (material_dir / "ipsec.secrets").write_text(
+    write_text_lf(
+        material_dir / "ipsec.secrets",
         render_secrets(customer_name, nickname),
-        encoding="utf-8",
-        newline="\n",
     )
     metadata = {
         "customer_name": customer_name,
@@ -335,10 +338,7 @@ def prepare_staging_tree(
         },
         "remote_stage": "/" + remote_rel_root.as_posix(),
     }
-    (material_dir / "install-metadata.json").write_text(
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_text_lf(material_dir / "install-metadata.json", json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     return root, [remote_rel_root], metadata
 
 
