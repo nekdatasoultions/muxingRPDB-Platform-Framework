@@ -11,9 +11,11 @@ from .core import (
     ensure_policy,
     ensure_tunnel,
     flush_route_table,
+    must,
     remove_local_ipv4,
     remove_policy,
     remove_tunnel,
+    sh,
 )
 from .customers import (
     calc_overlay,
@@ -155,6 +157,55 @@ def _validate_passthrough_module(
         )
 
 
+def _cgnat_ingress_routes(module: Dict[str, Any]) -> tuple[str, List[str]]:
+    original = module.get("_rpdb_original") or {}
+    transport = original.get("transport") if isinstance(original, dict) else {}
+    if not isinstance(transport, dict):
+        return "", []
+    if str(transport.get("mode") or "").strip().lower().replace("-", "_") != "cgnat":
+        return "", []
+
+    cgnat = transport.get("cgnat") or {}
+    if not isinstance(cgnat, dict):
+        return "", []
+    outer_transport = cgnat.get("outer_transport") or {}
+    if not isinstance(outer_transport, dict):
+        outer_transport = {}
+
+    interface = str(
+        cgnat.get("muxer_ingress_interface")
+        or outer_transport.get("muxer_ingress_interface")
+        or "cgs1mi0"
+    ).strip()
+    if not interface:
+        return "", []
+
+    routes: List[str] = []
+    for value in (
+        cgnat.get("customer_loopback_ip"),
+        outer_transport.get("customer_router_private_ip"),
+    ):
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        route = str(ipaddress.ip_address(raw))
+        if route not in routes:
+            routes.append(route)
+    return interface, routes
+
+
+def _apply_cgnat_ingress_routes(module: Dict[str, Any]) -> None:
+    interface, routes = _cgnat_ingress_routes(module)
+    for route in routes:
+        must(["ip", "route", "replace", f"{route}/32", "dev", interface])
+
+
+def _remove_cgnat_ingress_routes(module: Dict[str, Any]) -> None:
+    interface, routes = _cgnat_ingress_routes(module)
+    for route in routes:
+        sh(["ip", "route", "del", f"{route}/32", "dev", interface], check=False)
+
+
 def _clear_passthrough_customer_transport(
     module: Dict[str, Any],
     *,
@@ -174,6 +225,7 @@ def _clear_passthrough_customer_transport(
 
     remove_policy(mark_hex, table_id, priority=module.get("rpdb_priority"))
     flush_route_table(table_id)
+    _remove_cgnat_ingress_routes(module)
     remove_tunnel(tunnel_ifname)
 
     module_inside_ip = str(module.get("inside_ip", inside_ip)).strip()
@@ -230,6 +282,7 @@ def _apply_passthrough_customer_transport(
         mtu=tunnel_mtu,
     )
     ensure_policy(mark_hex, table_id, tunnel_ifname, priority=module.get("rpdb_priority"))
+    _apply_cgnat_ingress_routes(module)
 
 
 def apply_passthrough(

@@ -124,6 +124,19 @@ def _peer_cidr(value: str) -> str:
     return raw
 
 
+def _transport_mode(transport: Dict[str, Any]) -> str:
+    return str(transport.get("mode") or "").strip().lower().replace("-", "_")
+
+
+def _cgnat_inner_peer_ip(peer: Dict[str, Any], transport: Dict[str, Any]) -> str:
+    if _transport_mode(transport) != "cgnat":
+        return str(peer.get("public_ip") or "")
+    cgnat = transport.get("cgnat") or {}
+    if not isinstance(cgnat, dict):
+        return str(peer.get("public_ip") or "")
+    return str(cgnat.get("customer_loopback_ip") or peer.get("public_ip") or "")
+
+
 def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
     customer = module.get("customer") or {}
     peer = module.get("peer") or {}
@@ -134,7 +147,7 @@ def _compat_module_from_rpdb(module: Dict[str, Any]) -> Dict[str, Any]:
     compat: Dict[str, Any] = {
         "id": int(customer["id"]),
         "name": str(customer["name"]),
-        "peer_ip": _peer_cidr(str(peer.get("public_ip") or "")),
+        "peer_ip": _peer_cidr(_cgnat_inner_peer_ip(peer, transport)),
         "protocols": copy.deepcopy(module.get("protocols") or {}),
         "natd_rewrite": copy.deepcopy(module.get("natd_rewrite") or {}),
         "post_ipsec_nat": copy.deepcopy(module.get("post_ipsec_nat") or {}),
@@ -236,7 +249,9 @@ def _build_rpdb_customer_json(module: Dict[str, Any], source_ref: str, updated_a
         customer_doc["customer_class"] = str(module["customer_class"])
 
     peer_doc = original.setdefault("peer", {})
-    peer_doc["public_ip"] = str(module["peer_ip"]).split("/")[0]
+    original_transport = original.get("transport") or {}
+    if _transport_mode(original_transport) != "cgnat":
+        peer_doc["public_ip"] = str(module["peer_ip"]).split("/")[0]
     if not str(peer_doc.get("remote_id") or "").strip():
         peer_doc["remote_id"] = peer_doc["public_ip"]
 
