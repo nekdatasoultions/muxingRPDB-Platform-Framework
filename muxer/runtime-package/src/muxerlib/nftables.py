@@ -212,6 +212,8 @@ def build_passthrough_nft_model(
         peer = _peer_host(module)
         mark_hex = _customer_mark(module, base_mark)
         udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
+        if _transport_mode(module) == "cgnat" and udp500:
+            udp4500 = True
         natd_rewrite_enabled, _natd_inner_ip = customer_natd_flags(module)
         backend_underlay_ip = str(module.get("backend_underlay_ip") or backend_ul_default).strip()
         headend_egress_sources = customer_headend_egress_sources(module, backend_underlay_ip)

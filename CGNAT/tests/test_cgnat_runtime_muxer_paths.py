@@ -132,8 +132,15 @@ class CgnatRuntimeMuxerPathTests(unittest.TestCase):
         script = nftables.render_passthrough_nft_script(model)
 
         self.assertEqual(model["interfaces"]["traffic_ifs"], ["cgs1mi0", "ens34"])
+        self.assertIn("10.250.10.10", model["sets"]["udp4500_accept_peers"])
+        self.assertEqual(
+            model["translation"]["maps"]["udp4500_dnat"]["10.250.10.10"],
+            "dnat to 172.31.40.223",
+        )
         self.assertIn('iifname { "cgs1mi0", "ens34" } ip daddr @public_destinations udp dport 500', script)
+        self.assertIn('iifname { "cgs1mi0", "ens34" } ip daddr @public_destinations udp dport 4500', script)
         self.assertIn('oifname { "cgs1mi0", "ens34" } udp sport 500', script)
+        self.assertIn('oifname { "cgs1mi0", "ens34" } udp sport 4500', script)
         self.assertIn("10.250.10.10 : 172.31.40.223", script)
 
 
