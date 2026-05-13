@@ -56,6 +56,7 @@ class CgnatTransport:
     outer_auth_ref: str = ""
     customer_loopback_ip: str = ""
     known_inside_identity: str = ""
+    outer_transport: Optional[Dict[str, Any]] = None
     service_reachable_subnets: Optional[List[str]] = None
     pki: Optional[CgnatPki] = None
 
@@ -617,6 +618,30 @@ def _normalize_cgnat_pki(doc: Dict[str, Any]) -> CgnatPki:
     )
 
 
+def _normalize_cgnat_outer_transport(value: Any) -> Optional[Dict[str, Any]]:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("customer.transport.cgnat.outer_transport must be a mapping")
+
+    normalized: Dict[str, Any] = {}
+    for key in ("headend_underlay_interface", "headend_xfrm_interface", "gateway_customer_interface"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            normalized[key] = text
+
+    if value.get("headend_if_id") not in (None, ""):
+        normalized["headend_if_id"] = int(value["headend_if_id"])
+
+    if value.get("customer_router_private_ip") not in (None, ""):
+        normalized["customer_router_private_ip"] = _validated_ipv4(
+            value.get("customer_router_private_ip"),
+            "customer.transport.cgnat.outer_transport.customer_router_private_ip",
+        )
+
+    return normalized or None
+
+
 def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
     pki_doc = doc.get("pki") or {}
     return CgnatTransport(
@@ -639,6 +664,7 @@ def _normalize_cgnat_transport(doc: Dict[str, Any]) -> CgnatTransport:
             if doc.get("known_inside_identity") not in (None, "")
             else ""
         ),
+        outer_transport=_normalize_cgnat_outer_transport(doc.get("outer_transport")),
         service_reachable_subnets=_validated_optional_cidr_list(
             doc.get("service_reachable_subnets"),
             "customer.transport.cgnat.service_reachable_subnets",

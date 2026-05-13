@@ -146,6 +146,12 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
 
     def test_cgnat_request_survives_request_source_and_module_layers(self) -> None:
         request_doc = self._load_request("example-minimal-cgnat.yaml")
+        request_doc["customer"]["transport"]["cgnat"]["outer_transport"] = {
+            "headend_underlay_interface": "ens34",
+            "headend_xfrm_interface": "cgxfrm-r3",
+            "headend_if_id": 103,
+            "customer_router_private_ip": "172.31.48.30",
+        }
         jsonschema.validate(instance=request_doc, schema=self.schema)
 
         customer_source = self._render_source(request_doc)
@@ -168,6 +174,15 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(source_transport["cgnat"]["customer_loopback_ip"], "10.250.1.10")
         self.assertEqual(source_transport["cgnat"]["known_inside_identity"], "10.20.30.10/32")
         self.assertEqual(
+            source_transport["cgnat"]["outer_transport"],
+            {
+                "headend_underlay_interface": "ens34",
+                "headend_xfrm_interface": "cgxfrm-r3",
+                "headend_if_id": 103,
+                "customer_router_private_ip": "172.31.48.30",
+            },
+        )
+        self.assertEqual(
             source_transport["cgnat"]["service_reachable_subnets"],
             ["23.20.31.151/32", "194.138.36.86/32"],
         )
@@ -189,6 +204,15 @@ class CustomerProvisioningIntegrationTests(unittest.TestCase):
         self.assertEqual(module_transport["cgnat"]["outer_topology"], "per_customer_outer")
         self.assertEqual(module_transport["cgnat"]["customer_loopback_ip"], "10.250.1.10")
         self.assertEqual(module_transport["cgnat"]["known_inside_identity"], "10.20.30.10/32")
+        self.assertEqual(
+            module_transport["cgnat"]["outer_transport"],
+            {
+                "headend_underlay_interface": "ens34",
+                "headend_xfrm_interface": "cgxfrm-r3",
+                "headend_if_id": 103,
+                "customer_router_private_ip": "172.31.48.30",
+            },
+        )
         self.assertEqual(
             module_transport["cgnat"]["service_reachable_subnets"],
             ["23.20.31.151/32", "194.138.36.86/32"],
