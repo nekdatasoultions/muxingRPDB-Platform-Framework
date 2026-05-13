@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import shlex
@@ -138,6 +139,140 @@ def route_cidrs_from_metadata(metadata: dict[str, Any]) -> tuple[list[str], str]
     if source == "remote_host_cidrs":
         source = "selectors.remote_host_cidrs"
     return cidrs, source
+
+
+def _text_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def _host_text(value: Any) -> str:
+    interface = ipaddress.ip_interface(str(value))
+    return str(interface.ip)
+
+
+def _network_text(value: Any) -> tuple[ipaddress.IPv4Network, str]:
+    network = ipaddress.ip_network(str(value), strict=False)
+    if network.prefixlen == 32:
+        return network, str(network.network_address)
+    return network, str(network)
+
+
+def _netmap_translation_pairs(nat_config: dict[str, Any]) -> list[dict[str, str]]:
+    real_subnets = _text_list(nat_config.get("real_subnets"))
+    translated_subnets = _text_list(nat_config.get("translated_subnets"))
+    translations: list[dict[str, str]] = []
+    for real_value, translated_value in zip(real_subnets, translated_subnets):
+        real_network, real_text = _network_text(real_value)
+        translated_network, translated_text = _network_text(translated_value)
+        translations.append(
+            {
+                "presented": translated_text,
+                "real": real_text,
+                "kind": "host"
+                if real_network.prefixlen == 32 and translated_network.prefixlen == 32
+                else "pool",
+            }
+        )
+    return translations
+
+
+def _explicit_translation_pairs(nat_config: dict[str, Any]) -> list[dict[str, str]]:
+    translations: list[dict[str, str]] = []
+    for host_mapping in nat_config.get("host_mappings") or []:
+        if not isinstance(host_mapping, dict):
+            continue
+        translated_ip = str(host_mapping.get("translated_ip") or "").strip()
+        real_ip = str(host_mapping.get("real_ip") or "").strip()
+        if translated_ip and real_ip:
+            translations.append(
+                {
+                    "presented": _host_text(translated_ip),
+                    "real": _host_text(real_ip),
+                    "kind": "host",
+                }
+            )
+    return translations
+
+
+def _generic_translation_pairs(nat_config: dict[str, Any]) -> list[dict[str, str]]:
+    translated_source_ip = str(nat_config.get("translated_source_ip") or "").strip()
+    if not translated_source_ip:
+        return []
+    translations: list[dict[str, str]] = []
+    for real_value in _text_list(nat_config.get("real_subnets")):
+        _real_network, real_text = _network_text(real_value)
+        translations.append(
+            {
+                "presented": _host_text(translated_source_ip),
+                "real": real_text,
+                "kind": "source_ip",
+            }
+        )
+    return translations
+
+
+def nat_translation_pairs(nat_config: dict[str, Any]) -> list[dict[str, str]]:
+    strategy = str(nat_config.get("mapping_strategy") or "").strip()
+    mode = str(nat_config.get("mode") or "").strip()
+    if strategy == "explicit_host_map" or mode == "explicit_map":
+        return _explicit_translation_pairs(nat_config)
+    if strategy == "one_to_one" or mode == "netmap":
+        return _netmap_translation_pairs(nat_config)
+    return _generic_translation_pairs(nat_config)
+
+
+def outside_nat_customer_sources(outside_nat: dict[str, Any], selectors: dict[str, Any]) -> list[str]:
+    explicit_sources = _text_list(outside_nat.get("customer_sources"))
+    if explicit_sources:
+        return explicit_sources
+    remote_hosts = _text_list(selectors.get("remote_host_cidrs"))
+    if remote_hosts:
+        return remote_hosts
+    return _text_list(selectors.get("remote_subnets"))
+
+
+def nat_translation_summary(customer_module: dict[str, Any]) -> dict[str, Any]:
+    selectors = customer_module.get("selectors") or {}
+    post_ipsec_nat = customer_module.get("post_ipsec_nat") or {}
+    outside_nat = customer_module.get("outside_nat") or {}
+    summary: dict[str, Any] = {}
+
+    if bool(post_ipsec_nat.get("enabled")):
+        summary["inside"] = {
+            "enabled": True,
+            "mode": post_ipsec_nat.get("mode"),
+            "mapping_strategy": post_ipsec_nat.get("mapping_strategy"),
+            "translations": nat_translation_pairs(post_ipsec_nat),
+            "core_subnets": _text_list(post_ipsec_nat.get("core_subnets")),
+        }
+
+    if bool(outside_nat.get("enabled")):
+        summary["outside"] = {
+            "enabled": True,
+            "mode": outside_nat.get("mode"),
+            "mapping_strategy": outside_nat.get("mapping_strategy"),
+            "translations": nat_translation_pairs(outside_nat),
+            "customer_sources": outside_nat_customer_sources(outside_nat, selectors),
+            "route_via": outside_nat.get("route_via"),
+            "route_dev": outside_nat.get("route_dev"),
+        }
+
+    return summary
+
+
+def nat_translation_summary_from_metadata(
+    metadata: dict[str, Any],
+    request_doc: dict[str, Any],
+) -> dict[str, Any]:
+    module = metadata.get("customer_json") or {}
+    if isinstance(module, dict) and module:
+        return nat_translation_summary(module)
+    customer = request_doc.get("customer") or {}
+    if isinstance(customer, dict) and customer:
+        return nat_translation_summary(customer)
+    return {}
 
 
 def merged_metadata(sot_metadata: dict[str, Any], request_doc: dict[str, Any]) -> dict[str, Any]:
@@ -516,6 +651,7 @@ def print_human(result: dict[str, Any]) -> None:
             f"backend={metadata.get('backend_cluster') or ''} "
             f"transport={metadata.get('transport_mode') or ''}"
         )
+    print_nat_translation_summary(result.get("nat_translations") or {})
     for surface in result.get("surfaces") or []:
         label = surface.get("target_name") or surface.get("role")
         if surface.get("family"):
@@ -551,6 +687,45 @@ def print_human(result: dict[str, Any]) -> None:
             )
     for error in result.get("overall", {}).get("errors") or []:
         print(f"error: {error}")
+
+
+def _format_nat_translations(translations: list[dict[str, str]]) -> str:
+    if not translations:
+        return "-"
+    rendered: list[str] = []
+    for translation in translations:
+        suffix = " pool" if translation.get("kind") == "pool" else ""
+        rendered.append(f"{translation.get('presented')}->{translation.get('real')}{suffix}")
+    return ", ".join(rendered)
+
+
+def print_nat_translation_summary(summary: dict[str, Any]) -> None:
+    inside = summary.get("inside") or {}
+    outside = summary.get("outside") or {}
+    if not inside and not outside:
+        return
+    print("nat translations:")
+    if inside:
+        core = ",".join(inside.get("core_subnets") or []) or "-"
+        print(
+            "  inside: "
+            f"mode={inside.get('mode') or ''} "
+            f"mapping={inside.get('mapping_strategy') or ''} "
+            f"presented->real=[{_format_nat_translations(inside.get('translations') or [])}] "
+            f"core=[{core}]"
+        )
+    if outside:
+        customer_sources = ",".join(outside.get("customer_sources") or []) or "-"
+        route_via = outside.get("route_via") or "-"
+        route_dev = outside.get("route_dev") or "-"
+        print(
+            "  outside: "
+            f"mode={outside.get('mode') or ''} "
+            f"mapping={outside.get('mapping_strategy') or ''} "
+            f"presented->real=[{_format_nat_translations(outside.get('translations') or [])}] "
+            f"customer_sources=[{customer_sources}] "
+            f"route={route_via} dev {route_dev}"
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -600,6 +775,7 @@ def main() -> int:
     )
     sot_metadata = customer_metadata(backend.get("customer_item"))
     metadata = merged_metadata(sot_metadata, request_doc)
+    nat_translations = nat_translation_summary_from_metadata(metadata, request_doc)
     route_cidrs, route_source = route_cidrs_from_metadata(sot_metadata)
     if not route_cidrs:
         route_cidrs, route_source = route_cidrs_from_request(request_doc)
@@ -687,6 +863,7 @@ def main() -> int:
             for key, value in metadata.items()
             if key != "customer_json"
         },
+        "nat_translations": nat_translations,
         "surfaces": surfaces,
         "overall": overall,
     }
