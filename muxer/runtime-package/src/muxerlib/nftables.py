@@ -85,6 +85,55 @@ def _translation_key(left: str, right: str) -> str:
     return f"{left} . {right}"
 
 
+def _transport_doc(module: Dict[str, Any]) -> Dict[str, Any]:
+    transport = module.get("transport") or {}
+    if not isinstance(transport, dict):
+        transport = {}
+    if not transport:
+        original = module.get("_rpdb_original") or {}
+        if isinstance(original, dict):
+            original_transport = original.get("transport") or {}
+            if isinstance(original_transport, dict):
+                transport = original_transport
+    return transport
+
+
+def _transport_mode(module: Dict[str, Any]) -> str:
+    transport = _transport_doc(module)
+    return str(transport.get("mode") or "").strip().lower().replace("-", "_")
+
+
+def _cgnat_ingress_interface(module: Dict[str, Any]) -> str:
+    if _transport_mode(module) != "cgnat":
+        return ""
+    transport = _transport_doc(module)
+    cgnat = transport.get("cgnat") or {}
+    if not isinstance(cgnat, dict):
+        return ""
+    outer_transport = cgnat.get("outer_transport") or {}
+    if not isinstance(outer_transport, dict):
+        outer_transport = {}
+    return str(
+        cgnat.get("muxer_ingress_interface")
+        or outer_transport.get("muxer_ingress_interface")
+        or "cgs1mi0"
+    ).strip()
+
+
+def _interface_match(field: str, interfaces: Iterable[str]) -> str:
+    cleaned: List[str] = []
+    for interface in interfaces:
+        value = str(interface or "").strip()
+        if value and value not in cleaned:
+            cleaned.append(value)
+    if not cleaned:
+        return f'{field} ""'
+    if len(cleaned) == 1:
+        return f'{field} "{cleaned[0]}"'
+    rendered = ", ".join(f'"{interface}"' for interface in sorted(cleaned))
+    return f"{field} {{ {rendered} }}"
+
+
 def _sorted_manifest_entries(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(
         items,
@@ -150,6 +199,8 @@ def build_passthrough_nft_model(
 
     deferred_translation_customers: List[Dict[str, Any]] = []
     deferred_bridge_customers: List[Dict[str, Any]] = []
+    traffic_interfaces: List[str] = []
+    _append_unique(traffic_interfaces, pub_if)
 
     customer_count = 0
     translation_enabled = settings["translation_backend"] == "nftables" and nat_rewrite and public_priv_ip != public_ip
@@ -157,6 +208,7 @@ def build_passthrough_nft_model(
 
     for module in modules:
         customer_count += 1
+        _append_unique(traffic_interfaces, _cgnat_ingress_interface(module))
         peer = _peer_host(module)
         mark_hex = _customer_mark(module, base_mark)
         udp500, udp4500, esp50, force_4500_to_500 = customer_protocol_flags(module)
@@ -368,6 +420,7 @@ def build_passthrough_nft_model(
         },
         "interfaces": {
             "public_if": pub_if,
+            "traffic_ifs": sorted(traffic_interfaces),
             "public_destinations": sorted(public_destinations),
         },
         "default_drop": default_drop,
@@ -463,6 +516,9 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
     sets = model["sets"]
     maps = model["maps"]
     public_if = interfaces["public_if"]
+    traffic_ifs = interfaces.get("traffic_ifs") or [public_if]
+    ingress_match = _interface_match("iifname", traffic_ifs)
+    egress_match = _interface_match("oifname", traffic_ifs)
     render_mode = str(model.get("render_mode") or "nftables-batch-preview")
     classification_backend = str(model.get("classification_backend") or "nftables")
     translation_backend = str(model.get("translation_backend") or "nftables")
@@ -511,12 +567,12 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
             )
             if bridge_sets.get("force4500_in_pairs"):
                 lines.append(
-                    f'    iifname "{public_if}" udp dport 4500 ip saddr . ip daddr @force4500_in_pairs '
+                    f"    {ingress_match} udp dport 4500 ip saddr . ip daddr @force4500_in_pairs "
                     f'{_queue_statement((bridge_hooks.get("force4500_in") or {}).get("queue_num", 2101), (bridge_hooks.get("force4500_in") or {}).get("queue_bypass", True))}'
                 )
             if bridge_sets.get("natd_in_pairs"):
                 lines.append(
-                    f'    iifname "{public_if}" udp dport 500 ip saddr . ip daddr @natd_in_pairs '
+                    f"    {ingress_match} udp dport 500 ip saddr . ip daddr @natd_in_pairs "
                     f'{_queue_statement((bridge_hooks.get("natd_in") or {}).get("queue_num", 2111), (bridge_hooks.get("natd_in") or {}).get("queue_bypass", True))}'
                 )
             lines.append("  }")
@@ -529,12 +585,12 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
             )
             if bridge_sets.get("force4500_out_pairs"):
                 lines.append(
-                    f'    oifname "{public_if}" udp sport 500 ip saddr . ip daddr @force4500_out_pairs '
+                    f"    {egress_match} udp sport 500 ip saddr . ip daddr @force4500_out_pairs "
                     f'{_queue_statement((bridge_hooks.get("force4500_out") or {}).get("queue_num", 2102), (bridge_hooks.get("force4500_out") or {}).get("queue_bypass", True))}'
                 )
             if bridge_sets.get("natd_out_pairs"):
                 lines.append(
-                    f'    oifname "{public_if}" udp sport 500 udp dport 500 ip saddr . ip daddr @natd_out_pairs '
+                    f"    {egress_match} udp sport 500 udp dport 500 ip saddr . ip daddr @natd_out_pairs "
                     f'{_queue_statement((bridge_hooks.get("natd_out") or {}).get("queue_num", 2112), (bridge_hooks.get("natd_out") or {}).get("queue_bypass", True))}'
                 )
             lines.append("  }")
@@ -547,17 +603,17 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
         )
         if sets["udp500_mark_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 '
+                f"    {ingress_match} ip daddr @public_destinations udp dport 500 "
                 "ip saddr @udp500_mark_peers meta mark set ip saddr map @peer_mark_udp500"
             )
         if sets["udp4500_mark_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 '
+                f"    {ingress_match} ip daddr @public_destinations udp dport 4500 "
                 "ip saddr @udp4500_mark_peers meta mark set ip saddr map @peer_mark_udp4500"
             )
         if sets["esp_mark_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp '
+                f"    {ingress_match} ip daddr @public_destinations ip protocol esp "
                 "ip saddr @esp_mark_peers meta mark set ip saddr map @peer_mark_esp"
             )
         lines.append("  }")
@@ -571,23 +627,23 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
         )
         if sets["udp500_accept_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 '
+                f"    {ingress_match} ip daddr @public_destinations udp dport 500 "
                 "ip saddr @udp500_accept_peers accept"
             )
         if sets["udp4500_accept_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 '
+                f"    {ingress_match} ip daddr @public_destinations udp dport 4500 "
                 "ip saddr @udp4500_accept_peers accept"
             )
         if sets["esp_accept_peers"]:
             lines.append(
-                f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp '
+                f"    {ingress_match} ip daddr @public_destinations ip protocol esp "
                 "ip saddr @esp_accept_peers accept"
             )
         if model.get("default_drop"):
-            lines.append(f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 drop')
-            lines.append(f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 drop')
-            lines.append(f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp drop')
+            lines.append(f"    {ingress_match} ip daddr @public_destinations udp dport 500 drop")
+            lines.append(f"    {ingress_match} ip daddr @public_destinations udp dport 4500 drop")
+            lines.append(f"    {ingress_match} ip daddr @public_destinations ip protocol esp drop")
         lines.append("  }")
         lines.append("}")
 
@@ -628,19 +684,19 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
             )
             if udp500_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 500 '
+                    f"    {ingress_match} ip daddr @public_destinations udp dport 500 "
                     "dnat to ip saddr map @udp500_dnat"
                 )
             if udp4500_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 '
+                    f"    {ingress_match} ip daddr @public_destinations udp dport 4500 "
                     "dnat to ip saddr map @udp4500_dnat"
                 )
             for peer, target in udp4500_force500_dnat_direct.items():
-                lines.append(f'    iifname "{public_if}" ip daddr @public_destinations udp dport 4500 ip saddr {peer} dnat to {target}')
+                lines.append(f"    {ingress_match} ip daddr @public_destinations udp dport 4500 ip saddr {peer} dnat to {target}")
             if esp_dnat_map:
                 lines.append(
-                    f'    iifname "{public_if}" ip daddr @public_destinations ip protocol esp '
+                    f"    {ingress_match} ip daddr @public_destinations ip protocol esp "
                     "dnat to ip saddr map @esp_dnat"
                 )
             lines.append("  }")
@@ -652,19 +708,19 @@ def render_passthrough_nft_script(model: Dict[str, Any]) -> str:
                 ]
             )
             if udp500_snat_map:
-                lines.append(f'    oifname "{public_if}" udp sport 500 snat to ip saddr . ip daddr map @udp500_snat')
+                lines.append(f"    {egress_match} udp sport 500 snat to ip saddr . ip daddr map @udp500_snat")
             for key, target in udp500_force4500_snat_direct.items():
                 parts = _concat_key_parts(key)
                 if len(parts) == 2:
-                    lines.append(f'    oifname "{public_if}" udp sport 500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}')
+                    lines.append(f"    {egress_match} udp sport 500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}")
             if udp4500_snat_map:
-                lines.append(f'    oifname "{public_if}" udp sport 4500 snat to ip saddr . ip daddr map @udp4500_snat')
+                lines.append(f"    {egress_match} udp sport 4500 snat to ip saddr . ip daddr map @udp4500_snat")
             for key, target in udp4500_force4500_snat_direct.items():
                 parts = _concat_key_parts(key)
                 if len(parts) == 2:
-                    lines.append(f'    oifname "{public_if}" udp sport 4500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}')
+                    lines.append(f"    {egress_match} udp sport 4500 ip saddr {parts[0]} ip daddr {parts[1]} snat to {target}")
             if esp_snat_map:
-                lines.append(f'    oifname "{public_if}" ip protocol esp snat to ip saddr . ip daddr map @esp_snat')
+                lines.append(f"    {egress_match} ip protocol esp snat to ip saddr . ip daddr map @esp_snat")
             lines.append("  }")
             lines.append("}")
 
