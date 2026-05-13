@@ -219,7 +219,10 @@ def build_passthrough_nft_model(
         headend_egress_sources = customer_headend_egress_sources(module, backend_underlay_ip)
         if translation_enabled and not backend_underlay_ip:
             raise ValueError(f"{module.get('name')}: pass-through DNAT requires backend_underlay_ip")
-        nat_preroute_dst = backend_underlay_ip
+        # MUXER3 strict non-NAT behavior is deliberately different from NAT-T:
+        # UDP/500 and ESP are routed over the customer GRE table while keeping
+        # the shared public identity as the destination seen by the head end.
+        nat_preroute_dst = backend_underlay_ip if udp4500 else public_ip
 
         if udp500:
             _append_unique(udp500_accept_peers, peer)
@@ -294,15 +297,17 @@ def build_passthrough_nft_model(
             )
             bridge_handled = True
         elif bridge_enabled and natd_rewrite_enabled and natd_enabled:
-            _append_unique(natd_in_pairs, _translation_key(peer, backend_underlay_ip))
+            _append_unique(natd_in_pairs, _translation_key(peer, public_ip))
             if public_priv_ip != public_ip:
                 _append_unique(natd_in_pairs, _translation_key(peer, public_priv_ip))
             _append_unique(natd_out_pairs, _translation_key(backend_underlay_ip, peer))
+            if public_ip != backend_underlay_ip:
+                _append_unique(natd_out_pairs, _translation_key(public_ip, peer))
             bridge_manifest_natd_in.append(
                 {
                     "customer_name": str(module["name"]),
                     "peer_ip": peer,
-                    "destinations": sorted({backend_underlay_ip, public_priv_ip}),
+                    "destinations": sorted({public_ip, public_priv_ip}),
                     "queue_num": natd_dpi_queue_in,
                     "queue_bypass": natd_dpi_queue_bypass,
                 }
@@ -311,7 +316,7 @@ def build_passthrough_nft_model(
                 {
                     "customer_name": str(module["name"]),
                     "peer_ip": peer,
-                    "sources": [backend_underlay_ip],
+                    "sources": sorted({backend_underlay_ip, public_ip}),
                     "queue_num": natd_dpi_queue_out,
                     "queue_bypass": natd_dpi_queue_bypass,
                 }

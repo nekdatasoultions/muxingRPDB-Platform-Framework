@@ -439,6 +439,20 @@ def _disabled_snat_coverage(*, reason: str) -> Dict[str, Any]:
     }
 
 
+def _render_headend_local_addrs(protocols: Dict[str, Any], ipsec: Dict[str, Any]) -> str:
+    configured_local_addrs = str(ipsec.get("local_addrs") or "").strip()
+    if configured_local_addrs:
+        return configured_local_addrs
+
+    if not bool(protocols.get("udp4500")):
+        left_public = str(ipsec.get("left_public") or "").strip()
+        if left_public and left_public != "%defaultroute":
+            return left_public
+        return _placeholder("HEADEND_PUBLIC_IP")
+
+    return _placeholder("HEADEND_PRIMARY_IP")
+
+
 def _render_ipsec_intent(
     customer: Dict[str, Any],
     peer: Dict[str, Any],
@@ -450,7 +464,7 @@ def _render_ipsec_intent(
 ) -> Dict[str, Any]:
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
-    local_addrs = ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP")
+    local_addrs = _render_headend_local_addrs(protocols, ipsec)
     initiation = _render_ipsec_initiation(ipsec)
     effective_local_ts = _effective_local_ts(selectors, outside_nat)
     effective_remote_ts = _effective_remote_ts(selectors)
@@ -551,6 +565,7 @@ def _render_swanctl_connection(
     customer: Dict[str, Any],
     peer: Dict[str, Any],
     selectors: Dict[str, Any],
+    protocols: Dict[str, Any],
     ipsec: Dict[str, Any],
     transport: Dict[str, Any] | None = None,
     outside_nat: Dict[str, Any] | None = None,
@@ -573,7 +588,7 @@ def _render_swanctl_connection(
         if auth.get("method") == "certificate"
         else str(ipsec.get("local_id") or "")
     )
-    local_addrs = str(ipsec.get("local_addrs") or _placeholder("HEADEND_PRIMARY_IP"))
+    local_addrs = _render_headend_local_addrs(protocols, ipsec)
     remote_addrs = _headend_peer_endpoint(peer, resolved_transport)
     ike_proposals = _render_ike_proposals(ipsec)
     esp_proposals = _render_esp_proposals(ipsec)
@@ -1615,6 +1630,7 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
             customer,
             peer,
             selectors,
+            protocols,
             ipsec,
             transport,
             outside_nat,

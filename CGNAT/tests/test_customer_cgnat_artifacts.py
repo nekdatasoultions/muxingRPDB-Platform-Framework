@@ -54,6 +54,31 @@ class CgnatCustomerArtifactTests(unittest.TestCase):
         )
         return customer_module, customer_item
 
+    def test_strict_non_nat_headend_defaults_to_public_identity_local_addrs(self) -> None:
+        request_doc = deepcopy(self._load_request("example-local-psk-nonnat.yaml"))
+
+        customer_module, customer_item = self._render_customer(request_doc)
+        artifacts = build_customer_artifact_tree(customer_module, customer_item)
+
+        headend_conf = artifacts["headend"]["ipsec/swanctl-connection.conf"]
+        ipsec_intent = artifacts["headend"]["ipsec/ipsec-intent.json"]
+
+        self.assertIn("local_addrs = ${HEADEND_PUBLIC_IP}", headend_conf)
+        self.assertEqual(ipsec_intent["local_addrs"], "${HEADEND_PUBLIC_IP}")
+
+    def test_nat_t_headend_defaults_to_underlay_local_addrs(self) -> None:
+        request_doc = deepcopy(self._load_request("example-local-psk-nonnat.yaml"))
+        request_doc["customer"]["protocols"]["udp4500"] = True
+
+        customer_module, customer_item = self._render_customer(request_doc)
+        artifacts = build_customer_artifact_tree(customer_module, customer_item)
+
+        headend_conf = artifacts["headend"]["ipsec/swanctl-connection.conf"]
+        ipsec_intent = artifacts["headend"]["ipsec/ipsec-intent.json"]
+
+        self.assertIn("local_addrs = ${HEADEND_PRIMARY_IP}", headend_conf)
+        self.assertEqual(ipsec_intent["local_addrs"], "${HEADEND_PRIMARY_IP}")
+
     def test_cgnat_headend_artifacts_key_off_customer_loopback_when_outer_peer_is_shared(self) -> None:
         customer1_request = deepcopy(self._load_request("example-cgnat-customer-1-local-pki.yaml"))
         customer2_request = deepcopy(self._load_request("example-minimal-cgnat-local-pki.yaml"))

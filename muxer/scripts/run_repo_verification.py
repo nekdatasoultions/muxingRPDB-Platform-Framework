@@ -3240,22 +3240,25 @@ print(
                 global_cfg["public_ip"],
                 global_cfg["interfaces"]["public_private_ip"],
             }
-            dnat_values = []
-            for map_name in ("udp500_dnat", "udp4500_dnat", "esp_dnat"):
-                dnat_values.extend((translation_maps.get(map_name) or {}).values())
+            nat_t_dnat_values = [
+                (translation_maps.get("udp500_dnat") or {}).get(nat_t_peer),
+                (translation_maps.get("udp4500_dnat") or {}).get(nat_t_peer),
+                (translation_maps.get("esp_dnat") or {}).get(nat_t_peer),
+            ]
             checks = {
                 "dnat_uses_address_map": "dnat to ip saddr map @udp500_dnat" in script,
                 "snat_uses_concat_address_map": "snat to ip saddr . ip daddr map @udp500_snat" in script,
                 "dnat_map_type_is_address": "type ipv4_addr : ipv4_addr" in script,
                 "snat_map_type_is_concat_address": "type ipv4_addr . ipv4_addr : ipv4_addr" in script,
-                "strict_non_nat_udp500_dnat_targets_headend": (translation_maps.get("udp500_dnat") or {}).get(nonnat_peer) == f"dnat to {nonnat_headend}",
-                "strict_non_nat_esp_dnat_targets_headend": (translation_maps.get("esp_dnat") or {}).get(nonnat_peer) == f"dnat to {nonnat_headend}",
+                "strict_non_nat_udp500_dnat_preserves_public_identity": (translation_maps.get("udp500_dnat") or {}).get(nonnat_peer) == f"dnat to {global_cfg['public_ip']}",
+                "strict_non_nat_esp_dnat_preserves_public_identity": (translation_maps.get("esp_dnat") or {}).get(nonnat_peer) == f"dnat to {global_cfg['public_ip']}",
+                "strict_non_nat_udp4500_not_rendered": nonnat_peer not in (translation_maps.get("udp4500_dnat") or {}),
                 "nat_t_udp500_dnat_targets_headend": (translation_maps.get("udp500_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
                 "nat_t_udp4500_dnat_targets_headend": (translation_maps.get("udp4500_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
                 "nat_t_esp_dnat_targets_headend": (translation_maps.get("esp_dnat") or {}).get(nat_t_peer) == f"dnat to {nat_t_headend}",
-                "no_pass_through_dnat_targets_muxer_identity": all(
+                "nat_t_dnat_targets_do_not_use_muxer_identity": all(
                     str(value).replace("dnat to ", "").strip() not in muxer_identities
-                    for value in dnat_values
+                    for value in nat_t_dnat_values
                 ),
                 "no_verdict_nat_maps": "type ipv4_addr : verdict" not in script,
                 "no_dnat_statements_inside_map": ": dnat to" not in script,

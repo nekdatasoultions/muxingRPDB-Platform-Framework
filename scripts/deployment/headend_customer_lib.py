@@ -427,7 +427,9 @@ def validate_headend_bundle(bundle_dir: Path) -> dict[str, Any]:
     if public_identity_intent.get("remove_policy") != "retain_shared_identity":
         report["errors"].append("public identity remove policy must retain the shared head-end loopback identity")
     if auth_method != "certificate" and public_identity_ip and ipsec_intent.get("local_id") not in (None, "", public_identity_ip):
-        report["errors"].append("IPsec local_id must match the rendered public identity IP")
+        report["warnings"].append(
+            "IPsec local_id differs from the rendered public identity IP; customer-side remote_id must match it"
+        )
 
     if not route_lines:
         report["warnings"].append("routing/ip-route.commands.txt contains no executable route commands")

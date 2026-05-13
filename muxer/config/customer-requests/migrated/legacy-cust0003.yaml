@@ -2,6 +2,7 @@ schema_version: 1
 
 customer:
   name: legacy-cust0003
+  customer_class: strict-non-nat
   peer:
     public_ip: 166.213.153.41
     remote_id: 166.213.153.41
@@ -11,19 +12,74 @@ customer:
       - 172.31.54.39/32
       - 172.31.34.79/32
       - 194.138.36.80/28
-      - 172.30.0.90/32
+      - 10.128.4.3/32
     remote_subnets:
       - 10.129.4.12/32
       - 192.168.1.59/32
+    remote_host_cidrs:
+      - 10.129.4.12/32
+      - 192.168.1.59/32
+  backend:
+    cluster: non-nat
+    role: nonnat-active
+  dynamic_provisioning:
+    enabled: false
   ipsec:
     auto: start
+    local_id: 23.20.31.151
     remote_id: 166.213.153.41
     ike_version: ikev2
+    ike_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
+    esp_policies:
+      - aes256-sha256-modp2048
+      - aes256-sha256-modp4096
     dpddelay: 10s
     dpdtimeout: 120s
     dpdaction: restart
+    forceencaps: false
+    mobike: false
+    fragmentation: true
     vti_routing: no
     vti_shared: yes
+  protocols:
+    udp500: true
+    udp4500: false
+    esp50: true
+    force_rewrite_4500_to_500: false
+  natd_rewrite:
+    enabled: true
   post_ipsec_nat:
-    enabled: false
-    mode: disabled
+    enabled: true
+    mode: explicit_map
+    mapping_strategy: explicit_host_map
+    translated_subnets:
+      - 172.30.0.90/32
+      - 172.30.0.91/32
+    real_subnets:
+      - 10.129.4.12/32
+      - 192.168.1.59/32
+    core_subnets:
+      - 172.31.54.39/32
+      - 194.138.36.80/28
+    host_mappings:
+      - real_ip: 10.129.4.12/32
+        translated_ip: 172.30.0.90/32
+      - real_ip: 192.168.1.59/32
+        translated_ip: 172.30.0.91/32
+    tcp_mss_clamp: 1360
+  outside_nat:
+    enabled: true
+    mode: netmap
+    mapping_strategy: one_to_one
+    real_subnets:
+      - 194.138.36.86/32
+    translated_subnets:
+      - 10.128.4.3/32
+    customer_sources:
+      - 10.129.4.12/32
+      - 192.168.1.59/32
+    tcp_mss_clamp: 1360
+    route_via: 172.31.63.44
+    route_dev: ens36

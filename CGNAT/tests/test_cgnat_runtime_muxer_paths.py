@@ -143,6 +143,67 @@ class CgnatRuntimeMuxerPathTests(unittest.TestCase):
         self.assertIn('oifname { "cgs1mi0", "ens34" } udp sport 4500', script)
         self.assertIn("10.250.10.10 : 172.31.40.223", script)
 
+    def test_strict_non_nat_runtime_preserves_public_identity(self) -> None:
+        nftables = _runtime_module("nftables")
+
+        model = nftables.build_passthrough_nft_model(
+            [
+                {
+                    "name": "legacy-strict-customer",
+                    "id": 2,
+                    "peer_ip": "198.51.100.10/32",
+                    "backend_underlay_ip": "172.31.40.223",
+                    "headend_egress_sources": ["172.31.40.223", "23.20.31.151"],
+                    "protocols": {
+                        "udp500": True,
+                        "udp4500": False,
+                        "esp50": True,
+                        "force_rewrite_4500_to_500": False,
+                    },
+                    "natd_rewrite": {
+                        "enabled": True,
+                    },
+                }
+            ],
+            {
+                "public_ip": "23.20.31.151",
+                "backend_underlay_ip": "172.31.40.223",
+                "interfaces": {
+                    "public_if": "ens34",
+                    "public_private_ip": "172.31.33.150",
+                },
+                "firewall_policy": {
+                    "default_drop_ipsec_to_public_ip": True,
+                    "use_nat_rewrite": True,
+                },
+                "nftables": {
+                    "pass_through": {
+                        "classification_backend": "nftables",
+                        "translation_backend": "nftables",
+                        "bridge_backend": "nftables",
+                    },
+                },
+                "experimental": {
+                    "natd_dpi_rewrite": {
+                        "enabled": True,
+                    },
+                },
+            },
+            render_mode="nftables-live-pass-through",
+        )
+        script = nftables.render_passthrough_nft_script(model)
+        translation_maps = model["translation"]["maps"]
+        bridge_sets = model["bridge"]["sets"]
+
+        self.assertEqual(translation_maps["udp500_dnat"]["198.51.100.10"], "dnat to 23.20.31.151")
+        self.assertEqual(translation_maps["esp_dnat"]["198.51.100.10"], "dnat to 23.20.31.151")
+        self.assertNotIn("198.51.100.10", translation_maps["udp4500_dnat"])
+        self.assertIn("198.51.100.10 . 23.20.31.151", bridge_sets["natd_in_pairs"])
+        self.assertIn("198.51.100.10 . 172.31.33.150", bridge_sets["natd_in_pairs"])
+        self.assertIn("23.20.31.151 . 198.51.100.10", bridge_sets["natd_out_pairs"])
+        self.assertIn("172.31.40.223 . 198.51.100.10", bridge_sets["natd_out_pairs"])
+        self.assertIn("198.51.100.10 : 23.20.31.151", script)
+
 
 if __name__ == "__main__":
     unittest.main()
