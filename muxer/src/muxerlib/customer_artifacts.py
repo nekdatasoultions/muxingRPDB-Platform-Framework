@@ -965,6 +965,7 @@ def _render_post_ipsec_nat_intent(
         "real_subnets": post_ipsec_nat.get("real_subnets") or [],
         "host_mappings": post_ipsec_nat.get("host_mappings") or [],
         "core_subnets": post_ipsec_nat.get("core_subnets") or [],
+        "routed_core_subnets": post_ipsec_nat.get("routed_core_subnets") or [],
         "interface": _effective_nat_interface(post_ipsec_nat),
         "output_mark": post_ipsec_nat.get("output_mark"),
         "ipsec_path_mtu": (ipsec or {}).get("path_mtu"),
@@ -1256,9 +1257,43 @@ def _effective_headend_outside_nat(
     return outside_nat
 
 
-def _render_clear_route_command(subnet: str, outside_nat: Dict[str, Any]) -> str:
-    route_via = str(outside_nat.get("route_via") or "").strip()
-    route_dev = str(outside_nat.get("route_dev") or "").strip() or "${HEADEND_CLEAR_IFACE}"
+def _cidr_key(value: Any) -> str:
+    try:
+        return str(ipaddress.ip_network(str(value).strip(), strict=False))
+    except ValueError:
+        return str(value or "").strip()
+
+
+def _matches_routed_core_subnet(subnet: str, post_ipsec_nat: Dict[str, Any]) -> bool:
+    routed = {
+        _cidr_key(value)
+        for value in post_ipsec_nat.get("routed_core_subnets") or []
+        if str(value or "").strip()
+    }
+    return bool(routed and _cidr_key(subnet) in routed)
+
+
+def _clear_route_profile(
+    subnet: str,
+    backend: Dict[str, Any],
+    post_ipsec_nat: Dict[str, Any],
+    outside_nat: Dict[str, Any],
+) -> Dict[str, Any]:
+    if bool(outside_nat.get("enabled")):
+        return outside_nat
+    backend_cluster = str(backend.get("cluster") or "").strip().lower()
+    if (
+        backend_cluster == "nat"
+        and bool(post_ipsec_nat.get("enabled"))
+        and _matches_routed_core_subnet(subnet, post_ipsec_nat)
+    ):
+        return post_ipsec_nat
+    return {}
+
+
+def _render_clear_route_command(subnet: str, route_profile: Dict[str, Any]) -> str:
+    route_via = str(route_profile.get("route_via") or "").strip()
+    route_dev = str(route_profile.get("route_dev") or "").strip() or "${HEADEND_CLEAR_IFACE}"
     if route_via:
         return f"ip route replace {subnet} via {route_via} dev {route_dev}"
     return f"ip route replace {subnet} dev {route_dev}"
@@ -1604,7 +1639,10 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     route_commands = [
         "# Customer-scoped head-end routes",
         *[
-            _render_clear_route_command(str(subnet), outside_nat if bool(outside_nat.get("enabled")) else {})
+            _render_clear_route_command(
+                str(subnet),
+                _clear_route_profile(str(subnet), backend, post_ipsec_nat, outside_nat),
+            )
             for subnet in clear_route_subnets
         ],
     ]
@@ -1701,6 +1739,13 @@ def build_headend_artifacts(module: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 "customer_sources": _outside_nat_customer_sources(outside_nat, selectors),
                 "clear_route_subnets": clear_route_subnets,
                 "purpose": "translate customer-visible far-end space to real local/core space",
+            },
+            "post_ipsec_nat": {
+                "enabled": bool(post_ipsec_nat.get("enabled")),
+                "routed_core_subnets": post_ipsec_nat.get("routed_core_subnets") or [],
+                "route_via": post_ipsec_nat.get("route_via"),
+                "route_dev": post_ipsec_nat.get("route_dev"),
+                "purpose": "optionally steer selected post-IPsec core/service routes through the clear-side router",
             },
         },
         "routing/ip-route.commands.txt": "\n".join(route_commands) + "\n",

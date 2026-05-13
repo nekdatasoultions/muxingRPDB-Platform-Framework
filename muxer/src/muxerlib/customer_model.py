@@ -225,6 +225,7 @@ class PostIpsecNat:
     real_subnets: Optional[List[str]] = None
     host_mappings: Optional[List[HostMapping]] = None
     core_subnets: Optional[List[str]] = None
+    routed_core_subnets: Optional[List[str]] = None
     interface: str = ""
     output_mark: str = ""
     tcp_mss_clamp: Optional[int] = None
@@ -898,6 +899,7 @@ def _normalize_nat_mapping_fields(doc: Dict[str, Any], path: str) -> Dict[str, A
 def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
     mapping = _normalize_nat_mapping_fields(doc, "customer.post_ipsec_nat")
     core_subnets = _as_list(doc.get("core_subnets"))
+    routed_core_subnets = _as_list(doc.get("routed_core_subnets"))
 
     return PostIpsecNat(
         enabled=bool(doc.get("enabled")),
@@ -908,6 +910,7 @@ def _normalize_post_ipsec_nat(doc: Dict[str, Any]) -> PostIpsecNat:
         real_subnets=mapping["real_subnets"] or None,
         host_mappings=mapping["host_mappings"],
         core_subnets=core_subnets or None,
+        routed_core_subnets=routed_core_subnets or None,
         interface=str(doc.get("interface") or ""),
         output_mark=str(doc.get("output_mark") or ""),
         tcp_mss_clamp=(

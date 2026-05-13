@@ -12,6 +12,7 @@ sys.path.insert(0, str(MUXER_SRC))
 
 from muxerlib.customer_artifacts import (  # noqa: E402
     _render_post_ipsec_nat_nftables,
+    build_headend_artifacts,
     build_smartconnect_artifacts,
 )
 from muxerlib.customer_route_scope import (  # noqa: E402
@@ -157,6 +158,65 @@ class CustomerRouteScopeTests(unittest.TestCase):
         self.assertIn("172.30.0.133 : 10.129.3.131", nftables["apply"])
         self.assertIn("172.30.0.134 : 10.129.3.132", nftables["apply"])
         self.assertNotIn("172.30.0.128 : 10.129.3.131", nftables["apply"])
+
+    def test_inside_nat_headend_routes_only_routed_core_subnets_via_clear_router(self) -> None:
+        module = base_module()
+        module["backend"] = {"cluster": "nat"}
+        module["selectors"] = {
+            "local_subnets": ["172.31.54.39/32", "194.138.36.80/28"],
+            "remote_subnets": ["10.129.3.131/32"],
+            "remote_host_cidrs": ["10.129.3.131/32"],
+        }
+        module["post_ipsec_nat"] = {
+            "enabled": True,
+            "mode": "explicit_map",
+            "mapping_strategy": "explicit_host_map",
+            "real_subnets": ["10.129.3.131/32"],
+            "translated_subnets": ["172.30.0.128/27"],
+            "host_mappings": [
+                {
+                    "real_ip": "10.129.3.131/32",
+                    "translated_ip": "172.30.0.133/32",
+                }
+            ],
+            "core_subnets": ["172.31.54.39/32", "194.138.36.80/28"],
+            "routed_core_subnets": ["194.138.36.80/28"],
+            "route_via": "172.31.63.44",
+            "route_dev": "ens36",
+        }
+
+        headend = build_headend_artifacts(module)
+        route_commands = headend["routing/ip-route.commands.txt"]
+        route_intent = headend["routing/routing-intent.json"]
+
+        self.assertIn("ip route replace 172.31.54.39/32 dev ${HEADEND_CLEAR_IFACE}", route_commands)
+        self.assertIn("ip route replace 194.138.36.80/28 via 172.31.63.44 dev ens36", route_commands)
+        self.assertEqual(route_intent["post_ipsec_nat"]["routed_core_subnets"], ["194.138.36.80/28"])
+
+    def test_inside_nat_headend_does_not_apply_routed_core_subnets_on_non_nat_stage(self) -> None:
+        module = base_module()
+        module["backend"] = {"cluster": "non-nat"}
+        module["selectors"] = {
+            "local_subnets": ["172.31.54.39/32", "194.138.36.80/28"],
+            "remote_subnets": ["10.129.3.131/32"],
+            "remote_host_cidrs": ["10.129.3.131/32"],
+        }
+        module["post_ipsec_nat"] = {
+            "enabled": True,
+            "mode": "netmap",
+            "mapping_strategy": "one_to_one",
+            "real_subnets": ["10.129.3.131/32"],
+            "translated_subnets": ["172.30.0.128/27"],
+            "core_subnets": ["172.31.54.39/32", "194.138.36.80/28"],
+            "routed_core_subnets": ["194.138.36.80/28"],
+            "route_via": "172.31.63.44",
+            "route_dev": "ens36",
+        }
+
+        route_commands = build_headend_artifacts(module)["routing/ip-route.commands.txt"]
+
+        self.assertIn("ip route replace 194.138.36.80/28 dev ${HEADEND_CLEAR_IFACE}", route_commands)
+        self.assertNotIn("ip route replace 194.138.36.80/28 via 172.31.63.44 dev ens36", route_commands)
 
     def test_cleanup_includes_pool_and_explicit_routes_for_mode_changes(self) -> None:
         module = base_module()

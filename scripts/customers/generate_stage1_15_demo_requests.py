@@ -25,6 +25,9 @@ CORE_LOCAL_SUBNETS = [
     "172.31.54.39/32",
     "194.138.36.80/28",
 ]
+ROUTED_CORE_SUBNETS = [
+    "194.138.36.80/28",
+]
 
 LOOPBACKS: dict[int, str] = {
     1: "10.129.3.127/32",
@@ -170,7 +173,10 @@ def build_request(number: int) -> dict[str, Any]:
             "translated_subnets": [INSIDE_NAT_BLOCKS[number]],
             "real_subnets": [loopback],
             "core_subnets": list(CORE_LOCAL_SUBNETS),
+            "routed_core_subnets": list(ROUTED_CORE_SUBNETS),
             "tcp_mss_clamp": 1360,
+            "route_via": "172.31.63.44",
+            "route_dev": "ens36",
         }
         customer_doc["outside_nat"] = {
             "enabled": False,

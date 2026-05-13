@@ -979,6 +979,9 @@
         "core_subnets": {
           "$ref": "#/$defs/ipv4_cidr_array"
         },
+        "routed_core_subnets": {
+          "$ref": "#/$defs/ipv4_cidr_array"
+        },
         "interface": {
           "type": "string",
           "minLength": 1
