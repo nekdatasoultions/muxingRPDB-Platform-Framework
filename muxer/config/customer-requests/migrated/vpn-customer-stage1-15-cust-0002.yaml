@@ -2,8 +2,8 @@ schema_version: 1
 customer:
   name: vpn-customer-stage1-15-cust-0002
   peer:
-    public_ip: 3.236.161.125
-    remote_id: 3.236.161.125
+    public_ip: 44.204.224.144
+    remote_id: 44.204.224.144
     psk_secret_ref: /muxingrpdb/dev/customers/vpn-customer-stage1-15-cust-0002/psk
   selectors:
     local_subnets:
@@ -28,7 +28,7 @@ customer:
       update_remote_id_when_equal_to_peer_ip: false
   ipsec:
     auto: start
-    remote_id: 3.236.161.125
+    remote_id: 44.204.224.144
     ike_version: ikev2
     ike_policies:
     - aes256-sha256-modp2048
