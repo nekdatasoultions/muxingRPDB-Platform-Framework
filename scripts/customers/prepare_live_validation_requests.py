@@ -498,7 +498,7 @@ def prepare_cgnat_requests(
             outer_transport={
                 "headend_xfrm_interface": "cgxfrm-gw2",
                 "customer_router_private_ip": "172.31.48.33",
-                "gateway_customer_interface": "ens34",
+                "gateway_customer_interface": "ens35",
             },
         ),
         cgnat_demo_spec(
@@ -514,7 +514,7 @@ def prepare_cgnat_requests(
             outer_transport={
                 "headend_xfrm_interface": "cgxfrm-gw2",
                 "customer_router_private_ip": "172.31.48.34",
-                "gateway_customer_interface": "ens34",
+                "gateway_customer_interface": "ens35",
             },
         ),
         cgnat_demo_spec(
@@ -529,7 +529,7 @@ def prepare_cgnat_requests(
             outer_transport={
                 "headend_xfrm_interface": "cgxfrm-gw2",
                 "customer_router_private_ip": "172.31.48.35",
-                "gateway_customer_interface": "ens34",
+                "gateway_customer_interface": "ens35",
             },
         ),
     ]
