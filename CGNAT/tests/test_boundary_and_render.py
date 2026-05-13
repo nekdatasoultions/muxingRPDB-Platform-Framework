@@ -96,6 +96,8 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(router_requests[1]["role"], "customer_vpn_router_2")
         self.assertIn("disable_source_dest_check_head_end", action_names)
         self.assertIn("disable_source_dest_check_isp_head_end", action_names)
+        self.assertIn("disable_source_dest_check_customer_vpn_router_1", action_names)
+        self.assertIn("disable_source_dest_check_customer_vpn_router_2", action_names)
         if isp_eip_action is not None:
             self.assertEqual(isp_eip_action["association_target"], "transit_network_interface")
 
@@ -123,7 +125,13 @@ class PackageRenderingTests(unittest.TestCase):
         self.assertEqual(readiness["role_scope"], "customer-vpn-routers")
         self.assertEqual(set(plan["ec2_requests"]), {"customer_vpn_routers"})
         self.assertEqual(len(router_requests), 2)
-        self.assertEqual(plan["post_create_actions"]["actions"], [])
+        self.assertEqual(
+            {action["name"] for action in plan["post_create_actions"]["actions"]},
+            {
+                "disable_source_dest_check_customer_vpn_router_1",
+                "disable_source_dest_check_customer_vpn_router_2",
+            },
+        )
         self.assertFalse((deploy_output / "head-end-run-instances-request.json").exists())
         self.assertFalse((deploy_output / "isp-head-end-run-instances-request.json").exists())
 

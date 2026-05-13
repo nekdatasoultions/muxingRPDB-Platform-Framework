@@ -398,6 +398,7 @@ def _build_customer_vpn_router_run_instances_requests(package: dict[str, Any]) -
 def _build_post_create_actions(package: dict[str, Any], role_scope: str = "all") -> dict[str, Any]:
     head_end = package["cgnat_head_end"]
     isp_head_end = package["cgnat_isp_head_end"]
+    customer_vpn_routers = list(package.get("customer_vpn_routers") or [])
     actions: list[dict[str, Any]] = []
 
     if role_scope in {"all", "cgnat-head-end"}:
@@ -441,6 +442,11 @@ def _build_post_create_actions(package: dict[str, Any], role_scope: str = "all")
                 }
             )
         actions.append({"name": "disable_source_dest_check_isp_head_end", "service_role": "cgnat_isp_head_end"})
+    if role_scope in {"all", "customer-vpn-routers"}:
+        for router in customer_vpn_routers:
+            role = str(router.get("role") or "").strip()
+            if role:
+                actions.append({"name": f"disable_source_dest_check_{role}", "service_role": role})
     return {"actions": actions}
 
 
@@ -629,6 +635,10 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
         "cgnat_head_end": _network_interface_ids(result["head_end"]),
         "cgnat_isp_head_end": _network_interface_ids(result["isp_head_end"]),
     }
+    for router_result in result.get("customer_vpn_routers", []):
+        role = str(router_result.get("role") or "").strip()
+        if role:
+            role_to_enis[role] = _network_interface_ids(router_result)
 
     for action in plan["post_create_actions"]["actions"]:
         if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
@@ -661,7 +671,7 @@ def _apply_plan_with_boto3(plan: dict[str, Any], dry_run: bool) -> dict[str, Any
                 AllowReassociation=False,
             )
             _record_action(action["name"], action["service_role"], "completed", {"allocation": allocation, "association": association})
-        elif action["name"] in {"disable_source_dest_check_head_end", "disable_source_dest_check_isp_head_end"}:
+        elif action["name"].startswith("disable_source_dest_check_"):
             network_interface_ids = role_to_enis.get(action["service_role"]) or []
             if not network_interface_ids:
                 continue
@@ -770,6 +780,10 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
         "cgnat_head_end": _network_interface_ids(result["head_end"]),
         "cgnat_isp_head_end": _network_interface_ids(result["isp_head_end"]),
     }
+    for router_result in result.get("customer_vpn_routers", []):
+        role = str(router_result.get("role") or "").strip()
+        if role:
+            role_to_enis[role] = _network_interface_ids(router_result)
 
     for action in plan["post_create_actions"]["actions"]:
         if action["name"] in {"associate_head_end_eip", "associate_isp_head_end_eip"}:
@@ -816,7 +830,7 @@ def _apply_plan_with_aws_cli(plan: dict[str, Any], dry_run: bool) -> dict[str, A
                 ],
             )
             _record_action(action["name"], action["service_role"], "completed", {"allocation": allocation, "association": association})
-        elif action["name"] in {"disable_source_dest_check_head_end", "disable_source_dest_check_isp_head_end"}:
+        elif action["name"].startswith("disable_source_dest_check_"):
             network_interface_ids = role_to_enis.get(action["service_role"]) or []
             if not network_interface_ids:
                 continue
